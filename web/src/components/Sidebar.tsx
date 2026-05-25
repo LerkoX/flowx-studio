@@ -1,0 +1,94 @@
+import { useState } from 'react'
+import { motion } from 'framer-motion'
+import { Link, useLocation } from 'react-router-dom'
+import {
+  Box,
+  Settings,
+  Sparkles,
+} from 'lucide-react'
+
+const navItems = [
+  { path: '/', icon: Sparkles, label: 'AI 工作流' },
+  { path: '/node-generator', icon: Box, label: 'AI 节点' },
+  { path: '/executors', icon: Settings, label: '执行器' },
+]
+
+export default function Sidebar() {
+  const location = useLocation()
+  const [collapsed, setCollapsed] = useState(true)
+
+  return (
+    <motion.aside
+      className="fixed left-0 top-0 h-full z-40
+                 bg-white/5 backdrop-blur-2xl
+                 border-r border-white/10
+                 flex flex-col"
+      animate={{ width: collapsed ? 48 : 160 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 25, mass: 0.8 }}
+      onMouseEnter={() => setCollapsed(false)}
+      onMouseLeave={() => setCollapsed(true)}
+    >
+      {/* Logo */}
+      <div className="h-14 flex items-center px-3 border-b border-white/10 flex-shrink-0">
+        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-500
+                        flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
+          FX
+        </div>
+        {!collapsed && (
+          <motion.span
+            className="ml-2 text-white/90 font-semibold text-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            FlowX
+          </motion.span>
+        )}
+      </div>
+
+      {/* 导航项 */}
+      <nav className="flex-1 py-3 px-1.5 space-y-1">
+        {navItems.map((item) => {
+          const isActive = location.pathname === item.path
+          const Icon = item.icon
+
+          return (
+            <Link
+              key={item.path}
+              to={item.path}
+              className={`
+                flex items-center gap-2 px-2.5 py-2 rounded-xl
+                transition-all duration-200 relative
+                ${isActive
+                  ? 'bg-white/10 text-white'
+                  : 'text-white/60 hover:text-white hover:bg-white/5'
+                }
+              `}
+            >
+              {/* 激活指示条 */}
+              {isActive && (
+                <motion.div
+                  className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-white rounded-r-full"
+                  layoutId="sidebarIndicator"
+                  transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                />
+              )}
+
+              <Icon size={18} />
+              {!collapsed && (
+                <motion.span
+                  className="text-xs font-medium whitespace-nowrap"
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -10 }}
+                >
+                  {item.label}
+                </motion.span>
+              )}
+            </Link>
+          )
+        })}
+      </nav>
+    </motion.aside>
+  )
+}
