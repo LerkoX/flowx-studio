@@ -100,7 +100,7 @@ function ToolbarButton({ icon, label }: { icon: string; label: string }) {
 
   return (
     <button
-      className="p-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-all"
+      className="p-2 rounded-full bg-transparent text-white/70 hover:text-white hover:bg-white/10 transition-all"
       title={label}
     >
       {iconMap[icon] || icon}
