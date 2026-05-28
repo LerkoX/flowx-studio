@@ -91,9 +91,18 @@ go build -o flowx-studio cmd/flowx-studio/main.go
 # 最终产物：单个 flowx-studio 二进制文件
 ```
 
-## 8.2 命令行接口
+## 8.2 命令行接口（Cobra）
 
-### 8.2.1 命令设计
+### 8.2.1 技术选型
+
+使用 [spf13/cobra](https://github.com/spf13/cobra) 作为 CLI 框架，配合 [spf13/viper](https://github.com/spf13/viper) 处理配置加载。
+
+**选择理由**：
+- 业界标准的 Go CLI 框架，生态成熟
+- 内置子命令、参数解析、帮助生成、自动补全
+- 与 viper 无缝集成，支持配置文件和环境变量
+
+### 8.2.2 命令设计
 
 ```bash
 # 启动 Web UI（默认命令）
@@ -104,23 +113,158 @@ flowx-studio server
 flowx-studio version
 
 # 查看帮助
-flowx-studio help
-flowx-studio help server
+flowx-studio --help
+flowx-studio server --help
 ```
 
 **注意**：运行 YAML 工作流的 CLI 功能保留在 FlowX 核心库中（`flowx run workflow.yaml`），不在 flowx-studio 中提供。
 
-### 8.2.2 启动参数
+### 8.2.3 启动参数
 
 ```bash
-flowx server [flags]
+flowx-studio server [flags]
 
 Flags:
   -p, --port int        HTTP 服务端口 (默认 8080)
   -H, --host string     监听地址 (默认 "0.0.0.0")
       --no-open         不自动打开浏览器
-      --data-dir string 数据目录 (默认 "~/.flowx")
+      --data-dir string 数据目录 (默认 "~/.flowx-studio")
       --debug           启用调试模式
+```
+
+### 8.2.4 Cobra 实现示例
+
+```go
+package main
+
+import (
+    "fmt"
+    "os"
+
+    "github.com/spf13/cobra"
+    "github.com/spf13/viper"
+)
+
+var (
+    cfgFile string
+    rootCmd = &cobra.Command{
+        Use:   "flowx-studio",
+        Short: "AI 驱动的可视化工作流平台",
+        Long: `FlowX Studio 是一个基于 FlowX 核心引擎的 AI 驱动可视化工作流平台。
+用户通过自然语言描述需求，AI 自动完成节点生成、工作流编排和执行监控。`,
+        Run: func(cmd *cobra.Command, args []string) {
+            // 默认启动 server
+            runServer()
+        },
+    }
+
+    serverCmd = &cobra.Command{
+        Use:   "server",
+        Short: "启动 Web UI 服务",
+        Long:  "启动 FlowX Studio 的 HTTP 服务器，提供 Web UI 和 API 服务",
+        Run: func(cmd *cobra.Command, args []string) {
+            runServer()
+        },
+    }
+
+    versionCmd = &cobra.Command{
+        Use:   "version",
+        Short: "查看版本信息",
+        Run: func(cmd *cobra.Command, args []string) {
+            fmt.Printf("FlowX Studio %s (build %s)\n", version, commit)
+            fmt.Printf("FlowX Engine %s\n", flowxVersion)
+        },
+    }
+)
+
+func init() {
+    cobra.OnInitialize(initConfig)
+
+    // 全局 flags
+    rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "配置文件路径")
+    rootCmd.PersistentFlags().Bool("debug", false, "启用调试模式")
+    viper.BindPFlag("debug", rootCmd.PersistentFlags().Lookup("debug"))
+
+    // server 子命令 flags
+    serverCmd.Flags().IntP("port", "p", 8080, "HTTP 服务端口")
+    serverCmd.Flags().StringP("host", "H", "0.0.0.0", "监听地址")
+    serverCmd.Flags().Bool("no-open", false, "不自动打开浏览器")
+    serverCmd.Flags().String("data-dir", "~/.flowx-studio", "数据目录")
+
+    // 绑定到 viper
+    viper.BindPFlag("server.port", serverCmd.Flags().Lookup("port"))
+    viper.BindPFlag("server.host", serverCmd.Flags().Lookup("host"))
+    viper.BindPFlag("server.no_open", serverCmd.Flags().Lookup("no-open"))
+    viper.BindPFlag("data.dir", serverCmd.Flags().Lookup("data-dir"))
+
+    // 注册子命令
+    rootCmd.AddCommand(serverCmd)
+    rootCmd.AddCommand(versionCmd)
+}
+
+func initConfig() {
+    if cfgFile != "" {
+        viper.SetConfigFile(cfgFile)
+    } else {
+        home, _ := os.UserHomeDir()
+        viper.AddConfigPath(home + "/.flowx-studio")
+        viper.SetConfigName("config")
+        viper.SetConfigType("yaml")
+    }
+
+    viper.SetEnvPrefix("FLOWX_STUDIO")
+    viper.AutomaticEnv()
+
+    if err := viper.ReadInConfig(); err == nil {
+        fmt.Println("使用配置文件:", viper.ConfigFileUsed())
+    }
+}
+
+func main() {
+    if err := rootCmd.Execute(); err != nil {
+        fmt.Fprintln(os.Stderr, err)
+        os.Exit(1)
+    }
+}
+```
+
+### 8.2.5 配置加载优先级
+
+Cobra + Viper 的配置优先级（高到低）：
+
+1. **命令行参数**：`--port 9090`
+2. **环境变量**：`FLOWX_STUDIO_PORT=9090`
+3. **配置文件**：`~/.flowx-studio/config.yaml`
+4. **默认值**：`8080`
+
+```yaml
+# ~/.flowx-studio/config.yaml 示例
+server:
+  port: 8080
+  host: "0.0.0.0"
+  auto_open_browser: true
+
+data:
+  dir: "~/.flowx-studio"
+  db_path: "~/.flowx-studio/studio.db"
+
+ai:
+  default_provider: "openai"
+  providers:
+    - name: "OpenAI"
+      provider: "openai"
+      model: "gpt-4"
+      api_key: "${OPENAI_API_KEY}"
+      temperature: 0.7
+
+execution:
+  default_executor: "local"
+  max_concurrent: 5
+  timeout: "1h"
+
+mock:
+  timeout: "30s"
+  use_docker: true
 ```
 
 ### 8.2.3 环境变量
@@ -139,30 +283,25 @@ Flags:
 
 ### 8.3.1 启动流程
 
-```
-用户执行 flowx-studio
-    │
-    ▼
-[命令解析] 识别为 server 命令（默认）
-    │
-    ▼
-[初始化]
-  ├── 创建数据目录 ~/.flowx-studio
-  ├── 初始化数据库（如有必要）
-  ├── 加载系统配置
-  └── 检查 AI 配置
-    │
-    ▼
-[启动 HTTP 服务器]
-  ├── 注册 API 路由
-  ├── 注册静态资源路由
-  └── 注册 SSE 路由
-    │
-    ▼
-[打开浏览器]（如果未禁用）
-    │
-    ▼
-[等待请求]
+```mermaid
+flowchart TD
+    A[用户执行flowx-studio] --> B[命令解析识别为server命令]
+    B --> C[初始化]
+    C --> C1[创建数据目录]
+    C --> C2[初始化数据库]
+    C --> C3[加载系统配置]
+    C --> C4[检查AI配置]
+    C1 --> D
+    C2 --> D
+    C3 --> D
+    C4 --> D
+    D[启动HTTP服务器] --> D1[注册API路由]
+    D --> D2[注册静态资源路由]
+    D --> D3[注册SSE路由]
+    D1 --> E
+    D2 --> E
+    D3 --> E
+    E[打开浏览器] --> F[等待请求]
 ```
 
 ### 8.3.2 优雅关闭

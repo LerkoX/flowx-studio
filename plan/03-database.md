@@ -179,7 +179,40 @@ CREATE INDEX idx_exec_nodes_execution ON execution_nodes(execution_id);
 CREATE INDEX idx_exec_nodes_status ON execution_nodes(status);
 ```
 
-### 3.3.5 AI 配置 (ai_configs)
+### 3.3.5 执行日志 (execution_logs)
+
+存储执行过程中的详细日志条目，支持实时推送和历史查询。
+
+```sql
+CREATE TABLE execution_logs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    execution_id    INTEGER NOT NULL,                   -- 关联的执行记录 ID
+    node_id         TEXT,                                -- 节点 ID（可为空，表示系统级日志）
+    node_name       TEXT,                                -- 节点名称
+    step_name       TEXT,                                -- 步骤名称
+    level           TEXT DEFAULT 'info',                 -- debug | info | warn | error | fatal
+    message         TEXT NOT NULL,                       -- 日志内容
+    output          TEXT,                                -- 命令标准输出/错误
+    timestamp       DATETIME DEFAULT CURRENT_TIMESTAMP,  -- 日志时间
+    
+    FOREIGN KEY (execution_id) REFERENCES executions(id) ON DELETE CASCADE
+);
+
+-- 索引
+CREATE INDEX idx_exec_logs_execution ON execution_logs(execution_id);
+CREATE INDEX idx_exec_logs_node ON execution_logs(execution_id, node_id);
+CREATE INDEX idx_exec_logs_level ON execution_logs(level);
+CREATE INDEX idx_exec_logs_timestamp ON execution_logs(timestamp);
+```
+
+**日志级别说明**：
+- `debug`：开发调试信息
+- `info`：正常运行信息（节点开始、完成等）
+- `warn`：警告信息（超时、降级等）
+- `error`：错误信息（节点执行失败）
+- `fatal`：致命错误（系统级异常）
+
+### 3.3.6 AI 配置 (ai_configs)
 
 存储 AI 提供商的配置信息。
 
@@ -233,7 +266,10 @@ INSERT INTO system_configs (key, value, description) VALUES
 ('execution_timeout_sec', '3600', '工作流执行超时时间（秒）'),
 ('max_workflow_history', '100', '保留的最大执行历史数量'),
 ('auto_open_browser', 'true', '启动时是否自动打开浏览器'),
-('server_port', '8080', 'HTTP 服务端口');
+('server_port', '8080', 'HTTP 服务端口'),
+('log_retention_days', '30', '执行日志保留天数'),
+('log_max_buffer_size', '1000', '实时日志内存缓冲区大小'),
+('log_auto_scroll', 'true', '日志查看器默认自动滚动');
 ```
 
 ### 3.3.7 对话历史 (chat_history)
@@ -258,40 +294,76 @@ CREATE INDEX idx_chat_context ON chat_history(context_type, context_id);
 
 ## 3.4 实体关系图
 
-```
-┌──────────────┐       ┌──────────────┐       ┌──────────────┐
-│    nodes     │       │  workflows   │       │  ai_configs  │
-├──────────────┤       ├──────────────┤       ├──────────────┤
-│ id (PK)      │       │ id (PK)      │       │ id (PK)      │
-│ name (UQ)    │◄──────│ node_ids     │       │ provider     │
-│ language     │       │ yaml_config  │       │ model        │
-│ code         │       │ status       │       │ api_key      │
-│ parameters   │       │ intent       │       │ is_active    │
-└──────────────┘       └──────┬───────┘       └──────────────┘
-                              │
-                              │ 1:N
-                              ▼
-                       ┌──────────────┐
-                       │  executions  │
-                       ├──────────────┤
-                       │ id (PK)      │
-                       │ workflow_id  │◄──── FK
-                       │ status       │
-                       │ logs         │
-                       │ result       │
-                       └──────┬───────┘
-                              │
-                              │ 1:N
-                              ▼
-                       ┌──────────────┐
-                       │execution_nodes│
-                       ├──────────────┤
-                       │ id (PK)      │
-                       │ execution_id │◄──── FK
-                       │ node_id      │
-                       │ status       │
-                       │ logs         │
-                       └──────────────┘
+```mermaid
+erDiagram
+    nodes ||--o{ workflows : "被引用"
+    workflows ||--o{ executions : "1:N"
+    executions ||--o{ execution_nodes : "1:N"
+    executions ||--o{ execution_logs : "1:N"
+    workflows ||--o{ chat_history : "关联对话"
+    nodes ||--o{ chat_history : "关联对话"
+
+    nodes {
+        int id PK
+        string name UK
+        string language
+        text code
+        text parameters
+    }
+
+    workflows {
+        int id PK
+        string name
+        text yaml_config
+        string status
+        text node_ids
+    }
+
+    executions {
+        int id PK
+        int workflow_id FK
+        string status
+        text logs
+        text result
+    }
+
+    execution_nodes {
+        int id PK
+        int execution_id FK
+        string node_id
+        string status
+        text logs
+    }
+
+    ai_configs {
+        int id PK
+        string provider
+        string model
+        string api_key
+        boolean is_active
+    }
+
+    execution_logs {
+        int id PK
+        int execution_id FK
+        string node_id
+        string node_name
+        string step_name
+        string level
+        text message
+        text output
+        datetime timestamp
+    }
+
+    chat_history {
+        int id PK
+        string session_id
+        string role
+        text content
+        string context_type
+        int context_id
+        datetime created_at
+    }
 ```
 
 ## 3.5 数据迁移策略

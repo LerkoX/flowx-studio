@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>10. FlowX 核心库依赖评估 - FlowX Studio</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            themeVariables: {
+                primaryColor: '#1e1e3a',
+                primaryTextColor: '#e2e8f0',
+                primaryBorderColor: '#6366f1',
+                lineColor: '#a855f7',
+                secondaryColor: '#16162a',
+                tertiaryColor: '#0f0f1a',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                fontSize: '14px'
+            },
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            },
+            sequence: {
+                useMaxWidth: true
+            },
+            gantt: {
+                useMaxWidth: true
+            }
+        });
+    </script>
+</head>
+<body>
+    <div class="layout">
+        <nav class="sidebar">
+<div class="nav-header">
+<h2>FlowX Studio</h2>
+<p>技术设计文档</p>
+</div>
+<ul class="nav-links">
+<li><a href="README.html">FlowX Studio 技术设计文档</a></li>
+<li><a href="01-overview.html">1. 项目概述与愿景</a></li>
+<li><a href="02-architecture.html">2. 系统架构设计</a></li>
+<li><a href="03-database.html">3. 数据库设计</a></li>
+<li><a href="04-api.html">4. API 设计</a></li>
+<li><a href="05-frontend.html">5. 前端设计</a></li>
+<li><a href="06-ai-service.html">6. AI 服务层设计</a></li>
+<li><a href="07-node-system.html">7. 节点系统与执行引擎</a></li>
+<li><a href="08-runtime.html">8. 运行时与部署设计</a></li>
+<li><a href="09-security.html">9. 安全与错误处理设计</a></li>
+<li><a href="10-core-deps.html" class="active">10. FlowX 核心库依赖评估</a></li>
+</ul>
+</nav>
+        <main class="content">
+            <article>
+                <h1 id="10-flowx-核心库依赖评估与增强建议">10. FlowX 核心库依赖评估与增强建议</h1>
+
+<h2 id="101-评估范围">10.1 评估范围</h2>
+
+<p>基于 FlowX 核心库现有代码（<code>github.com/LerkoX/flowx</code>），评估其公开接口对 flowx-studio 的支持程度。</p>
+
+<p>评估涉及的关键文件：</p>
+<ul>
+<li><code>runtime.go</code> / <code>runtime_impl.go</code> —— Runtime 接口与实现</li>
+<li><code>dag/pipeline.go</code> / <code>dag/pipeline_impl.go</code> —— Pipeline 接口与实现</li>
+<li><code>dag/pipeline_execution.go</code> —— 执行逻辑</li>
+<li><code>dag/node.go</code> / <code>dag/node_impl.go</code> —— Node 接口与实现</li>
+<li><code>logger/logger.go</code> —— 日志推送接口</li>
+<li><code>core/config.go</code> / <code>core/const.go</code> —— 核心模型</li>
+</ul>
+<h2 id="102-接口能力逐项评估">10.2 接口能力逐项评估</h2>
+
+<h3 id="1021-runtime-接口-满足">10.2.1 Runtime 接口 —— 满足</h3>
+
+<pre><code class="language-go">type Runtime interface {
+    Get(id string) (dag.Pipeline, error)
+    Cancel(ctx context.Context, id string) error
+    RunAsync(ctx context.Context, id string, config string, listener dag.Listener) (dag.Pipeline, error)
+    RunSync(ctx context.Context, id string, config string, listener dag.Listener) (dag.Pipeline, error)
+    Rm(id string)
+    Done() chan struct{}
+    Notify(data interface{}) error
+    Ctx() context.Context
+    StopBackground()
+    StartBackground()
+    SetPusher(pusher logger.Pusher)
+    SetTemplateEngine(engine template.TemplateEngine)
+    GetTemplateEngine() template.TemplateEngine
+    ExportConfig(id string) (string, error)
+    Pause(ctx context.Context, id string) error
+    Resume(ctx context.Context, id string) error
+    ModifyGraph(ctx context.Context, id string, modifications dag.GraphModifications) error
+    UpdateConfig(ctx context.Context, id string, newConfigYAML string) error
+}</code></pre>
+
+<p><strong>评估结论</strong>：Runtime 接口功能完善，满足 flowx-studio 对执行、取消、暂停、恢复、配置导出、动态修改的全部需求。</p>
+
+<h3 id="1022-pipeline-接口-基本满足">10.2.2 Pipeline 接口 —— 基本满足</h3>
+
+<pre><code class="language-go">type Pipeline interface {
+    Id() string
+    GetGraph() Graph
+    SetGraph(graph Graph)
+    Status() string
+    SetMetadata(store metadata.MetadataStore)
+    Metadata() Metadata
+    Listening(listener Listener)
+    Done() &lt;-chan struct{}
+    Run(ctx context.Context) error
+    Notify()
+    Cancel()
+    SetExecutorProvider(provider ExecutorProvider)
+    SetTemplateEngine(engine template.TemplateEngine)
+    GetTemplateEngine() template.TemplateEngine
+    SetPusher(pusher logger.Pusher)
+    Pause() error
+    Resume(ctx context.Context) error
+    IsModifiable() bool
+}</code></pre>
+
+<p><strong>评估结论</strong>：</p>
+<ul>
+<li><code>GetGraph()</code> + 遍历节点可以获取完整图结构和节点状态 —— 满足</li>
+<li><code>Status()</code> 返回流水线整体状态 —— 满足</li>
+<li><code>Done()</code> 通知执行完成 —— 满足</li>
+<li><code>Listening(Listener)</code> 事件监听 —— <strong>缺少节点上下文，见 10.3.1</strong></li>
+<li><code>Cancel/Pause/Resume</code> —— 满足</li>
+</ul>
+<h3 id="1023-node-接口-满足">10.2.3 Node 接口 —— 满足</h3>
+
+<pre><code class="language-go">type Node interface {
+    Id() string
+    PipelineId() string
+    Status() string
+    Get(key string) string
+    Set(key string, value any)
+    GetExecutor() string
+    GetSteps() []core.Step
+    GetConfig() map[string]any
+    GetRuntimeStatus() *core.NodeRuntimeStatus
+    SetRuntimeStatus(status *core.NodeRuntimeStatus)
+    GetStepRuntimeStatus(stepName string) *core.StepRuntimeStatus
+    SetStepRuntimeStatus(stepStatus *core.StepRuntimeStatus)
+    EnsureIds()
+}</code></pre>
+
+<p><strong>评估结论</strong>：节点状态管理能力完善。<code>GetRuntimeStatus()</code> 返回的 <code>NodeRuntimeStatus</code> 包含：</p>
+<ul>
+<li><code>Status</code> —— 节点状态</li>
+<li><code>StartTime/EndTime</code> —— 起止时间</li>
+<li><code>Steps</code> —— 步骤状态列表（含 <code>Output</code> 字段）</li>
+<li><code>Executor</code> —— 执行器信息</li>
+<li><code>Custom</code> —— 自定义扩展字段</li>
+</ul>
+<p>完全满足 Web 层对节点状态监控的需求。</p>
+
+<h3 id="1024-listener-事件机制-已增强">10.2.4 Listener 事件机制 —— <strong>已增强</strong> ✅</h3>
+
+<pre><code class="language-go">type Listener interface {
+    Handle(p Pipeline, event Event)
+    Events() []Event
+}</code></pre>
+
+<p><strong>现有事件类型</strong>：</p>
+<pre><code class="language-go">PipelineInit                // 流水线初始化
+PipelineStart               // 流水线开始执行
+PipelineFinish              // 流水线完成
+PipelineExecutorPrepare     // 流水线执行器开始准备
+PipelineExecutorPrepareDone // 流水线执行器准备完毕
+PipelineNodeStart           // 节点开始
+PipelineNodeFinish          // 节点完成
+PipelineNodeFailed          // 节点执行失败（新增）
+PipelinePaused              // 流水线暂停
+PipelineResumed             // 流水线恢复
+PipelineGraphModified       // 图被修改</code></pre>
+
+<p><strong>解决方案</strong>：通过 <code>Pipeline.CurrentNode()</code> 获取当前节点上下文</p>
+
+<p>在 <code>pipeline_execution.go</code> 中，<code>executeNodeWithLifecycle</code> 执行期间会在 Pipeline 上设置当前节点：</p>
+<pre><code class="language-go">func (p *PipelineImpl) executeNodeWithLifecycle(ctx context.Context, node Node) error {
+    p.mu.Lock()
+    p.currentNode = node
+    p.mu.Unlock()
+    
+    p.NotifyEvent(PipelineNodeStart)
+    // ... 执行 ...
+    p.NotifyEvent(PipelineNodeFinish)
+    
+    p.mu.Lock()
+    p.currentNode = nil
+    p.mu.Unlock()
+}</code></pre>
+
+<p>Listener 可通过 <code>p.CurrentNode()</code> 直接获取触发事件的节点：</p>
+<pre><code class="language-go">func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
+    switch event {
+    case dag.PipelineNodeStart:
+        if node := p.CurrentNode(); node != nil {
+            l.eventCh &lt;- Event{
+                Type:   "node_start",
+                NodeID: node.Id(),
+            }
+        }
+    case dag.PipelineNodeFinish:
+        if node := p.CurrentNode(); node != nil {
+            l.eventCh &lt;- Event{
+                Type:   "node_complete",
+                NodeID: node.Id(),
+                Status: node.GetRuntimeStatus().Status,
+            }
+        }
+    case dag.PipelineNodeFailed:
+        if node := p.CurrentNode(); node != nil {
+            l.eventCh &lt;- Event{
+                Type:   "node_failed",
+                NodeID: node.Id(),
+            }
+        }
+    }
+}</code></pre>
+
+<p><strong>评估结论</strong>：通过 <code>CurrentNode()</code> 接口，Listener 可精确获取事件关联的节点，无需遍历全图。完全满足 flowx-studio 的节点级事件需求。</p>
+<h3 id="1025-logger-pusher-满足">10.2.5 Logger Pusher —— 满足</h3>
+
+<pre><code class="language-go">type Pusher interface {
+    Push(ctx context.Context, entry Entry) error
+    PushBatch(ctx context.Context, entries []Entry) error
+    Close() error
+}
+
+type Entry struct {
+    Pipeline  string    `json:"pipeline"`
+    BuildID   string    `json:"buildId"`
+    Node      string    `json:"node"`      // 节点ID
+    Step      string    `json:"step"`      // 步骤名称
+    Timestamp time.Time `json:"timestamp"`
+    Level     Level     `json:"level"`
+    Message   string    `json:"message"`
+    Output    string    `json:"output"`    // 命令标准输出/错误
+}</code></pre>
+
+<p><strong>评估结论</strong>：<code>Entry</code> 包含 <code>Node</code> 和 <code>Step</code> 字段，flowx-studio 可通过自定义 Pusher 实现实时日志捕获和 SSE 推送。完全满足需求。</p>
+
+<h3 id="1026-执行输出获取-满足">10.2.6 执行输出获取 —— 满足</h3>
+
+<p>节点执行输出通过两个途径获取：</p>
+
+<ol>
+<li><strong>实时日志</strong>：通过 <code>logger.Pusher</code> 的 <code>Entry.Output</code> 字段捕获</li>
+<li><strong>结果输出</strong>：通过 <code>NodeRuntimeStatus.Steps[].Output</code> 获取步骤输出摘要</li>
+</ol>
+<p><strong>评估结论</strong>：满足 Web 层对执行日志和输出结果展示的需求。</p>
+
+<h3 id="1027-执行取消与超时-满足">10.2.7 执行取消与超时 —— 满足</h3>
+
+<ul>
+<li><code>Runtime.Cancel()</code> 可取消运行中的流水线</li>
+<li>Pipeline 内部已检查 <code>ctx.Done()</code> 信号（见 <code>runLevelByLevel</code> 和 <code>executeNodeWithLifecycle</code>）</li>
+<li>flowx-studio 可通过 <code>context.WithTimeout</code> 控制执行超时</li>
+</ul>
+<p><strong>评估结论</strong>：满足需求，无需核心库增强。</p>
+
+<h2 id="103-已实现增强项">10.3 已实现增强项 ✅</h2>
+
+<h3 id="1031-pipeline-接口新增-currentnode-方法">10.3.1 Pipeline 接口新增 CurrentNode() 方法 —— <strong>已实现</strong></h3>
+
+<p><strong>状态</strong>：✅ 已在 <code>feat/studio-enhancements</code> 分支实现并合并</p>
+
+<p><strong>实现文件</strong>：</p>
+<ul>
+<li><code>dag/pipeline.go</code> —— Pipeline 接口添加 <code>CurrentNode() Node</code></li>
+<li><code>dag/pipeline_impl.go</code> —— PipelineImpl 添加 <code>currentNode</code> 字段 + 线程安全实现</li>
+<li><code>dag/pipeline_execution.go</code> —— <code>executeNodeWithLifecycle</code> 中设置/清理</li>
+</ul>
+
+<p><strong>验证</strong>：通过单元测试 <code>TestCurrentNode_*</code></p>
+
+<p><strong>使用方式</strong>：</p>
+<pre><code class="language-go">func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
+    switch event {
+    case dag.PipelineNodeStart:
+        if node := p.CurrentNode(); node != nil {
+            l.eventCh &lt;- Event{Type: "node_start", NodeID: node.Id()}
+        }
+    case dag.PipelineNodeFinish:
+        if node := p.CurrentNode(); node != nil {
+            l.eventCh &lt;- Event{Type: "node_complete", NodeID: node.Id()}
+        }
+    }
+}</code></pre>
+
+<h3 id="1032-新增-pipelinenodefailed-事件">10.3.2 新增 PipelineNodeFailed 事件 —— <strong>已实现</strong></h3>
+
+<p><strong>状态</strong>：✅ 已实现</p>
+
+<p><strong>实现文件</strong>：</p>
+<ul>
+<li><code>core/const.go</code> —— 新增 <code>EventPipelineNodeFailed = "pipeline-node-failed"</code></li>
+<li><code>dag/pipeline.go</code> —— 新增 <code>PipelineNodeFailed</code> 事件变量</li>
+<li><code>dag/pipeline_execution.go</code> —— 节点执行失败时触发该事件</li>
+</ul>
+
+<p><strong>使用方式</strong>：</p>
+<pre><code class="language-go">case dag.PipelineNodeFailed:
+    if node := p.CurrentNode(); node != nil {
+        l.eventCh &lt;- Event{Type: "node_failed", NodeID: node.Id()}
+    }
+</code></pre>
+
+<h3 id="1033-runtime-接口新增-listpipelines-方法">10.3.3 Runtime 接口新增 ListPipelines() 方法 —— <strong>已实现</strong></h3>
+
+<p><strong>状态</strong>：✅ 已实现</p>
+
+<p><strong>实现文件</strong>：</p>
+<ul>
+<li><code>runtime.go</code> —— Runtime 接口添加 <code>ListPipelines() []string</code></li>
+<li><code>runtime_impl.go</code> —— RuntimeImpl 实现方法</li>
+</ul>
+
+<p><strong>使用方式</strong>：</p>
+<pre><code class="language-go">activeIDs := runtime.ListPipelines()
+for _, id := range activeIDs {
+    pipeline, _ := runtime.Get(id)
+    fmt.Printf("Pipeline %s status: %s\n", id, pipeline.Status())
+}
+</code></pre>
+
+<h2 id="104-事件桥接实现策略">10.4 事件桥接实现策略</h2>
+
+<h3 id="1041-推荐方案基于-currentnode-的精确事件推送">10.4.1 推荐方案：基于 CurrentNode() 的精确事件推送</h3>
+
+<p>由于核心库已增强 <code>CurrentNode()</code> 和 <code>PipelineNodeFailed</code> 事件，flowx-studio 可直接采用精确事件方案：</p>
+
+<pre><code class="language-go">type studioListener struct {
+    eventCh chan Event
+}
+
+func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
+    switch event {
+    case dag.PipelineNodeStart:
+        if node := p.CurrentNode(); node != nil {
+            l.eventCh &lt;- Event{
+                Type:   "node_start",
+                NodeID: node.Id(),
+                Status: node.GetRuntimeStatus().Status,
+            }
+        }
+    case dag.PipelineNodeFinish:
+        if node := p.CurrentNode(); node != nil {
+            l.eventCh &lt;- Event{
+                Type:   "node_complete",
+                NodeID: node.Id(),
+                Status: node.GetRuntimeStatus().Status,
+            }
+        }
+    case dag.PipelineNodeFailed:
+        if node := p.CurrentNode(); node != nil {
+            l.eventCh &lt;- Event{
+                Type:   "node_failed",
+                NodeID: node.Id(),
+                Status: core.StatusFailed,
+            }
+        }
+    case dag.PipelinePaused:
+        l.eventCh &lt;- Event{Type: "pipeline_paused"}
+    case dag.PipelineResumed:
+        l.eventCh &lt;- Event{Type: "pipeline_resumed"}
+    }
+}
+</code></pre>
+
+<p><strong>优势</strong>：</p>
+<ul>
+<li>无需遍历全图，O(1) 获取当前节点</li>
+<li>精确的节点级事件，支持实时状态高亮</li>
+<li>原生支持失败事件，无需状态推断</li>
+</ul>
+
+<h2 id="105-版本兼容性矩阵">10.5 版本兼容性矩阵</h2>
+
+<table>
+<thead>
+<tr>
+<th>flowx-studio 版本</th>
+<th>依赖 FlowX 版本</th>
+<th>兼容性说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>v0.1.0</td>
+<td>v1.3.0+</td>
+<td>初始版本，直接使用 <code>CurrentNode()</code> 和 <code>PipelineNodeFailed</code> 接口</td>
+</tr>
+</tbody>
+</table>
+
+<p><strong>注意</strong>：所有增强功能已合并到 FlowX 主分支，flowx-studio v0.1.0 可直接依赖最新版本，无需过渡方案。</p>
+
+<h2 id="106-实现记录">10.6 实现记录</h2>
+
+<p>所有增强功能已在 <code>github.com/LerkoX/flowx</code> 的 <code>feat/studio-enhancements</code> 分支实现并验证：</p>
+
+<h3>已实现功能清单</h3>
+
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>功能</th>
+<th>状态</th>
+<th>验证</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>Pipeline.CurrentNode()</code></td>
+<td>✅ 已合并</td>
+<td><code>TestCurrentNode_*</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>PipelineNodeFailed</code> 事件</td>
+<td>✅ 已合并</td>
+<td><code>TestPipelineNodeFailed_*</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>Runtime.ListPipelines()</code></td>
+<td>✅ 已合并</td>
+<td><code>TestListPipelines_*</code></td>
+</tr>
+</tbody>
+</table>
+
+<h3>相关提交</h3>
+
+<ul>
+<li><strong>分支</strong>：<code>feat/studio-enhancements</code></li>
+<li><strong>修改文件</strong>：
+<ul>
+<li><code>dag/pipeline.go</code> —— 接口扩展</li>
+<li><code>dag/pipeline_impl.go</code> —— <code>currentNode</code> 字段 + 实现</li>
+<li><code>dag/pipeline_execution.go</code> —— 生命周期中设置/清理</li>
+<li><code>core/const.go</code> —— 新增事件常量</li>
+<li><code>runtime.go</code> —— 接口扩展</li>
+<li><code>runtime_impl.go</code> —— <code>ListPipelines()</code> 实现</li>
+<li><code>dag/pipeline_studio_test.go</code> —— 新增测试（新增文件）</li>
+<li><code>runtime_test.go</code> —— 新增测试</li>
+</ul>
+</li>
+</ul>
+
+<h3>向后兼容性</h3>
+
+<p>所有增强均为<strong>新增接口/方法</strong>，不修改现有接口签名，完全向后兼容。现有代码无需任何调整。</p>
+            </article>
+        </main>
+    </div>
+    <div id="mermaid-overlay" class="mermaid-overlay" onclick="closeMermaidFullscreen(event)">
+        <div class="mermaid-overlay-content">
+            <button class="mermaid-close-btn" onclick="closeMermaidFullscreen(event)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+                关闭
+            </button>
+            <div id="mermaid-overlay-diagram"></div>
+            <div class="mermaid-zoom-controls">
+                <button onclick="zoomOut()" title="缩小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <button onclick="zoomIn()" title="放大">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <div class="zoom-separator"></div>
+                <span id="mermaid-scale-display" class="zoom-scale">100%</span>
+                <div class="zoom-separator"></div>
+                <button onclick="zoomFit()" title="适应屏幕">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path>
+                    </svg>
+                </button>
+                <button onclick="zoomReset()" title="原始大小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="1 4 1 10 7 10"></polyline>
+                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>

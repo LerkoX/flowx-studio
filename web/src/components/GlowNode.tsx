@@ -20,8 +20,9 @@ const statusConfig = {
   skipped: { color: '#64748b', glow: 'none' },
 }
 
-const GlowNode = memo(({ data, selected }: NodeProps<GlowNodeData>) => {
-  const { name, description, status, language, accentColor = '#6366f1' } = data
+const GlowNode = memo(({ data, selected }: NodeProps) => {
+  const nodeData = data as unknown as GlowNodeData
+  const { name, description, status, language, accentColor = '#6366f1' } = nodeData
   const config = statusConfig[status]
 
   return (
@@ -79,7 +80,7 @@ const GlowNode = memo(({ data, selected }: NodeProps<GlowNodeData>) => {
             style={{ background: `linear-gradient(135deg, ${accentColor}, ${accentColor}80)` }}
           >
             <span className="text-white text-lg">
-              {data.icon || '◆'}
+              {nodeData.icon || '◆'}
             </span>
           </div>
 

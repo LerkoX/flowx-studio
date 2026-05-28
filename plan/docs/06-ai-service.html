@@ -1,0 +1,1050 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>6. AI 服务层设计 - FlowX Studio</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            themeVariables: {
+                primaryColor: '#1e1e3a',
+                primaryTextColor: '#e2e8f0',
+                primaryBorderColor: '#6366f1',
+                lineColor: '#a855f7',
+                secondaryColor: '#16162a',
+                tertiaryColor: '#0f0f1a',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                fontSize: '14px'
+            },
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            },
+            sequence: {
+                useMaxWidth: true
+            },
+            gantt: {
+                useMaxWidth: true
+            }
+        });
+    </script>
+</head>
+<body>
+    <div class="layout">
+        <nav class="sidebar">
+<div class="nav-header">
+<h2>FlowX Studio</h2>
+<p>技术设计文档</p>
+</div>
+<ul class="nav-links">
+<li><a href="README.html">FlowX Studio 技术设计文档</a></li>
+<li><a href="01-overview.html">1. 项目概述与愿景</a></li>
+<li><a href="02-architecture.html">2. 系统架构设计</a></li>
+<li><a href="03-database.html">3. 数据库设计</a></li>
+<li><a href="04-api.html">4. API 设计</a></li>
+<li><a href="05-frontend.html">5. 前端设计</a></li>
+<li><a href="06-ai-service.html" class="active">6. AI 服务层设计</a></li>
+<li><a href="07-node-system.html">7. 节点系统与执行引擎</a></li>
+<li><a href="08-runtime.html">8. 运行时与部署设计</a></li>
+<li><a href="09-security.html">9. 安全与错误处理设计</a></li>
+<li><a href="10-core-deps.html">10. FlowX 核心库依赖评估</a></li>
+</ul>
+</nav>
+        <main class="content">
+            <article>
+                <h1 id="6-ai-服务层设计">6. AI 服务层设计</h1>
+
+<h2 id="61-设计目标">6.1 设计目标</h2>
+
+<ul>
+<li><strong>多提供商支持</strong>：统一接口封装 OpenAI、Anthropic、Ollama 等</li>
+<li><strong>模型能力抽象</strong>：自动识别模型能力（函数调用、JSON 模式等）</li>
+<li><strong>Prompt 工程</strong>：标准化 Prompt 模板，确保 AI 输出符合 FlowX 规范</li>
+<li><strong>容错机制</strong>：重试、降级、超时控制</li>
+<li><strong>流式响应</strong>：支持 SSE 流式输出，提升用户体验</li>
+</ul>
+<h2 id="62-架构设计">6.2 架构设计</h2>
+
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│                      AI Service Layer                        │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │                    AIService                           │  │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌─────────────┐  │  │
+│  │  │ NodeGenerator│  │WorkflowGen   │  │  ChatService│  │  │
+│  │  └──────────────┘  └──────────────┘  └─────────────┘  │  │
+│  └───────────────────────────────────────────────────────┘  │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │                    Provider Interface                  │  │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ │  │
+│  │  │  OpenAI  │ │Anthropic │ │  Ollama  │ │  Custom  │ │  │
+│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ │  │
+│  └───────────────────────────────────────────────────────┘  │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │                    Prompt Engine                       │  │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌─────────────┐  │  │
+│  │  │   Templates  │  │  Variables   │  │   Parser    │  │  │
+│  │  └──────────────┘  └──────────────┘  └─────────────┘  │  │
+│  └───────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘</code></pre>
+
+<h2 id="63-provider-接口设计">6.3 Provider 接口设计</h2>
+
+<pre><code class="language-go">// Provider 是所有 AI 提供商的通用接口
+type Provider interface {
+    // 基本信息
+    Name() string
+    AvailableModels() []ModelInfo
+    
+    // 核心能力
+    Chat(ctx context.Context, req ChatRequest) (ChatResponse, error)
+    ChatStream(ctx context.Context, req ChatRequest) (StreamIterator, error)
+    
+    // 健康检查
+    HealthCheck(ctx context.Context) error
+}
+
+type ModelInfo struct {
+    Name                  string
+    DisplayName           string
+    MaxContextLength      int
+    SupportsFunctionCall  bool
+    SupportsJSONMode      bool
+    SupportsVision        bool
+    MaxOutputTokens       int
+}
+
+type ChatRequest struct {
+    Model       string
+    Messages    []Message
+    Temperature float64
+    MaxTokens   int
+    JSONMode    bool  // 要求返回 JSON 格式
+}
+
+type Message struct {
+    Role    string // system | user | assistant
+    Content string
+}
+
+type ChatResponse struct {
+    Content      string
+    Usage        TokenUsage
+    FinishReason string
+}
+
+type StreamIterator interface {
+    Next() (StreamChunk, error)
+    Close() error
+}
+
+type StreamChunk struct {
+    Content string
+    Done    bool
+}</code></pre>
+
+<h2 id="64-提供商实现">6.4 提供商实现</h2>
+
+<h3 id="641-openai-provider">6.4.1 OpenAI Provider</h3>
+
+<pre><code class="language-go">type OpenAIProvider struct {
+    apiKey   string
+    baseURL  string // 支持自定义代理地址
+    client   *http.Client
+}
+
+func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+    // 构建 OpenAI 格式的请求
+    // 调用 /v1/chat/completions
+    // 解析响应为通用 ChatResponse
+}
+
+func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest) (StreamIterator, error) {
+    // 调用 /v1/chat/completions?stream=true
+    // 返回 SSE 流迭代器
+}</code></pre>
+
+<h3 id="642-anthropic-provider">6.4.2 Anthropic Provider</h3>
+
+<pre><code class="language-go">type AnthropicProvider struct {
+    apiKey  string
+    baseURL string
+    client  *http.Client
+}
+
+// Anthropic API 格式与 OpenAI 不同，需要转换：
+// - messages 格式差异
+// - system prompt 位置不同
+// - 响应结构差异
+// 在 Provider 内部完成所有转换，对外暴露统一接口</code></pre>
+
+<h3 id="643-ollama-provider">6.4.3 Ollama Provider</h3>
+
+<pre><code class="language-go">type OllamaProvider struct {
+    baseURL string // 默认 http://localhost:11434
+    client  *http.Client
+}
+
+// Ollama 特点：
+// - 本地运行，无需 API Key
+// - 模型需要预先拉取
+// - API 兼容 OpenAI 格式（/api/chat）
+// - 支持流式响应</code></pre>
+
+<h2 id="65-prompt-工程">6.5 Prompt 工程</h2>
+
+<h3 id="651-节点生成-prompt">6.5.1 节点生成 Prompt</h3>
+
+<pre><code class="language-markdown">你是一个 FlowX 节点开发专家。FlowX 是一个工作流引擎，节点是可复用的执行单元。
+
+## 任务
+根据用户描述，生成一个符合 FlowX 规范的节点。
+
+## 节点规范
+1. **输入**：节点通过环境变量接收参数，参数名使用大写+下划线格式，如 `URL`、`TIMEOUT`
+2. **输出**：节点将结果输出到 stdout，使用 JSON 格式
+3. **错误**：错误信息输出到 stderr，进程 exit code 非 0
+4. **语言**：支持 Python、Go、Bash 等
+
+## 输出格式
+必须以 JSON 格式返回，包含以下字段：
+- name: 节点名称（蛇形命名，如 image_downloader）
+- description: 节点描述
+- language: 编程语言
+- parameters: 参数列表，每个参数包含 name, type, description, required, default
+- code: 完整实现代码
+- mock_code: Mock 测试代码（不依赖外部服务，返回模拟数据）
+
+## 用户描述
+{{user_description}}
+
+## 上下文
+{{context}}
+
+请生成节点：</code></pre>
+
+<h3 id="652-工作流生成-prompt">6.5.2 工作流生成 Prompt</h3>
+
+<pre><code class="language-markdown">你是一个工作流编排专家。FlowX 使用 YAML 配置定义工作流，图结构使用 Mermaid stateDiagram-v2 语法。
+
+## 可用节点
+{{available_nodes}}
+
+## 用户需求
+{{user_description}}
+
+## 输出要求
+1. 生成完整的 FlowX YAML 配置
+2. 如果现有节点不够用，列出需要新建的节点
+3. 图结构必须正确，使用 Mermaid stateDiagram-v2 语法
+4. 节点配置必须引用正确的参数
+
+## YAML 结构示例</code></pre>
+<p>name: workflow_name</p>
+<p>version: "1.0"</p>
+<p>graph: |</p>
+<p>  stateDiagram-v2</p>
+<p>    [*] --&gt; node1</p>
+<p>    node1 --&gt; node2</p>
+<p>    node2 --&gt; [*]</p>
+<p>nodes:</p>
+<p>  node1:</p>
+<p>    steps:</p>
+<ul>
+<li>name: step1</li>
+</ul>
+<p>        executor: local</p>
+<p>        commands:</p>
+<pre><code>
+请生成工作流配置：</code></pre>
+<ul>
+<li>python {{.node.code}}</li>
+</ul>
+<h3 id="653-对话-prompt">6.5.3 对话 Prompt</h3>
+
+<pre><code class="language-markdown">你是 FlowX AI 助手，一个帮助用户创建和管理工作流的智能助手。
+
+## 能力
+1. 理解用户的自动化需求
+2. 生成可复用的工作流节点
+3. 编排复杂的工作流
+4. 诊断和修复工作流错误
+
+## 原则
+1. 主动询问缺失的关键信息
+2. 提供清晰的操作建议
+3. 如果用户描述模糊，给出示例帮助澄清
+4. 保持对话简洁，聚焦工作流主题
+
+## 当前上下文
+{{context}}
+
+用户消息：{{user_message}}</code></pre>
+
+<h2 id="66-高阶服务封装">6.6 高阶服务封装</h2>
+
+<h3 id="661-nodegenerator">6.6.1 NodeGenerator</h3>
+
+<pre><code class="language-go">type NodeGenerator struct {
+    aiService *AIService
+    nodeRepo  db.NodeRepository
+}
+
+// GenerateNode 根据用户描述生成节点
+func (g *NodeGenerator) GenerateNode(ctx context.Context, description string, opts GenerateOptions) (*db.Node, error) {
+    // 1. 组装 Prompt（包含节点规范和上下文）
+    prompt := g.buildPrompt(description, opts)
+    
+    // 2. 调用 AI，要求 JSON 模式输出
+    response, err := g.aiService.Chat(ctx, ChatRequest{
+        Messages: []Message{{Role: "user", Content: prompt}},
+        JSONMode: true,
+    })
+    
+    // 3. 解析 JSON 响应
+    var nodeData GeneratedNode
+    if err := json.Unmarshal([]byte(response.Content), &amp;nodeData); err != nil {
+        return nil, fmt.Errorf("parse node data failed: %w", err)
+    }
+    
+    // 4. 验证节点数据完整性
+    if err := g.validateNode(nodeData); err != nil {
+        return nil, fmt.Errorf("validate node failed: %w", err)
+    }
+    
+    // 5. 保存到数据库
+    node := &amp;db.Node{
+        Name:        nodeData.Name,
+        Description: nodeData.Description,
+        Language:    nodeData.Language,
+        Code:        nodeData.Code,
+        MockCode:    nodeData.MockCode,
+        Parameters:  nodeData.Parameters,
+    }
+    
+    if err := g.nodeRepo.Create(ctx, node); err != nil {
+        return nil, fmt.Errorf("save node failed: %w", err)
+    }
+    
+    return node, nil
+}</code></pre>
+
+<h3 id="662-workflowgenerator">6.6.2 WorkflowGenerator</h3>
+
+<pre><code class="language-go">type WorkflowGenerator struct {
+    aiService     *AIService
+    nodeRepo      db.NodeRepository
+    workflowRepo  db.WorkflowRepository
+}
+
+// GenerateWorkflow 根据用户描述生成工作流
+func (g *WorkflowGenerator) GenerateWorkflow(ctx context.Context, description string, opts GenerateOptions) (*db.Workflow, error) {
+    // 1. 获取所有可用节点作为上下文
+    nodes, _ := g.nodeRepo.List(ctx)
+    
+    // 2. 组装 Prompt
+    prompt := g.buildPrompt(description, nodes, opts)
+    
+    // 3. 调用 AI 生成
+    response, err := g.aiService.Chat(ctx, ChatRequest{
+        Messages: []Message{{Role: "user", Content: prompt}},
+        JSONMode: false, // YAML 不是 JSON
+    })
+    
+    // 4. 从响应中提取 YAML
+    yamlConfig := g.extractYAML(response.Content)
+    
+    // 5. 验证 YAML 结构
+    if err := g.validateYAML(yamlConfig); err != nil {
+        return nil, fmt.Errorf("validate yaml failed: %w", err)
+    }
+    
+    // 6. 保存工作流
+    workflow := &amp;db.Workflow{
+        Name:       g.generateName(description),
+        Description: description,
+        YAMLConfig: yamlConfig,
+        Status:     "draft",
+    }
+    
+    if err := g.workflowRepo.Create(ctx, workflow); err != nil {
+        return nil, fmt.Errorf("save workflow failed: %w", err)
+    }
+    
+    return workflow, nil
+}</code></pre>
+
+<h2 id="67-容错与优化">6.7 容错与优化</h2>
+
+<h3 id="671-重试机制">6.7.1 重试机制</h3>
+
+<pre><code class="language-go">type RetryConfig struct {
+    MaxRetries  int
+    BaseDelay   time.Duration
+    MaxDelay    time.Duration
+    Multiplier  float64
+}
+
+func (p *BaseProvider) callWithRetry(ctx context.Context, fn func() error) error {
+    var lastErr error
+    delay := p.retryConfig.BaseDelay
+    
+    for i := 0; i &lt;= p.retryConfig.MaxRetries; i++ {
+        if err := fn(); err != nil {
+            lastErr = err
+            
+            // 判断是否需要重试
+            if !isRetryable(err) {
+                return err
+            }
+            
+            // 指数退避
+            if i &lt; p.retryConfig.MaxRetries {
+                time.Sleep(delay)
+                delay = min(time.Duration(float64(delay)*p.retryConfig.Multiplier), p.retryConfig.MaxDelay)
+            }
+        } else {
+            return nil
+        }
+    }
+    
+    return fmt.Errorf("max retries exceeded: %w", lastErr)
+}</code></pre>
+
+<h3 id="672-故障转移">6.7.2 故障转移</h3>
+
+<pre><code class="language-go">type AIService struct {
+    providers []Provider
+    // 按优先级排序，主模型在前
+}
+
+func (s *AIService) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+    for _, provider := range s.providers {
+        if !provider.IsEnabled() {
+            continue
+        }
+        
+        resp, err := provider.Chat(ctx, req)
+        if err == nil {
+            return resp, nil
+        }
+        
+        // 记录失败，尝试下一个提供商
+        log.Printf("Provider %s failed: %v", provider.Name(), err)
+    }
+    
+    return ChatResponse{}, fmt.Errorf("all providers failed")
+}</code></pre>
+
+<h3 id="673-流式响应处理">6.7.3 流式响应处理</h3>
+
+<pre><code class="language-go">func (s *AIService) ChatStream(ctx context.Context, req ChatRequest, onChunk func(string)) error {
+    iterator, err := s.primaryProvider.ChatStream(ctx, req)
+    if err != nil {
+        return err
+    }
+    defer iterator.Close()
+    
+    for {
+        chunk, err := iterator.Next()
+        if err != nil {
+            return err
+        }
+        
+        if chunk.Done {
+            break
+        }
+        
+        onChunk(chunk.Content)
+    }
+    
+    return nil
+}</code></pre>
+
+<h2 id="68-ai-配置管理">6.8 AI 配置管理</h2>
+
+<h3 id="681-配置模型">6.8.1 配置模型</h3>
+
+<pre><code class="language-go">type AIConfig struct {
+    ID           int64
+    Provider     string  // openai | anthropic | ollama
+    Name         string  // 用户自定义名称
+    Model        string  // 模型名称
+    APIKey       string  // 加密存储
+    BaseURL      string  // 自定义地址
+    Temperature  float64
+    MaxTokens    int
+    IsActive     bool    // 是否为默认配置
+    IsEnabled    bool    // 是否启用
+    Capabilities string  // JSON 模型能力
+}</code></pre>
+
+<h3 id="682-配置优先级">6.8.2 配置优先级</h3>
+
+<ol>
+<li>用户显式指定的配置</li>
+<li><code>is_active = true</code> 的默认配置</li>
+<li>第一个启用的配置</li>
+<li>本地 Ollama（如果可用）</li>
+</ol>
+<h3 id="683-api-key-加密">6.8.3 API Key 加密</h3>
+
+<p>使用 AES-GCM 加密存储 API Key：</p>
+
+<pre><code class="language-go">// 加密密钥从环境变量或系统密钥链获取
+var encryptionKey = os.Getenv("FLOWX_ENCRYPTION_KEY")
+
+func encryptAPIKey(key string) (string, error) {
+    block, err := aes.NewCipher([]byte(encryptionKey))
+    if err != nil {
+        return "", err
+    }
+    
+    gcm, err := cipher.NewGCM(block)
+    if err != nil {
+        return "", err
+    }
+    
+    nonce := make([]byte, gcm.NonceSize())
+    if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+        return "", err
+    }
+    
+    ciphertext := gcm.Seal(nonce, nonce, []byte(key), nil)
+    return base64.StdEncoding.EncodeToString(ciphertext), nil
+}</code></pre>
+
+<h2 id="69-监控与日志">6.9 监控与日志</h2>
+
+<h3 id="691-ai-调用日志">6.9.1 AI 调用日志</h3>
+
+<p>记录每次 AI 调用的关键信息：</p>
+
+<pre><code class="language-sql">CREATE TABLE ai_call_logs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider        TEXT NOT NULL,                   -- openai | anthropic | ollama
+    model           TEXT NOT NULL,                   -- 模型名称
+    operation       TEXT NOT NULL,                   -- generate_node | generate_workflow | chat | mock_test
+    request_params  TEXT,                            -- JSON: 请求参数（脱敏后）
+    input_tokens    INTEGER,                         -- 输入 token 数
+    output_tokens   INTEGER,                         -- 输出 token 数
+    latency_ms      INTEGER,                         -- 响应延迟（毫秒）
+    success         BOOLEAN,                         -- 是否成功
+    error_message   TEXT,                            -- 错误信息
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 索引
+CREATE INDEX idx_ai_logs_provider ON ai_call_logs(provider);
+CREATE INDEX idx_ai_logs_operation ON ai_call_logs(operation);
+CREATE INDEX idx_ai_logs_created ON ai_call_logs(created_at);</code></pre>
+
+<h3 id="692-性能指标">6.9.2 性能指标</h3>
+
+<p>监控以下指标：</p>
+<ul>
+<li>AI 调用延迟（P50、P95、P99）</li>
+<li>Token 使用量</li>
+<li>生成成功率</li>
+<li>各提供商可用性</li>
+</ul>
+<h2 id="610-安全考虑">6.10 安全考虑</h2>
+
+<ol>
+<li><strong>API Key 保护</strong>：加密存储，不在日志中明文输出</li>
+<li><strong>输入过滤</strong>：对用户输入进行基本的 XSS 和注入过滤</li>
+<li><strong>输出验证</strong>：AI 生成的代码在存储前进行语法验证</li>
+<li><strong>沙箱执行</strong>：Mock 测试在隔离环境运行，防止恶意代码</li>
+<li><strong>速率限制</strong>：对 AI 调用进行速率限制，防止滥用</li>
+</ol>
+<h2 id="611-业务逻辑流程">6.11 业务逻辑流程</h2>
+
+<h3 id="6111-概述">6.11.1 概述</h3>
+
+<p>FlowX Studio 的核心交互模式是<strong>对话式配置</strong>：用户通过与 AI 助手自然语言对话，完成节点生成、工作流编排、执行监控等所有操作。整个过程中<strong>不提供传统的手动配置界面</strong>。</p>
+
+<h3 id="6112-节点生成的业务流">6.11.2 节点生成的业务流</h3>
+
+<h4 id="正常流程">正常流程</h4>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    A[用户输入需求] --> B[AI 理解]
+    B --> B1[识别节点类型]
+    B --> B2[识别编程语言]
+    B --> B3[识别参数需求]
+    B1 --> C[Prompt 组装]
+    B2 --> C
+    B3 --> C
+    C --> D[AI 生成节点代码]
+    D --> E[后端验证]
+    E --> F[保存到节点注册中心]
+    F --> G[前端展示]
+    G --> H[用户点击 Mock 测试]
+    H --> I[Mock 执行]
+    I --> J[用户确认]
+    J --> K[节点可用]
+    K --> L[可被工作流引用]</pre>
+    </div>
+</div>
+
+<h4 id="异常流程">异常流程</h4>
+
+<p><strong>场景 1：AI 生成失败</strong></p>
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    A[AI 生成 → 返回格式不符合 JSON 规范] --> B[后端解析失败]
+    B --> C[自动重试 最多 3 次]
+    C -->|成功| D[继续正常流程]
+    C -->|失败| E[返回错误给用户]
+    E --> F["AI 生成节点时遇到了问题，请重试或调整描述"]</pre>
+    </div>
+</div>
+
+<p><strong>场景 2：Mock 测试失败</strong></p>
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    A[用户点击 Mock 测试] --> B[Mock 执行失败]
+    B --> B1[代码语法错误]
+    B --> B2[缺少依赖]
+    B --> B3[运行时异常]
+    B1 --> C[前端展示错误信息]
+    B2 --> C
+    B3 --> C
+    C --> D{用户选择}
+    D -->|让 AI 修复| E[AI 分析错误并重新生成代码]
+    D -->|手动修改| F[用户通过对话告诉 AI 修改意见]</pre>
+    </div>
+</div>
+
+<p><strong>场景 3：用户描述模糊</strong></p>
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    A[用户：帮我做个下载东西的节点] --> B[AI 识别：信息不足]
+    B --> C[AI 追问]
+    C --> C1[确认下载类型]
+    C --> C2[确认下载来源]
+    C --> C3[确认编程语言]
+    C1 --> D[用户补充信息]
+    C2 --> D
+    C3 --> D
+    D --> E[继续生成流程]</pre>
+    </div>
+</div>
+
+<h3 id="6113-工作流生成的业务流">6.11.3 工作流生成的业务流</h3>
+
+<h4 id="正常流程">正常流程</h4>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    A[用户输入需求] --> B[AI 理解]
+    B --> C[检查节点注册中心]
+    C --> D{所有节点都存在?}
+    D -->|是| E[编排工作流]
+    D -->|否| F[询问用户]
+    F --> G{用户同意?}
+    G -->|是| H[递归执行节点生成流程]
+    G -->|否| E
+    H --> E
+    E --> I[后端验证]
+    I --> J[保存工作流]
+    J --> K[前端展示]
+    K --> L{用户选择操作}
+    L -->|查看YAML| M[展示/复制 YAML 配置]
+    L -->|Mock测试| N[使用各节点 Mock 代码串联执行]
+    L -->|立即运行| O[正式执行工作流]</pre>
+    </div>
+</div>
+
+<h4 id="多轮迭代流程">多轮迭代流程</h4>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    A[第一轮：生成初版工作流] --> B[用户查看后提出修改]
+    B --> C[AI 理解修改需求]
+    C --> D[更新工作流]
+    D --> E[展示更新后的工作流]
+    E --> F{用户满意?}
+    F -->|是| G[保存并运行]
+    F -->|否| B</pre>
+    </div>
+</div>
+
+<h3 id="6114-对话交互的业务流">6.11.4 对话交互的业务流</h3>
+
+<h4 id="核心原则">核心原则</h4>
+
+<p>AI 助手不是简单的问答机器人，而是<strong>主动的工作流构建搭档</strong>。它会：</p>
+<ol>
+<li><strong>主动询问</strong>：发现信息缺失时主动追问</li>
+<li><strong>主动建议</strong>：根据上下文推荐下一步操作</li>
+<li><strong>主动诊断</strong>：执行失败时主动分析原因并给出修复方案</li>
+</ol>
+<h4 id="对话状态机">对话状态机</h4>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    A[等待用户输入] --> B[生成节点意图]
+    A --> C[生成工作流意图]
+    A --> D[执行意图]
+    B --> E[节点生成流程]
+    C --> F[工作流生成]
+    D --> G[执行流程]
+    E --> H[展示结果+操作按钮]
+    F --> H
+    G --> H
+    H --> I[用户确认完成]
+    H --> J[用户修改]
+    H --> K[用户执行]
+    J --> A</pre>
+    </div>
+</div>
+
+<h4 id="意图识别">意图识别</h4>
+
+<p>AI 需要识别用户的意图类型：</p>
+
+<table>
+<thead>
+<tr>
+<th>意图类型</th>
+<th>关键词/模式</th>
+<th>示例</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>生成节点</strong></td>
+<td>"创建节点"、"生成"、"做个...功能"</td>
+<td>"帮我做一个下载图片的节点"</td>
+</tr>
+<tr>
+<td><strong>生成工作流</strong></td>
+<td>"工作流"、"流水线"、"流程"</td>
+<td>"做一个图片处理工作流"</td>
+</tr>
+<tr>
+<td><strong>修改现有</strong></td>
+<td>"修改"、"改成"、"替换"</td>
+<td>"把压缩节点改成 WebP 格式"</td>
+</tr>
+<tr>
+<td><strong>执行</strong></td>
+<td>"运行"、"执行"、"测试"</td>
+<td>"运行这个工作流"</td>
+</tr>
+<tr>
+<td><strong>诊断</strong></td>
+<td>"为什么失败"、"报错"、"错误"</td>
+<td>"为什么上传节点失败了？"</td>
+</tr>
+<tr>
+<td><strong>查询</strong></td>
+<td>"查看"、"显示"、"是什么"</td>
+<td>"查看所有可用节点"</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="多轮对话的上下文维护">多轮对话的上下文维护</h4>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    A[对话轮次 1] --> A1[用户：帮我做一个图片处理工作流]
+    A1 --> A2[AI：生成工作流]
+    A2 --> B[对话轮次 2]
+    B --> B1[用户：把压缩改成支持 WebP]
+    B1 --> B2[AI：识别修改意图并更新工作流]
+    B2 --> C[对话轮次 3]
+    C --> C1[用户：运行]
+    C1 --> C2[AI：触发执行并推送状态]</pre>
+    </div>
+</div>
+
+<h3 id="6115-执行与监控的业务流">6.11.5 执行与监控的业务流</h3>
+
+<h4 id="工作流执行流程">工作流执行流程</h4>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    A[用户点击立即运行] --> B[前端发送请求]
+    B --> C[后端处理]
+    C --> D[SSE 实时推送]
+    D --> E[前端更新]
+    E --> F{执行结果}
+    F -->|成功| G[AI 返回成功信息]
+    F -->|失败| H[AI 自动诊断]
+    H --> I[让 AI 修复]
+    H --> J[查看详细日志]</pre>
+    </div>
+</div>
+
+<h4 id="mock-测试流程">Mock 测试流程</h4>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    A[用户点击 Mock 测试] --> B[前端发送请求]
+    B --> C[后端处理]
+    C --> D[前端展示]
+    D --> E{用户判断}
+    E -->|符合预期| F[工作流没问题]
+    E -->|不符合| G[AI 分析]
+    G --> G1[识别问题节点]
+    G --> G2[分析问题原因]
+    G --> G3[重新生成该节点代码]</pre>
+    </div>
+</div>
+
+<h3 id="6116-异常处理的业务流">6.11.6 异常处理的业务流</h3>
+
+<h4 id="生成超时">生成超时</h4>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    A[AI 生成请求超时 默认 60 秒] --> B[前端展示]
+    B --> C[超过 60 秒]
+    C --> D[后端返回 504 超时]
+    D --> E[前端处理]
+    E --> E1[展示超时提示和建议]
+    E --> E2[提供重试按钮]</pre>
+    </div>
+</div>
+
+<h4 id="ai-理解错误">AI 理解错误</h4>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    A[用户：帮我做个工作流，每天要自动备份] --> B[AI 误解]
+    B --> C[用户纠正]
+    C --> D[AI 纠正]
+    D --> E[覆盖之前的生成结果]
+    E --> F[用新的工作流替换旧的工作流]</pre>
+    </div>
+</div>
+
+<h4 id="依赖缺失">依赖缺失</h4>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    A[用户：做一个 OCR 识别图片文字的工作流] --> B[AI 分析]
+    B --> C[发现 ocr_processor 不存在]
+    C --> D{自动补全?}
+    D -->|否| E[询问用户]
+    E -->|同意| F[先执行节点生成]
+    D -->|是| F
+    F --> G[生成 ocr_processor 节点]
+    G --> H[再执行工作流生成]</pre>
+    </div>
+</div>
+
+<h3 id="6117-业务状态流转图">6.11.7 业务状态流转图</h3>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    A[等待输入] --> B[意图识别]
+    B --> C[生成节点]
+    B --> D[生成工作流]
+    B --> E[其他操作]
+    C --> F[AI生成中]
+    D --> F
+    E --> G[执行操作]
+    F --> H[生成完成]
+    G --> I[执行中]
+    H --> J[Mock测试]
+    I --> K[执行完成]
+    J --> L{测试通过?}
+    K --> M{成功?}
+    L -->|Yes| N[保存可用]
+    L -->|No| O[AI诊断修复]
+    M -->|Yes| P[展示结果]
+    M -->|No| O
+    O --> A</pre>
+    </div>
+</div>
+
+<h3 id="6118-关键业务规则">6.11.8 关键业务规则</h3>
+
+<ol>
+<li><strong>零手动配置</strong>：用户只能通过自然语言与 AI 交互，不提供任何表单、拖拽、参数输入框</li>
+<li><strong>Mock 先行</strong>：每个新生成的节点必须先通过 Mock 测试，才能被工作流引用执行</li>
+<li><strong>原子性生成</strong>：节点和工作流的生成是原子操作，生成失败不会留下半成品</li>
+<li><strong>版本覆盖</strong>：同一工作流多次生成时，新结果覆盖旧结果，但保留历史执行记录</li>
+<li><strong>上下文继承</strong>：多轮对话中，AI 始终记得当前工作流和节点的上下文，无需用户重复说明</li>
+<li><strong>自动补全</strong>：AI 检测到缺失节点时，默认询问用户是否需要自动生成（可配置为自动）</li>
+</ol>
+            </article>
+        </main>
+    </div>
+    <div id="mermaid-overlay" class="mermaid-overlay" onclick="closeMermaidFullscreen(event)">
+        <div class="mermaid-overlay-content">
+            <button class="mermaid-close-btn" onclick="closeMermaidFullscreen(event)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+                关闭
+            </button>
+            <div id="mermaid-overlay-diagram"></div>
+            <div class="mermaid-zoom-controls">
+                <button onclick="zoomOut()" title="缩小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <button onclick="zoomIn()" title="放大">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <div class="zoom-separator"></div>
+                <span id="mermaid-scale-display" class="zoom-scale">100%</span>
+                <div class="zoom-separator"></div>
+                <button onclick="zoomFit()" title="适应屏幕">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path>
+                    </svg>
+                </button>
+                <button onclick="zoomReset()" title="原始大小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="1 4 1 10 7 10"></polyline>
+                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>

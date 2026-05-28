@@ -2,7 +2,7 @@ export interface NodeParameter {
   name: string
   type: string
   description: string
-  required?: boolean
+  required: boolean
   default?: unknown
 }
 

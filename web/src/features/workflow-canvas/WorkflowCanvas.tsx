@@ -21,9 +21,9 @@ const nodeTypes = { glowNode: GlowNode }
 const edgeTypes = { gradientEdge: GradientEdge }
 
 function WorkflowCanvasInner() {
-  const [nodes, setNodes, onNodesChange] = useNodesState([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState([])
-  const [selectedNode, setSelectedNode] = useState<string | null>(null)
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+  const [, setSelectedNode] = useState<string | null>(null)
   const { currentWorkflow, nodeStatuses } = useWorkflowStore()
 
   // 初始加载

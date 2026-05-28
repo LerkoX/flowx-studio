@@ -2,9 +2,12 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import WorkflowCanvas from '@/features/workflow-canvas/WorkflowCanvas'
 import WorkflowConfigPanel from '@/features/workflow-canvas/WorkflowConfigPanel'
+import LogViewer from '@/components/LogViewer'
+
+type TabType = 'graph' | 'yaml' | 'logs'
 
 export default function WorkflowCanvasPage() {
-  const [rightPanelTab, setRightPanelTab] = useState<'graph' | 'yaml'>('graph')
+  const [rightPanelTab, setRightPanelTab] = useState<TabType>('graph')
 
   return (
     <div className="h-full flex relative">
@@ -13,7 +16,7 @@ export default function WorkflowCanvasPage() {
         <WorkflowCanvas />
       </div>
 
-      {/* 右侧面板（工作流图 / YAML 切换） */}
+      {/* 右侧面板 */}
       <motion.div
         className="w-[400px] flex-shrink-0 border-l border-white/10
                    bg-white/5 backdrop-blur-2xl flex flex-col"
@@ -33,28 +36,47 @@ export default function WorkflowCanvasPage() {
             onClick={() => setRightPanelTab('yaml')}
             label="YAML"
           />
+          <TabButton
+            active={rightPanelTab === 'logs'}
+            onClick={() => setRightPanelTab('logs')}
+            label="日志"
+          />
         </div>
 
         {/* 面板内容 */}
-        <div className="flex-1 overflow-auto p-4">
+        <div className="flex-1 overflow-hidden">
           <AnimatePresence mode="wait">
-            {rightPanelTab === 'graph' ? (
+            {rightPanelTab === 'graph' && (
               <motion.div
                 key="graph"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
+                className="h-full overflow-auto p-4"
               >
                 <WorkflowConfigPanel view="graph" />
               </motion.div>
-            ) : (
+            )}
+            {rightPanelTab === 'yaml' && (
               <motion.div
                 key="yaml"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
+                className="h-full overflow-auto p-4"
               >
                 <WorkflowConfigPanel view="yaml" />
+              </motion.div>
+            )}
+            {rightPanelTab === 'logs' && (
+              <motion.div
+                key="logs"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="h-full"
+              >
+                <LogViewer />
               </motion.div>
             )}
           </AnimatePresence>
@@ -64,7 +86,15 @@ export default function WorkflowCanvasPage() {
   )
 }
 
-function TabButton({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
+function TabButton({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean
+  onClick: () => void
+  label: string
+}) {
   return (
     <button
       onClick={onClick}

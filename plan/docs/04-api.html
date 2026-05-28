@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>4. API 设计 - FlowX Studio</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            themeVariables: {
+                primaryColor: '#1e1e3a',
+                primaryTextColor: '#e2e8f0',
+                primaryBorderColor: '#6366f1',
+                lineColor: '#a855f7',
+                secondaryColor: '#16162a',
+                tertiaryColor: '#0f0f1a',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                fontSize: '14px'
+            },
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            },
+            sequence: {
+                useMaxWidth: true
+            },
+            gantt: {
+                useMaxWidth: true
+            }
+        });
+    </script>
+</head>
+<body>
+    <div class="layout">
+        <nav class="sidebar">
+<div class="nav-header">
+<h2>FlowX Studio</h2>
+<p>技术设计文档</p>
+</div>
+<ul class="nav-links">
+<li><a href="README.html">FlowX Studio 技术设计文档</a></li>
+<li><a href="01-overview.html">1. 项目概述与愿景</a></li>
+<li><a href="02-architecture.html">2. 系统架构设计</a></li>
+<li><a href="03-database.html">3. 数据库设计</a></li>
+<li><a href="04-api.html" class="active">4. API 设计</a></li>
+<li><a href="05-frontend.html">5. 前端设计</a></li>
+<li><a href="06-ai-service.html">6. AI 服务层设计</a></li>
+<li><a href="07-node-system.html">7. 节点系统与执行引擎</a></li>
+<li><a href="08-runtime.html">8. 运行时与部署设计</a></li>
+<li><a href="09-security.html">9. 安全与错误处理设计</a></li>
+<li><a href="10-core-deps.html">10. FlowX 核心库依赖评估</a></li>
+</ul>
+</nav>
+        <main class="content">
+            <article>
+                <h1 id="4-api-设计">4. API 设计</h1>
+
+<h2 id="41-设计原则">4.1 设计原则</h2>
+
+<ul>
+<li><strong>RESTful 风格</strong>：使用标准 HTTP 方法和状态码</li>
+<li><strong>JSON 格式</strong>：请求和响应统一使用 JSON</li>
+<li><strong>资源命名</strong>：使用名词复数形式，如 <code>/api/nodes</code>、<code>/api/workflows</code></li>
+<li><strong>版本控制</strong>：URL 中包含版本号 <code>/api/v1/...</code></li>
+<li><strong>错误统一</strong>：遵循 RFC 7807 Problem Details 规范</li>
+</ul>
+<h2 id="42-基础响应格式">4.2 基础响应格式</h2>
+
+<h3 id="成功响应">成功响应</h3>
+
+<pre><code class="language-json">{
+  "code": 200,
+  "message": "success",
+  "data": { }
+}</code></pre>
+
+<h3 id="错误响应">错误响应</h3>
+
+<pre><code class="language-json">{
+  "code": 400,
+  "message": "Invalid request parameters",
+  "error": {
+    "type": "validation_error",
+    "detail": "Field 'name' is required",
+    "field": "name"
+  }
+}</code></pre>
+
+<h2 id="43-节点管理-api">4.3 节点管理 API</h2>
+
+<h3 id="431-获取节点列表">4.3.1 获取节点列表</h3>
+
+<pre><code class="language-http">GET /api/v1/nodes</code></pre>
+
+<p><strong>查询参数</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>必填</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>language</td>
+<td>string</td>
+<td>否</td>
+<td>按语言过滤</td>
+</tr>
+<tr>
+<td>tag</td>
+<td>string</td>
+<td>否</td>
+<td>按标签过滤</td>
+</tr>
+<tr>
+<td>search</td>
+<td>string</td>
+<td>否</td>
+<td>关键词搜索（名称和描述）</td>
+</tr>
+<tr>
+<td>page</td>
+<td>integer</td>
+<td>否</td>
+<td>页码，默认 1</td>
+</tr>
+<tr>
+<td>page_size</td>
+<td>integer</td>
+<td>否</td>
+<td>每页数量，默认 20</td>
+</tr>
+</tbody>
+</table>
+
+<p><strong>响应示例</strong>：</p>
+<pre><code class="language-json">{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "items": [
+      {
+        "id": 1,
+        "name": "image_downloader",
+        "description": "从指定 URL 下载图片",
+        "language": "python",
+        "parameters": [
+          {
+            "name": "url",
+            "type": "string",
+            "description": "图片 URL",
+            "required": true
+          }
+        ],
+        "tags": ["image", "download"],
+        "created_at": "2025-01-15T10:30:00Z"
+      }
+    ],
+    "total": 15,
+    "page": 1,
+    "page_size": 20
+  }
+}</code></pre>
+
+<h3 id="432-ai-生成节点">4.3.2 AI 生成节点</h3>
+
+<pre><code class="language-http">POST /api/v1/ai/generate-node</code></pre>
+
+<p><strong>请求体</strong>：</p>
+<pre><code class="language-json">{
+  "description": "我需要一个节点，可以从 URL 下载图片并保存到本地",
+  "language": "python",
+  "preferred_name": "image_downloader",
+  "context": {
+    "existing_nodes": ["url_validator"],
+    "workflow_intent": "图片处理流水线"
+  }
+}</code></pre>
+
+<p><strong>响应示例</strong>（流式 SSE）：</p>
+<pre><code>event: generating
+data: {"stage": "analyzing", "message": "正在分析需求..."}
+
+event: generating
+data: {"stage": "coding", "message": "正在生成节点代码..."}
+
+event: complete
+data: {"node_id": 16, "name": "image_downloader", "status": "created"}</code></pre>
+
+<h3 id="433-获取节点详情">4.3.3 获取节点详情</h3>
+
+<pre><code class="language-http">GET /api/v1/nodes/:id</code></pre>
+
+<p><strong>响应示例</strong>：</p>
+<pre><code class="language-json">{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "id": 1,
+    "name": "image_downloader",
+    "description": "从指定 URL 下载图片",
+    "language": "python",
+    "code": "import requests...",
+    "mock_code": "# 返回模拟图片数据...",
+    "parameters": [
+      {
+        "name": "url",
+        "type": "string",
+        "description": "图片下载地址",
+        "required": true,
+        "default": null
+      },
+      {
+        "name": "timeout",
+        "type": "integer",
+        "description": "超时时间（秒）",
+        "required": false,
+        "default": 30
+      }
+    ],
+    "dockerfile": null,
+    "requirements": "requests\npillow",
+    "tags": ["image", "download"],
+    "created_at": "2025-01-15T10:30:00Z",
+    "updated_at": "2025-01-15T10:30:00Z"
+  }
+}</code></pre>
+
+<h3 id="434-删除节点">4.3.4 删除节点</h3>
+
+<pre><code class="language-http">DELETE /api/v1/nodes/:id</code></pre>
+
+<p><strong>响应</strong>：</p>
+<pre><code class="language-json">{
+  "code": 200,
+  "message": "Node deleted successfully"
+}</code></pre>
+
+<h3 id="435-mock-测试节点">4.3.5 Mock 测试节点</h3>
+
+<pre><code class="language-http">POST /api/v1/nodes/:id/mock</code></pre>
+
+<p><strong>请求体</strong>：</p>
+<pre><code class="language-json">{
+  "parameters": {
+    "url": "https://example.com/image.jpg",
+    "timeout": 30
+  }
+}</code></pre>
+
+<p><strong>响应示例</strong>：</p>
+<pre><code class="language-json">{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "status": "success",
+    "duration_ms": 1250,
+    "output": {
+      "file_path": "/tmp/mock_image_123.jpg",
+      "size_bytes": 2048,
+      "format": "JPEG"
+    },
+    "logs": "Mock: 模拟下载图片成功\nMock: 文件大小 2048 bytes"
+  }
+}</code></pre>
+
+<h2 id="44-工作流管理-api">4.4 工作流管理 API</h2>
+
+<h3 id="441-获取工作流列表">4.4.1 获取工作流列表</h3>
+
+<pre><code class="language-http">GET /api/v1/workflows</code></pre>
+
+<p><strong>查询参数</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>必填</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>status</td>
+<td>string</td>
+<td>否</td>
+<td>状态过滤</td>
+</tr>
+<tr>
+<td>search</td>
+<td>string</td>
+<td>否</td>
+<td>关键词搜索</td>
+</tr>
+<tr>
+<td>page</td>
+<td>integer</td>
+<td>否</td>
+<td>页码</td>
+</tr>
+<tr>
+<td>page_size</td>
+<td>integer</td>
+<td>否</td>
+<td>每页数量</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="442-ai-生成工作流">4.4.2 AI 生成工作流</h3>
+
+<pre><code class="language-http">POST /api/v1/ai/generate-workflow</code></pre>
+
+<p><strong>请求体</strong>：</p>
+<pre><code class="language-json">{
+  "description": "帮我做一个工作流：每天自动从 Unsplash 下载一张风景图片，压缩到 800x600，然后上传到 S3",
+  "context": {
+    "preferred_nodes": ["image_downloader"],
+    "executor_preference": "docker"
+  }
+}</code></pre>
+
+<p><strong>响应</strong>（流式 SSE）：</p>
+<pre><code>event: analyzing
+data: {"message": "正在分析需求，识别需要 4 个节点..."}
+
+event: generating_nodes
+data: {"message": "正在生成新节点：unsplash_downloader..."}
+
+event: generating_workflow
+data: {"message": "正在编排工作流..."}
+
+event: complete
+data: {"workflow_id": 8, "name": "daily_image_pipeline", "node_count": 4}</code></pre>
+
+<h3 id="443-获取工作流详情">4.4.3 获取工作流详情</h3>
+
+<pre><code class="language-http">GET /api/v1/workflows/:id</code></pre>
+
+<p><strong>响应示例</strong>：</p>
+<pre><code class="language-json">{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "id": 8,
+    "name": "daily_image_pipeline",
+    "description": "每日风景图片下载和处理流水线",
+    "intent": "每天自动从 Unsplash 下载一张风景图片，压缩到 800x600，然后上传到 S3",
+    "status": "active",
+    "yaml_config": "name: daily_image_pipeline\nversion: \"1.0\"\n...",
+    "nodes": [
+      {
+        "id": 1,
+        "name": "unsplash_downloader",
+        "description": "从 Unsplash API 下载图片"
+      },
+      {
+        "id": 5,
+        "name": "image_compressor",
+        "description": "压缩图片到指定尺寸"
+      }
+    ],
+    "created_at": "2025-01-20T08:00:00Z",
+    "updated_at": "2025-01-20T08:00:00Z"
+  }
+}</code></pre>
+
+<h3 id="444-执行工作流">4.4.4 执行工作流</h3>
+
+<pre><code class="language-http">POST /api/v1/workflows/:id/run</code></pre>
+
+<p><strong>请求体</strong>：</p>
+<pre><code class="language-json">{
+  "parameters": {
+    "category": "nature",
+    "target_size": "800x600"
+  },
+  "dry_run": false
+}</code></pre>
+
+<p><strong>响应示例</strong>：</p>
+<pre><code class="language-json">{
+  "code": 200,
+  "message": "Workflow execution started",
+  "data": {
+    "execution_id": 42,
+    "status": "running",
+    "stream_url": "/api/v1/executions/42/stream"
+  }
+}</code></pre>
+
+<h3 id="445-mock-执行工作流">4.4.5 Mock 执行工作流</h3>
+
+<pre><code class="language-http">POST /api/v1/workflows/:id/mock</code></pre>
+
+<p><strong>说明</strong>：使用各节点的 Mock 代码执行工作流，不触发真实副作用。</p>
+
+<h3 id="446-删除工作流">4.4.6 删除工作流</h3>
+
+<pre><code class="language-http">DELETE /api/v1/workflows/:id</code></pre>
+
+<h2 id="45-执行监控-api">4.5 执行监控 API</h2>
+
+<h3 id="451-获取执行历史">4.5.1 获取执行历史</h3>
+
+<pre><code class="language-http">GET /api/v1/executions</code></pre>
+
+<p><strong>查询参数</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>必填</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>workflow_id</td>
+<td>integer</td>
+<td>否</td>
+<td>按工作流过滤</td>
+</tr>
+<tr>
+<td>status</td>
+<td>string</td>
+<td>否</td>
+<td>按状态过滤</td>
+</tr>
+<tr>
+<td>page</td>
+<td>integer</td>
+<td>否</td>
+<td>页码</td>
+</tr>
+<tr>
+<td>page_size</td>
+<td>integer</td>
+<td>否</td>
+<td>每页数量</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="452-获取执行详情">4.5.2 获取执行详情</h3>
+
+<pre><code class="language-http">GET /api/v1/executions/:id</code></pre>
+
+<p><strong>响应示例</strong>：</p>
+<pre><code class="language-json">{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "id": 42,
+    "workflow_id": 8,
+    "workflow_name": "daily_image_pipeline",
+    "status": "success",
+    "trigger": "manual",
+    "started_at": "2025-01-20T10:00:00Z",
+    "completed_at": "2025-01-20T10:02:15Z",
+    "duration_ms": 135000,
+    "nodes": [
+      {
+        "node_id": "unsplash_downloader",
+        "status": "success",
+        "started_at": "2025-01-20T10:00:00Z",
+        "completed_at": "2025-01-20T10:00:30Z",
+        "duration_ms": 30000
+      },
+      {
+        "node_id": "image_compressor",
+        "status": "success",
+        "started_at": "2025-01-20T10:00:30Z",
+        "completed_at": "2025-01-20T10:01:00Z",
+        "duration_ms": 30000
+      }
+    ],
+    "result": {
+      "summary": "所有节点执行成功",
+      "s3_url": "https://bucket.s3.amazonaws.com/nature_20250120.jpg"
+    }
+  }
+}</code></pre>
+
+<h3 id="453-实时日志流-sse">4.5.3 实时日志流 (SSE)</h3>
+
+<pre><code class="language-http">GET /api/v1/executions/:id/stream</code></pre>
+
+<p><strong>SSE 事件类型</strong>：</p>
+
+<pre><code>event: execution_start
+data: {"execution_id": 42, "timestamp": "2025-01-20T10:00:00Z"}
+
+event: node_start
+data: {"node_id": "unsplash_downloader", "node_name": "下载图片", "timestamp": "2025-01-20T10:00:00Z"}
+
+event: node_log
+data: {"node_id": "unsplash_downloader", "level": "info", "message": "开始下载图片...", "timestamp": "2025-01-20T10:00:01Z"}
+
+event: node_complete
+data: {"node_id": "unsplash_downloader", "status": "success", "duration_ms": 30000, "timestamp": "2025-01-20T10:00:30Z"}
+
+event: execution_complete
+data: {"execution_id": 42, "status": "success", "duration_ms": 135000, "timestamp": "2025-01-20T10:02:15Z"}</code></pre>
+
+<h3 id="454-查询执行日志">4.5.4 查询执行日志</h3>
+
+<pre><code class="language-http">GET /api/v1/executions/:id/logs</code></pre>
+
+<p><strong>查询参数</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>必填</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>node_id</td>
+<td>string</td>
+<td>否</td>
+<td>按节点过滤</td>
+</tr>
+<tr>
+<td>level</td>
+<td>string</td>
+<td>否</td>
+<td>日志级别过滤（支持多级别：info,error）</td>
+</tr>
+<tr>
+<td>search</td>
+<td>string</td>
+<td>否</td>
+<td>关键词搜索（message 字段）</td>
+</tr>
+<tr>
+<td>limit</td>
+<td>integer</td>
+<td>否</td>
+<td>返回数量，默认 100，最大 1000</td>
+</tr>
+<tr>
+<td>offset</td>
+<td>integer</td>
+<td>否</td>
+<td>分页偏移</td>
+</tr>
+</tbody>
+</table>
+
+<p><strong>响应示例</strong>：</p>
+<pre><code class="language-json">{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "items": [
+      {
+        "id": 1024,
+        "execution_id": 42,
+        "node_id": "unsplash_downloader",
+        "node_name": "下载图片",
+        "step_name": "download_image",
+        "level": "info",
+        "message": "开始下载图片: https://unsplash.com/photo.jpg",
+        "output": "HTTP/1.1 200 OK\nContent-Length: 2048...",
+        "timestamp": "2025-01-20T10:00:01Z"
+      },
+      {
+        "id": 1025,
+        "execution_id": 42,
+        "node_id": "unsplash_downloader",
+        "node_name": "下载图片",
+        "level": "info",
+        "message": "图片下载完成，大小: 2048 bytes",
+        "timestamp": "2025-01-20T10:00:02Z"
+      }
+    ],
+    "total": 156,
+    "limit": 100,
+    "offset": 0
+  }
+}</code></pre>
+
+<h3 id="455-导出执行日志">4.5.5 导出执行日志</h3>
+
+<pre><code class="language-http">POST /api/v1/executions/:id/logs/export</code></pre>
+
+<p><strong>请求体</strong>：</p>
+<pre><code class="language-json">{
+  "format": "json",       // json | txt | markdown
+  "node_ids": ["download", "compress"],  // 可选：指定节点
+  "level": "info"         // 可选：最低日志级别
+}</code></pre>
+
+<p><strong>响应</strong>：</p>
+<ul>
+<li>Content-Type: <code>application/json</code> 或 <code>text/plain</code></li>
+<li>返回日志文件下载</li>
+</ul>
+<h2 id="46-ai-对话-api">4.6 AI 对话 API</h2>
+
+<h3 id="461-通用-ai-对话">4.6.1 通用 AI 对话</h3>
+
+<pre><code class="language-http">POST /api/v1/ai/chat</code></pre>
+
+<p><strong>请求体</strong>：</p>
+<pre><code class="language-json">{
+  "session_id": "sess_123456",
+  "message": "我想做一个自动备份数据库的工作流",
+  "context": {
+    "current_page": "workflow_builder",
+    "selected_workflow_id": null
+  }
+}</code></pre>
+
+<p><strong>响应</strong>（流式 SSE）：</p>
+<pre><code>event: message
+data: {"role": "assistant", "content": "好的，我来帮你创建一个数据库备份工作流。"}
+
+event: message
+data: {"role": "assistant", "content": "首先，我需要了解几个信息："}
+
+event: message
+data: {"role": "assistant", "content": "1. 你使用什么数据库？（MySQL/PostgreSQL/MongoDB 等）"}
+
+event: action
+data: {"type": "ask_parameter", "parameters": ["db_type", "backup_frequency"]}</code></pre>
+
+<h3 id="462-获取对话历史">4.6.2 获取对话历史</h3>
+
+<pre><code class="language-http">GET /api/v1/ai/chat/:session_id/history</code></pre>
+
+<h2 id="47-配置管理-api">4.7 配置管理 API</h2>
+
+<h3 id="471-获取-ai-配置列表">4.7.1 获取 AI 配置列表</h3>
+
+<pre><code class="language-http">GET /api/v1/config/ai</code></pre>
+
+<h3 id="472-添加-ai-配置">4.7.2 添加 AI 配置</h3>
+
+<pre><code class="language-http">POST /api/v1/config/ai</code></pre>
+
+<p><strong>请求体</strong>：</p>
+<pre><code class="language-json">{
+  "provider": "openai",
+  "name": "OpenAI GPT-4",
+  "model": "gpt-4",
+  "api_key": "sk-xxxxxxxx",
+  "base_url": null,
+  "temperature": 0.7,
+  "max_tokens": 4096,
+  "is_active": true
+}</code></pre>
+
+<h3 id="473-测试-ai-配置">4.7.3 测试 AI 配置</h3>
+
+<pre><code class="language-http">POST /api/v1/config/ai/:id/test</code></pre>
+
+<p><strong>响应示例</strong>：</p>
+<pre><code class="language-json">{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "success": true,
+    "latency_ms": 850,
+    "model": "gpt-4",
+    "response": "Hello! I'm working properly."
+  }
+}</code></pre>
+
+<h3 id="474-获取系统配置">4.7.4 获取系统配置</h3>
+
+<pre><code class="language-http">GET /api/v1/config/system</code></pre>
+
+<h3 id="475-更新系统配置">4.7.5 更新系统配置</h3>
+
+<pre><code class="language-http">PUT /api/v1/config/system</code></pre>
+
+<h2 id="48-api-路由汇总">4.8 API 路由汇总</h2>
+
+<pre><code>/api/v1
+├── /nodes
+│   ├── GET    /          获取节点列表
+│   ├── POST   /          AI 生成节点（流式）
+│   ├── GET    /:id       获取节点详情
+│   ├── DELETE /:id       删除节点
+│   └── POST   /:id/mock  Mock 测试节点
+│
+├── /workflows
+│   ├── GET    /          获取工作流列表
+│   ├── POST   /          AI 生成工作流（流式）
+│   ├── GET    /:id       获取工作流详情
+│   ├── PUT    /:id       更新工作流
+│   ├── DELETE /:id       删除工作流
+│   ├── POST   /:id/run   执行工作流
+│   └── POST   /:id/mock  Mock 执行工作流
+│
+├── /executions
+│   ├── GET    /          获取执行历史
+│   ├── GET    /:id       获取执行详情
+│   ├── GET    /:id/stream 实时日志流 (SSE)
+│   ├── GET    /:id/logs  查询执行日志
+│   └── POST   /:id/logs/export 导出执行日志
+│
+├── /ai
+│   ├── POST   /chat      AI 对话（流式）
+│   └── GET    /chat/:session_id/history 对话历史
+│
+└── /config
+    ├── GET    /ai        获取 AI 配置列表
+    ├── POST   /ai        添加 AI 配置
+    ├── PUT    /ai/:id    更新 AI 配置
+    ├── DELETE /ai/:id    删除 AI 配置
+    ├── POST   /ai/:id/test 测试 AI 配置
+    ├── GET    /system    获取系统配置
+    └── PUT    /system    更新系统配置</code></pre>
+
+<h2 id="49-错误码定义">4.9 错误码定义</h2>
+
+<table>
+<thead>
+<tr>
+<th>HTTP 状态码</th>
+<th>错误类型</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>200</td>
+<td>success</td>
+<td>请求成功</td>
+</tr>
+<tr>
+<td>400</td>
+<td>bad_request</td>
+<td>请求参数错误</td>
+</tr>
+<tr>
+<td>401</td>
+<td>unauthorized</td>
+<td>API 密钥无效或过期</td>
+</tr>
+<tr>
+<td>404</td>
+<td>not_found</td>
+<td>资源不存在</td>
+</tr>
+<tr>
+<td>409</td>
+<td>conflict</td>
+<td>资源冲突（如名称已存在）</td>
+</tr>
+<tr>
+<td>422</td>
+<td>unprocessable</td>
+<td>请求格式正确但无法处理（如 AI 生成失败）</td>
+</tr>
+<tr>
+<td>429</td>
+<td>rate_limited</td>
+<td>请求频率限制</td>
+</tr>
+<tr>
+<td>500</td>
+<td>internal_error</td>
+<td>服务器内部错误</td>
+</tr>
+<tr>
+<td>502</td>
+<td>bad_gateway</td>
+<td>AI 服务不可用</td>
+</tr>
+<tr>
+<td>504</td>
+<td>timeout</td>
+<td>请求超时</td>
+</tr>
+</tbody>
+</table>
+
+            </article>
+        </main>
+    </div>
+    <div id="mermaid-overlay" class="mermaid-overlay" onclick="closeMermaidFullscreen(event)">
+        <div class="mermaid-overlay-content">
+            <button class="mermaid-close-btn" onclick="closeMermaidFullscreen(event)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+                关闭
+            </button>
+            <div id="mermaid-overlay-diagram"></div>
+            <div class="mermaid-zoom-controls">
+                <button onclick="zoomOut()" title="缩小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <button onclick="zoomIn()" title="放大">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <div class="zoom-separator"></div>
+                <span id="mermaid-scale-display" class="zoom-scale">100%</span>
+                <div class="zoom-separator"></div>
+                <button onclick="zoomFit()" title="适应屏幕">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path>
+                    </svg>
+                </button>
+                <button onclick="zoomReset()" title="原始大小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="1 4 1 10 7 10"></polyline>
+                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>

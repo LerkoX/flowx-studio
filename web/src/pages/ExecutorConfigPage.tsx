@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Server, Container, Cloud } from 'lucide-react'
-import ExecutorList from '@/features/executor-config/ExecutorList'
 import ExecutorForm from '@/features/executor-config/ExecutorForm'
 import ExecutorMonitor from '@/features/executor-config/ExecutorMonitor'
 

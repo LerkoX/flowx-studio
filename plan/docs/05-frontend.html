@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>5. 前端设计 - FlowX Studio</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            themeVariables: {
+                primaryColor: '#1e1e3a',
+                primaryTextColor: '#e2e8f0',
+                primaryBorderColor: '#6366f1',
+                lineColor: '#a855f7',
+                secondaryColor: '#16162a',
+                tertiaryColor: '#0f0f1a',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                fontSize: '14px'
+            },
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            },
+            sequence: {
+                useMaxWidth: true
+            },
+            gantt: {
+                useMaxWidth: true
+            }
+        });
+    </script>
+</head>
+<body>
+    <div class="layout">
+        <nav class="sidebar">
+<div class="nav-header">
+<h2>FlowX Studio</h2>
+<p>技术设计文档</p>
+</div>
+<ul class="nav-links">
+<li><a href="README.html">FlowX Studio 技术设计文档</a></li>
+<li><a href="01-overview.html">1. 项目概述与愿景</a></li>
+<li><a href="02-architecture.html">2. 系统架构设计</a></li>
+<li><a href="03-database.html">3. 数据库设计</a></li>
+<li><a href="04-api.html">4. API 设计</a></li>
+<li><a href="05-frontend.html" class="active">5. 前端设计</a></li>
+<li><a href="06-ai-service.html">6. AI 服务层设计</a></li>
+<li><a href="07-node-system.html">7. 节点系统与执行引擎</a></li>
+<li><a href="08-runtime.html">8. 运行时与部署设计</a></li>
+<li><a href="09-security.html">9. 安全与错误处理设计</a></li>
+<li><a href="10-core-deps.html">10. FlowX 核心库依赖评估</a></li>
+</ul>
+</nav>
+        <main class="content">
+            <article>
+                <h1 id="5-前端设计详细实现方案">5. 前端设计（详细实现方案）</h1>
+
+<h2 id="51-设计哲学">5.1 设计哲学</h2>
+
+<p>FlowX Studio 采用<strong>对话式配置</strong>作为核心交互模式。用户通过与 AI 助手自然语言对话，完成节点生成、工作流编排、执行监控等所有操作。整个过程中<strong>不提供传统的手动配置界面</strong>。</p>
+
+<p>界面设计参考 <strong>Taskade</strong> 和 <strong>n8n</strong> 的视觉风格，追求"未来感、丝滑、精致"的交互体验。</p>
+
+<hr>
+
+<h2 id="52-技术栈">5.2 技术栈</h2>
+
+<table>
+<thead>
+<tr>
+<th>技术</th>
+<th>版本</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>React</td>
+<td>18.x</td>
+<td>UI 框架</td>
+</tr>
+<tr>
+<td>TypeScript</td>
+<td>5.x</td>
+<td>类型系统</td>
+</tr>
+<tr>
+<td>Vite</td>
+<td>5.x</td>
+<td>构建工具</td>
+</tr>
+<tr>
+<td>Tailwind CSS</td>
+<td>3.x</td>
+<td>样式方案</td>
+</tr>
+<tr>
+<td>@xyflow/react</td>
+<td>12.x</td>
+<td>工作流画布（React Flow v12）</td>
+</tr>
+<tr>
+<td>Framer Motion</td>
+<td>11.x</td>
+<td>动画系统</td>
+</tr>
+<tr>
+<td>Lucide React</td>
+<td>最新</td>
+<td>图标库</td>
+</tr>
+<tr>
+<td>Zustand</td>
+<td>4.x</td>
+<td>状态管理</td>
+</tr>
+<tr>
+<td>React Query</td>
+<td>5.x</td>
+<td>服务端状态管理</td>
+</tr>
+<tr>
+<td>Axios</td>
+<td>1.x</td>
+<td>HTTP 客户端</td>
+</tr>
+<tr>
+<td><code>react-markdown</code></td>
+<td>9.x</td>
+<td>Markdown 渲染</td>
+</tr>
+<tr>
+<td><code>react-syntax-highlighter</code></td>
+<td>15.x</td>
+<td>代码语法高亮</td>
+</tr>
+<tr>
+<td><code>dagre</code></td>
+<td>0.8.x</td>
+<td>DAG 自动布局算法</td>
+</tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2 id="53-界面架构3-个核心界面">5.3 界面架构（3 个核心界面）</h2>
+
+<h3 id="531-界面总览">5.3.1 界面总览</h3>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    subgraph Page1["界面 1: AI + 工作流画布"]
+        P1_Sidebar["Sidebar 60/240px"]
+        P1_Canvas["中央画布 React Flow"]
+        P1_Config["右侧面板 Config"]
+        P1_Chat["底部 AI 对话输入栏"]
+    end
+    
+    subgraph Page2["界面 2: AI + 节点生成"]
+        P2_Sidebar["Sidebar 60/240px"]
+        P2_Visual["中央节点可视化面板"]
+        P2_Config["右侧面板 Config"]
+        P2_Chat["底部 AI 对话输入栏"]
+    end
+    
+    subgraph Page3["界面 3: 执行器配置"]
+        P3_Sidebar["Sidebar 60/240px"]
+        P3_Executor["执行器列表 + 配置表单"]
+    end
+    
+    P1_Sidebar --- P1_Canvas --- P1_Config
+    P2_Sidebar --- P2_Visual --- P2_Config
+    P3_Sidebar --- P3_Executor</pre>
+    </div>
+</div>
+
+<h3 id="532-路由设计">5.3.2 路由设计</h3>
+
+<p>使用 React Router v6 的 <code>createBrowserRouter</code> 配置三个路由，所有路由共享一个 Layout 布局组件：</p>
+
+<ul>
+<li><strong><code>/</code>（首页）</strong>：AI + 工作流画布（<code>WorkflowCanvasPage</code>）</li>
+<li><strong><code>/node-generator</code></strong>：AI + 节点生成（<code>NodeGeneratorPage</code>）</li>
+<li><strong><code>/executors</code></strong>：执行器配置（<code>ExecutorConfigPage</code>）</li>
+</ul>
+<p>Layout 组件包裹所有页面，提供 Sidebar 和底部 AI 对话输入栏。</p>
+
+<hr>
+
+<h2 id="54-视觉设计系统">5.4 视觉设计系统</h2>
+
+<h3 id="541-色彩系统">5.4.1 色彩系统</h3>
+
+<p>采用深色主题，以 Indigo 和 Purple 作为品牌渐变色：</p>
+
+<ul>
+<li><strong>主题色</strong>：Indigo (#6366f1) 到 Purple (#a855f7) 的 135deg 线性渐变</li>
+<li><strong>状态色</strong>：</li>
+<li>运行中：Cyan (#22d3ee)</li>
+<li>成功：Emerald (#34d399)</li>
+<li>失败：Rose (#fb7185)</li>
+<li>空闲：Slate (#94a3b8)</li>
+<li><strong>文字色</strong>：三级透明度白色（90%/60%/40%）实现视觉层级</li>
+<li><strong>背景色</strong>：深蓝紫三色渐变背景 + 5% 透明度白色面板</li>
+<li><strong>边框</strong>：10% 透明度白色作为默认边框，Hover 时提升至 20%</li>
+</ul>
+<h3 id="542-毛玻璃glassmorphism规范">5.4.2 毛玻璃（Glassmorphism）规范</h3>
+
+<p>所有浮动面板统一使用毛玻璃效果：</p>
+
+<ul>
+<li>背景为 5% 透明度的白色</li>
+<li><code>backdrop-filter: blur(24px)</code> 高斯模糊</li>
+<li>1px 半透明边框（10% 透明度白色）</li>
+<li>20px 大圆角</li>
+<li>Hover 时背景透明度提升至 8%，边框变亮（20%），添加品牌色阴影（<code>0 8px 32px rgba(99, 102, 241, 0.15)</code>）</li>
+</ul>
+<h3 id="543-节点设计规范n8n-风格">5.4.3 节点设计规范（n8n 风格）</h3>
+
+<p>节点卡片设计要点：</p>
+
+<ul>
+<li>圆角 20px，半透明背景（8% 白色），内阴影营造凹陷感</li>
+<li>顶部 2px 彩色条（根据节点类型变化，默认使用品牌渐变）</li>
+<li>左侧 40px 圆形图标容器，品牌渐变背景，白色图标</li>
+<li>最小宽度 200px，内边距 16px</li>
+<li><strong>选中态</strong>：呼吸灯脉冲动画（青色阴影从中心向外扩散再消失，2s 循环）</li>
+<li><strong>Hover</strong>：轻微放大（scale 1.03）+ 边框高亮 + 品牌色阴影，鼠标变为 grab/grabbing</li>
+</ul>
+<h3 id="544-连线设计规范">5.4.4 连线设计规范</h3>
+
+<ul>
+<li><strong>默认状态</strong>：半透明白色（20%）2px 线条</li>
+<li><strong>激活状态</strong>：Cyan 到 Purple 的 SVG 线性渐变，添加发光滤镜（<code>drop-shadow(0 0 4px cyan)</code>）</li>
+<li><strong>流动动画</strong>：虚线（10px 实线 + 5px 间隙）配合 1s 线性无限偏移动画，模拟数据流动效果</li>
+</ul>
+<h3 id="545-画布背景">5.4.5 画布背景</h3>
+
+<p>多层背景叠加营造星空感：</p>
+
+<ul>
+<li><strong>底层</strong>：三个径向渐变（Indigo/Purple/Cyan 分别位于不同位置），极低透明度</li>
+<li><strong>中层</strong>：深蓝紫三色线性渐变（135deg）</li>
+<li><strong>上层</strong>：24px 间距的点阵网格（1px 圆点，3% 透明度白色）</li>
+</ul>
+<hr>
+
+<h2 id="55-项目结构">5.5 项目结构</h2>
+
+<pre><code>web/
+├── public/
+│   └── favicon.ico
+├── src/
+│   ├── main.tsx                    # 应用入口
+│   ├── App.tsx                     # 根组件
+│   ├── index.css                   # 全局样式 + CSS 变量
+│   ├── router.tsx                  # 路由配置
+│   │
+│   ├── components/                 # 通用组件
+│   │   ├── Layout.tsx              # 页面布局（Sidebar + 内容区）
+│   │   ├── Sidebar.tsx             # 左侧导航栏（可折叠）
+│   │   ├── GlassPanel.tsx          # 毛玻璃面板容器
+│   │   ├── SpotlightCard.tsx       # 鼠标跟随高光卡片
+│   │   ├── GlowNode.tsx            # 霓虹发光节点效果
+│   │   ├── GradientEdge.tsx        # 渐变流动连线
+│   │   ├── ChatInputBar.tsx        # 底部 AI 对话输入栏（悬浮胶囊）
+│   │   ├── ChatMessage.tsx         # 单条聊天消息
+│   │   ├── StreamingText.tsx       # 流式文本渲染
+│   │   ├── AIActionButtons.tsx     # AI 操作按钮组
+│   │   ├── CodeViewer.tsx          # 代码展示（Monaco）
+│   │   ├── YamlViewer.tsx          # YAML 配置展示
+│   │   ├── LogViewer.tsx           # 日志查看器
+│   │   └── StatusBadge.tsx         # 状态标签
+│   │
+│   ├── pages/                      # 页面组件（3 个核心界面）
+│   │   ├── WorkflowCanvasPage.tsx      # 界面 1: AI + 工作流画布
+│   │   ├── NodeGeneratorPage.tsx       # 界面 2: AI + 节点生成
+│   │   └── ExecutorConfigPage.tsx      # 界面 3: 执行器配置
+│   │
+│   ├── features/                   # 功能模块
+│   │   ├── workflow-canvas/        # 工作流画布模块
+│   │   │   ├── WorkflowCanvas.tsx      # 画布主组件
+│   │   │   ├── CustomNode.tsx          # 自定义节点（GlowNode 封装）
+│   │   │   ├── CustomEdge.tsx          # 自定义边（GradientEdge 封装）
+│   │   │   ├── NodeDetailPanel.tsx     # 节点详情右侧面板
+│   │   │   ├── WorkflowConfigPanel.tsx # 工作流配置/YAML 切换面板
+│   │   │   ├── AutoLayout.ts           # DAG 自动布局
+│   │   │   └── useWorkflowCanvas.ts    # 画布状态 Hook
+│   │   │
+│   │   ├── node-visualization/     # 节点可视化模块
+│   │   │   ├── NodeVisualizer.tsx      # 节点可视化主组件
+│   │   │   ├── NodeParamPanel.tsx      # 节点参数面板
+│   │   │   ├── NodeCodePanel.tsx       # 代码展示面板（代码/Mock 切换）
+│   │   │   └── NodeConfigPanel.tsx     # 节点配置右侧面板
+│   │   │
+│   │   ├── chat/                   # AI 聊天模块
+│   │   │   ├── ChatPanel.tsx           # 聊天面板（嵌入各页面底部）
+│   │   │   ├── ChatMessage.tsx         # 单条消息
+│   │   │   ├── ChatInput.tsx           # 输入框
+│   │   │   ├── StreamingText.tsx       # 流式文本
+│   │   │   ├── AIActionButtons.tsx     # 操作按钮
+│   │   │   ├── useChat.ts              # 聊天逻辑 Hook
+│   │   │   └── useChatContext.ts       # 上下文管理
+│   │   │
+│   │   └── executor-config/        # 执行器配置模块
+│   │       ├── ExecutorList.tsx        # 执行器列表
+│   │       ├── ExecutorForm.tsx        # 执行器配置表单
+│   │       └── ExecutorMonitor.tsx     # 执行器监控面板
+│   │
+│   ├── hooks/                      # 自定义 Hooks
+│   │   ├── useSSE.ts               # SSE 实时流
+│   │   ├── useNodes.ts             # 节点数据管理
+│   │   ├── useWorkflows.ts         # 工作流数据管理
+│   │   └── useAIConfig.ts          # AI 配置管理
+│   │
+│   ├── stores/                     # 状态管理 (Zustand)
+│   │   ├── appStore.ts             # 应用级状态（侧边栏折叠、主题等）
+│   │   ├── chatStore.ts            # 聊天状态
+│   │   ├── workflowStore.ts        # 工作流状态
+│   │   ├── nodeStore.ts            # 节点状态
+│   │   └── executionStore.ts       # 执行状态
+│   │
+│   ├── types/                      # TypeScript 类型定义
+│   │   ├── node.ts
+│   │   ├── workflow.ts
+│   │   ├── execution.ts
+│   │   ├── ai.ts
+│   │   └── api.ts
+│   │
+│   ├── utils/                      # 工具函数
+│   │   ├── formatters.ts
+│   │   ├── validators.ts
+│   │   └── constants.ts
+│   │
+│   └── services/                   # 业务服务层
+│       ├── chatContext.ts          # 上下文组装服务
+│       └── layoutEngine.ts         # 布局引擎
+│
+├── index.html
+├── package.json
+├── tsconfig.json
+├── vite.config.ts
+└── tailwind.config.js</code></pre>
+
+<hr>
+
+<h2 id="56-核心组件实现">5.6 核心组件实现</h2>
+
+<h3 id="561-layout-布局组件">5.6.1 Layout 布局组件</h3>
+
+<p>Layout 是整个应用的根布局，采用全屏深色渐变背景，包含以下区域：</p>
+
+<ul>
+<li><strong>左侧 Sidebar</strong>：固定定位，支持折叠（60px/240px 两种宽度），使用 Framer Motion spring 动画实现平滑宽度过渡</li>
+<li><strong>主内容区</strong>：动态 <code>margin-left</code> 跟随 Sidebar 宽度变化，使用 spring 动画避免生硬跳动</li>
+<li><strong>顶部悬浮工具栏</strong>：胶囊形状，绝对定位在顶部中央，包含运行/暂停/缩放/全屏等操作按钮，入场时从上方滑入</li>
+<li><strong>底部 AI 对话输入栏</strong>：通过 <code>AnimatePresence</code> 控制显示/隐藏，支持条件渲染</li>
+</ul>
+<h3 id="562-sidebar-侧边栏组件">5.6.2 Sidebar 侧边栏组件</h3>
+
+<p>可折叠的左侧导航栏，核心功能：</p>
+
+<ul>
+<li><strong>导航项</strong>：三个路由入口（AI 工作流、AI 节点、执行器），使用 Lucide 图标</li>
+<li><strong>激活态高亮</strong>：当前路由项显示白色背景 + 左侧 3px 圆角指示条，使用 Framer Motion 的 <code>layoutId</code> 实现指示条在不同项之间平滑滑动切换</li>
+<li><strong>Logo 区域</strong>：渐变背景的 FX 图标 + FlowX 文字，折叠时文字通过 AnimatePresence 渐隐</li>
+<li><strong>折叠按钮</strong>：底部居中，点击切换 Sidebar 宽度，图标随状态切换为左/右箭头</li>
+<li><strong>动画</strong>：整体宽度变化使用 spring 动画（stiffness: 300, damping: 25）</li>
+</ul>
+<h3 id="563-spotlightcard-组件鼠标跟随高光">5.6.3 SpotlightCard 组件（鼠标跟随高光）</h3>
+
+<p>实现鼠标跟随的径向渐变高光效果，技术要点：</p>
+
+<ul>
+<li>使用 <code>useRef</code> 获取卡片 DOM 引用，<code>useState</code> 记录鼠标坐标和悬停状态</li>
+<li>监听 <code>onMouseMove</code> 事件，通过 <code>getBoundingClientRect</code> 计算鼠标相对于卡片的局部坐标</li>
+<li>在卡片上叠加一层绝对定位的 <code>radial-gradient</code>（600px 圆形，Indigo 15% 透明度），中心点实时跟随鼠标位置</li>
+<li>鼠标离开时（<code>onMouseLeave</code>）渐变透明度渐变为 0，实现平滑消失</li>
+<li>使用 Framer Motion 的 <code>whileHover</code> 实现整体缩放效果（scale 1.02）</li>
+</ul>
+<h3 id="564-glownode-组件霓虹发光节点">5.6.4 GlowNode 组件（霓虹发光节点）</h3>
+
+<p>React Flow 的自定义节点组件，核心特性：</p>
+
+<ul>
+<li><strong>霓虹发光边框</strong>：选中时在最外层显示 <code>conic-gradient</code> 旋转边框动画（3s 线性无限旋转），营造科技感</li>
+<li><strong>状态系统</strong>：idle/running/success/failed/skipped 五种状态，每种状态映射不同的颜色和发光效果：</li>
+<li>running：Cyan 色 + 脉冲发光</li>
+<li>success：Emerald 色</li>
+<li>failed：Rose 色</li>
+<li>idle/skipped：Slate 灰色，无发光</li>
+<li><strong>节点内容结构</strong>：</li>
+<li>顶部 2px 彩色条（颜色可自定义，默认品牌渐变）</li>
+<li>左侧圆形图标容器（渐变背景）</li>
+<li>名称（白色 90%，单行截断）+ 描述（白色 40%，单行截断）</li>
+<li>底部标签行：语言标签 + 状态标签（状态标签带脉冲圆点动画）</li>
+<li><strong>连接点</strong>：顶部输入 Handle（target）和底部输出 Handle（source），3px 圆形，半透明样式</li>
+<li><strong>入场动画</strong>：spring 动画从 scale 0.85 + 下移 10px 过渡到正常状态</li>
+</ul>
+<h3 id="565-gradientedge-组件渐变流动连线">5.6.5 GradientEdge 组件（渐变流动连线）</h3>
+
+<p>React Flow 的自定义边组件：</p>
+
+<ul>
+<li>使用 <code>getBezierPath</code> 计算贝塞尔曲线路径（基于源节点和目标节点的坐标及连接点位置）</li>
+<li>在 SVG <code>defs</code> 中定义线性渐变（Cyan 到 Purple），每条边使用独立 ID 避免冲突</li>
+<li>根据 <code>data</code> 属性动态切换样式：</li>
+<li><code>data.animated</code> 为 true 时：显示虚线（10px 实线 + 5px 间隙）并启用流动动画</li>
+<li><code>data.status</code> 为 active 时：使用渐变描边 + 发光滤镜</li>
+<li>默认状态：半透明白色实线</li>
+</ul>
+<h3 id="566-chatinputbar-组件底部悬浮-ai-对话栏">5.6.6 ChatInputBar 组件（底部悬浮 AI 对话栏）</h3>
+
+<p>底部固定的 AI 输入组件，设计为悬浮胶囊形态：</p>
+
+<ul>
+<li><strong>输入框</strong>：自适应高度的 textarea，支持多行输入：</li>
+<li>Enter 发送消息，Shift+Enter 换行</li>
+<li>自动根据内容高度调整（最大 120px）</li>
+<li>禁用状态下不可输入</li>
+<li><strong>发送按钮</strong>：渐变背景（Indigo 到 Purple），加载时显示旋转 Loader 图标，禁用时空心</li>
+<li>使用 Framer Motion 的 <code>whileHover</code> 和 <code>whileTap</code> 实现缩放反馈</li>
+<li><strong>快捷提示</strong>：输入框下方水平排列"生成节点/创建工作流/Mock 测试/查看日志"等快捷按钮，点击后自动填入输入框并聚焦</li>
+<li><strong>整体样式</strong>：毛玻璃效果（5% 白色背景 + 24px 模糊 + 半透明边框），聚焦时边框和背景变亮</li>
+<li><strong>定位</strong>：绝对定位在底部中央，最大宽度 2xl，两侧留边距</li>
+</ul>
+<hr>
+
+<h2 id="57-三大界面详细设计">5.7 三大界面详细设计</h2>
+
+<h3 id="571-界面-1-ai-工作流画布-workflowcanvaspage">5.7.1 界面 1: AI + 工作流画布 (WorkflowCanvasPage)</h3>
+
+<p>三栏布局：</p>
+
+<ul>
+<li><strong>左侧</strong>：可展开/收起的 AI 对话历史面板（宽度 320px），使用 <code>AnimatePresence</code> 实现滑入/滑出动画（从左侧 -20px 滑入）。通过绝对定位的按钮（◀/▶）控制显示状态</li>
+<li><strong>中央</strong>：<code>WorkflowCanvas</code> 组件（React Flow 画布），占据剩余全部空间</li>
+<li><strong>右侧</strong>：400px 宽配置面板，固定在右侧：</li>
+<li>顶部标签切换："流程图" / "YAML"，使用 <code>layoutId</code> 实现下划线平滑滑动动画</li>
+<li>内容区使用 <code>AnimatePresence mode="wait"</code> 实现标签切换时的淡入淡出过渡</li>
+<li><code>WorkflowConfigPanel</code> 组件根据当前标签渲染不同视图</li>
+</ul>
+<h3 id="572-界面-2-ai-节点生成-nodegeneratorpage">5.7.2 界面 2: AI + 节点生成 (NodeGeneratorPage)</h3>
+
+<p>与界面 1 采用类似的布局模式：</p>
+
+<ul>
+<li><strong>左侧</strong>：可展开/收起的 AI 对话历史面板（与界面 1 相同交互）</li>
+<li><strong>中央</strong>：<code>NodeVisualizer</code> 组件（节点可视化），带内边距的滚动区域</li>
+<li><strong>右侧</strong>：400px 宽配置面板，三标签切换：</li>
+<li>"参数"：显示节点输入参数列表</li>
+<li>"代码"：显示节点实现代码</li>
+<li>"Mock"：显示 Mock 测试配置和结果</li>
+<li>标签切换同样使用 <code>layoutId</code> 下划线动画</li>
+</ul>
+<h3 id="573-界面-3-执行器配置-executorconfigpage">5.7.3 界面 3: 执行器配置 (ExecutorConfigPage)</h3>
+
+<p>两栏布局，无底部 AI 输入栏：</p>
+
+<ul>
+<li><strong>左侧</strong>：执行器类型列表（宽度 320px），三种类型：</li>
+<li>Local（本地 Shell 执行器）</li>
+<li>Docker（Docker 容器执行器）</li>
+<li>Kubernetes（K8s Pod 执行器）</li>
+<li>每项包含图标、名称、描述，选中项高亮（白色背景 + 渐变图标背景）</li>
+<li>使用 Framer Motion 的 <code>whileHover</code> 和 <code>whileTap</code> 实现缩放反馈</li>
+<li><strong>右侧</strong>：上下两部分：</li>
+<li>上部：<code>ExecutorForm</code> 配置表单（根据选中的执行器类型渲染不同表单字段）</li>
+<li>下部：<code>ExecutorMonitor</code> 监控面板（显示状态和资源使用图表）</li>
+</ul>
+<hr>
+
+<h2 id="58-工作流画布模块">5.8 工作流画布模块</h2>
+
+<h3 id="581-workflowcanvas-主组件">5.8.1 WorkflowCanvas 主组件</h3>
+
+<p>基于 React Flow 的工作流可视化画布，核心逻辑：</p>
+
+<ul>
+<li><strong>数据初始化</strong>：从 <code>workflowStore</code> 获取当前工作流的 YAML 配置，解析为节点和边数据：</li>
+<li>使用 <code>parseYaml</code> 解析 YAML 文本</li>
+<li>使用 <code>parseMermaidToFlow</code> 将 Mermaid 图语法转换为 React Flow 的 nodes/edges 格式</li>
+<li>节点状态从 <code>nodeStatuses</code> 注入到每个节点的 <code>data</code> 中</li>
+<li><strong>自动布局</strong>：使用 <code>dagre</code> 算法进行 DAG 自动布局（默认 TB 垂直方向），将计算后的坐标应用到节点</li>
+<li><strong>实时状态同步</strong>：监听 <code>nodeStatuses</code> 变化，使用函数式 <code>setNodes/setEdges</code> 更新：</li>
+<li>节点：根据状态更新颜色配置</li>
+<li>边：源节点 running 时启用流动动画，目标节点 failed 时变红</li>
+<li><strong>交互功能</strong>：</li>
+<li>节点可拖拽（<code>nodesDraggable: true</code>）</li>
+<li>节点可点击选中（触发外部状态更新）</li>
+<li>支持缩放（0.2x ~ 2x）和平移</li>
+<li>自动适配视图（<code>fitView</code>）</li>
+<li><strong>视觉元素</strong>：</li>
+<li><code>Background</code>：点阵网格背景（24px 间距，1px 圆点）</li>
+<li><code>Controls</code>：自定义毛玻璃样式（半透明背景 + 圆角）</li>
+<li><code>MiniMap</code>：小地图，节点颜色根据状态动态映射</li>
+<li><code>Panel</code>：右上角状态面板，显示当前工作流名称</li>
+</ul>
+<h3 id="582-自动布局算法">5.8.2 自动布局算法</h3>
+
+<p>使用 <code>dagre</code> 库实现 DAG 自动布局，流程：</p>
+
+<ul>
+<li>创建 <code>dagre.graphlib.Graph</code> 实例，设置默认边标签</li>
+<li>配置图属性：<code>rankdir</code> 为 TB（垂直）或 LR（水平），节点间距 60px，层间距 100px</li>
+<li>遍历所有节点，设置固定宽高（220x100）</li>
+<li>遍历所有边，建立源节点到目标节点的连接关系</li>
+<li>调用 <code>dagre.layout()</code> 执行布局计算</li>
+<li>将计算结果转换为 React Flow 的 position 格式（坐标居中偏移：减去节点宽高的一半）</li>
+<li>返回布局后的 nodes 和 edges</li>
+</ul>
+<hr>
+
+<h2 id="59-节点可视化模块">5.9 节点可视化模块</h2>
+
+<h3 id="591-nodevisualizer-主组件">5.9.1 NodeVisualizer 主组件</h3>
+
+<p>节点详情展示页面，用于预览 AI 生成的节点：</p>
+
+<ul>
+<li><strong>空状态</strong>：当没有当前节点时，中央显示机器人图标（带摇摆动画）和提示文字，引导用户通过底部 AI 对话栏描述节点需求</li>
+<li><strong>节点头部</strong>：使用 <code>SpotlightCard</code> 包装，包含：</li>
+<li>左侧 48px 渐变图标（品牌色）</li>
+<li>名称（大字号）+ 描述（小字号，灰色）</li>
+<li>右侧语言标签（小圆角标签）</li>
+<li><strong>参数列表</strong>：使用 <code>SpotlightCard</code> 包装，遍历 <code>parameters</code> 数组：</li>
+<li>每个参数水平排列：名称（Indigo 色等宽字体）、类型标签（小圆角）、描述（灰色）、必填标记（红色星号）</li>
+<li>使用 Framer Motion 实现逐项入场动画（stagger 效果）</li>
+<li><strong>Mock 测试结果</strong>：如有 <code>mockResult</code>，使用 <code>SpotlightCard</code> 包装，内部为黑色半透明背景的等宽字体代码块，JSON 格式化展示</li>
+<li>所有卡片均使用 <code>SpotlightCard</code> 实现鼠标跟随高光效果</li>
+</ul>
+<hr>
+
+<h2 id="510-ai-聊天模块">5.10 AI 聊天模块</h2>
+
+<h3 id="5101-chatpanel-组件">5.10.1 ChatPanel 组件</h3>
+
+<p>聊天消息展示面板，支持嵌入各页面：</p>
+
+<ul>
+<li><strong>自动滚动</strong>：使用 <code>useRef</code> 获取滚动容器，通过 <code>useEffect</code> 监听 <code>messages</code> 和 <code>streamingContent</code> 变化，自动将滚动条置底</li>
+<li><strong>欢迎消息</strong>：当消息列表为空时显示，包含：</li>
+<li>机器人图标（Framer Motion 循环摇摆动画，2s 周期）</li>
+<li>"FlowX AI 助手" 标题</li>
+<li>引导文字（说明可以通过对话生成工作流和节点）</li>
+<li><strong>历史消息</strong>：使用 <code>AnimatePresence</code> 包裹消息列表，每条消息入场时从下方淡入（spring 动画，带 stagger delay）</li>
+<li><strong>流式输出</strong>：当 <code>isGenerating</code> 为 true 且存在 <code>streamingContent</code> 时，显示 <code>StreamingText</code> 组件实时渲染流式文本</li>
+<li><strong>加载指示器</strong>：当 AI 正在思考但尚无流式内容时，显示三个圆点跳动动画（Framer Motion，不同 delay 的上下位移，0.6s 周期）</li>
+<li><strong>紧凑模式</strong>：通过 <code>compact</code> prop 控制是否添加底部 padding（非紧凑模式需要为底部输入栏留空）</li>
+</ul>
+<h3 id="5102-logviewer-组件">5.10.2 LogViewer 组件</h3>
+
+<p>日志查看器用于展示执行过程中的实时日志和历史日志，嵌入 WorkflowCanvasPage 的右侧面板或作为独立弹窗。</p>
+
+<p><strong>核心功能</strong>：</p>
+
+<ul>
+<li><strong>实时日志流</strong>：</li>
+<li>通过 SSE <code>/api/v1/executions/:id/stream</code> 接收实时日志</li>
+<li>日志自动追加到底部，保持滚动条在底部（可手动暂停自动滚动）</li>
+<li>新日志条目入场动画：从右侧淡入（100ms）</li>
+</ul>
+<ul>
+<li><strong>日志级别过滤</strong>：</li>
+<li>顶部工具栏提供级别筛选按钮：<code>全部</code> / <code>INFO</code> / <code>WARN</code> / <code>ERROR</code> / <code>DEBUG</code></li>
+<li>选中的级别高亮显示（品牌色背景）</li>
+<li>支持多选组合过滤</li>
+</ul>
+<ul>
+<li><strong>节点过滤</strong>：</li>
+<li>下拉选择框列出当前执行的所有节点</li>
+<li>选择节点后只显示该节点的日志</li>
+<li>支持"只看当前选中节点"快捷切换</li>
+</ul>
+<ul>
+<li><strong>日志条目样式</strong>：</li>
+<li>时间戳：等宽字体，灰色（40% 透明度），格式 <code>HH:MM:SS.ms</code></li>
+<li>级别标签：彩色圆角标签（INFO-绿色、WARN-黄色、ERROR-红色、DEBUG-灰色）</li>
+<li>节点名：Indigo 色等宽字体</li>
+<li>消息内容：白色 90%，自动换行</li>
+<li>错误日志：左侧 2px 红色竖线标识</li>
+</ul>
+<ul>
+<li><strong>搜索高亮</strong>：</li>
+<li>顶部搜索框输入关键词</li>
+<li>匹配的日志条目高亮显示（黄色背景）</li>
+<li>支持正则表达式搜索（可选）</li>
+</ul>
+<ul>
+<li><strong>日志导出</strong>：</li>
+<li>右上角导出按钮，支持导出为 JSON / TXT / Markdown</li>
+<li>导出时可选择时间范围和日志级别</li>
+</ul>
+<ul>
+<li><strong>性能优化</strong>：</li>
+<li>虚拟滚动：超过 500 条日志时启用虚拟滚动</li>
+<li>日志上限：内存中最多保留 5000 条，超出时写入 IndexedDB</li>
+<li>懒加载历史日志：滚动到顶部时自动加载更早的日志</li>
+</ul>
+<p><strong>UI 结构</strong>：</p>
+
+<pre><code>┌─────────────────────────────────┐
+│ 🔍 [搜索框...]    [全部 ▼] [📥] │  ← 工具栏
+├─────────────────────────────────┤
+│ 10:00:01  INFO  [download]      │
+│           开始下载图片...        │
+│ 10:00:02  INFO  [download]      │
+│           下载完成，2048 bytes   │
+│ 10:00:03  WARN  [compress]      │
+│           图片质量降级           │
+│ 10:00:04  ERROR [upload]        │
+│ ┃ 上传失败：连接超时            │  ← 左侧红色竖线
+├─────────────────────────────────┤
+│ [自动滚动 ▼]  共 156 条日志      │  ← 底部状态栏
+└─────────────────────────────────┘</code></pre>
+
+<hr>
+
+<h2 id="511-动效规范">5.11 动效规范</h2>
+
+<h3 id="5111-framer-motion-spring-配置">5.11.1 Framer Motion Spring 配置</h3>
+
+<p>统一提取动画配置到独立文件，避免各处硬编码：</p>
+
+<p>定义四种弹簧效果预设：</p>
+<ul>
+<li><strong>default</strong>（通用交互）：stiffness 300, damping 25, mass 0.8 —— 用于大多数 UI 过渡</li>
+<li><strong>gentle</strong>（柔和过渡）：stiffness 200, damping 20, mass 1 —— 用于较大面积的动画</li>
+<li><strong>bouncy</strong>（弹性效果）：stiffness 400, damping 15, mass 0.6 —— 用于需要弹性的元素</li>
+<li><strong>stiff</strong>（快速响应）：stiffness 500, damping 30, mass 0.5 —— 用于快速反馈</li>
+</ul>
+<p>同时封装常用动画变体供复用：</p>
+<ul>
+<li><code>fadeInUp</code>：从下方 10px 淡入</li>
+<li><code>scaleIn</code>：从 0.85 缩放到 1 并淡入</li>
+<li><code>slideInRight</code>：从右侧 100% 滑入</li>
+<li><code>slideInLeft</code>：从左侧 -20px 滑入并淡入</li>
+</ul>
+<h3 id="5112-css-动画">5.11.2 CSS 动画</h3>
+
+<p>全局 CSS 关键帧动画定义：</p>
+
+<ul>
+<li><strong>rotate</strong>：360度旋转（3s 线性无限），用于霓虹边框的 conic-gradient 旋转</li>
+<li><strong>flowDash</strong>：虚线偏移（-15px），1s 线性无限，用于连线流动效果</li>
+<li><strong>pulse-glow</strong>：脉冲发光（2s ease-in-out 无限），品牌色阴影从 20px 扩散到 40px 再收缩</li>
+<li><strong>float</strong>：上下浮动（3s ease-in-out 无限），-5px 到 0px 位移</li>
+</ul>
+<p>自定义滚动条样式：</p>
+<ul>
+<li>宽度 6px，高度 6px</li>
+<li>轨道透明</li>
+<li>滑块为 10% 透明度白色，圆角 3px，Hover 时提升至 20%</li>
+</ul>
+<p>选中文本样式：品牌色 Indigo 30% 透明度背景，白色文字。</p>
+
+<hr>
+
+<h2 id="512-tailwind-配置">5.12 Tailwind 配置</h2>
+
+<p>在 Tailwind 默认配置基础上扩展自定义主题：</p>
+
+<ul>
+<li><strong>自定义颜色</strong>：</li>
+<li><code>brand.indigo</code>: #6366f1</li>
+<li><code>brand.purple</code>: #a855f7</li>
+<li><code>status.running</code>: #22d3ee</li>
+<li><code>status.success</code>: #34d399</li>
+<li><code>status.error</code>: #fb7185</li>
+<li><code>status.idle</code>: #94a3b8</li>
+<li><strong>字体</strong>：monospace 字体栈（SF Mono, Monaco, Cascadia Code）</li>
+<li><strong>自定义动画</strong>：</li>
+<li><code>flow-dash</code>：1s 线性无限，对应虚线流动</li>
+<li><code>pulse-glow</code>：2s ease-in-out 无限，对应脉冲发光</li>
+<li><code>float</code>：3s ease-in-out 无限，对应上下浮动</li>
+<li><strong>backdropBlur</strong>：扩展 2xl 为 24px</li>
+</ul>
+<hr>
+
+<h2 id="513-状态管理zustand">5.13 状态管理（Zustand）</h2>
+
+<h3 id="5131-应用状态">5.13.1 应用状态</h3>
+
+<p>管理应用级 UI 状态（<code>appStore</code>）：</p>
+
+<ul>
+<li><code>sidebarCollapsed</code>：侧边栏折叠状态（布尔值，默认 false）</li>
+<li><code>theme</code>：当前主题（固定为 'dark'）</li>
+<li><code>toggleSidebar</code>：切换侧边栏折叠状态的动作</li>
+</ul>
+<h3 id="5132-聊天状态">5.13.2 聊天状态</h3>
+
+<p>管理 AI 对话状态（<code>chatStore</code>）：</p>
+
+<ul>
+<li><code>messages</code>：消息列表，包含用户和 AI 的消息对象（id, role, content, timestamp）</li>
+<li><code>isGenerating</code>：是否正在生成 AI 回复（布尔值）</li>
+<li><code>streamingContent</code>：当前流式输出的文本片段（字符串，逐步追加）</li>
+<li><code>sendMessage(content)</code>：发送消息流程：</li>
+<li>构建用户消息对象并追加到 messages</li>
+<li>设置 isGenerating 为 true，清空 streamingContent</li>
+<li>调用后端 SSE API 获取流式响应（实际实现中）</li>
+<li>接收完成后设置 isGenerating 为 false</li>
+<li><code>appendStreamingContent(content)</code>：将新片段追加到 streamingContent</li>
+<li><code>finalizeStreaming()</code>：结束流式输出，重置状态</li>
+<li><code>executeAction(action)</code>：执行 AI 返回的结构化操作指令（如创建节点、更新工作流等）</li>
+</ul>
+<hr>
+
+<h2 id="514-性能优化">5.14 性能优化</h2>
+
+<ol>
+<li><strong>React.memo</strong>: 所有节点组件使用 memo 包裹，避免不必要的重渲染</li>
+<li><strong>ReactFlow 优化</strong>:</li>
+<li><code>onlyRenderVisibleElements: true</code> 只渲染可视区域内元素</li>
+<li>自定义节点使用 <code>memo</code></li>
+<li>状态更新使用函数式 <code>setNodes</code> 避免闭包问题</li>
+<li><strong>Framer Motion</strong>: 使用 <code>layoutId</code> 避免不必要的布局重渲染</li>
+<li><strong>代码分割</strong>: 路由级懒加载，减少首屏加载时间</li>
+<li><strong>图片优化</strong>: 全部使用 SVG 图标（Lucide），避免位图资源</li>
+<li><strong>CSS 优化</strong>: 使用 CSS 变量减少运行时计算，关键动画使用 GPU 加速属性</li>
+</ol>
+<hr>
+
+<h2 id="515-特别组件清单">5.15 特别组件清单</h2>
+
+<table>
+<thead>
+<tr>
+<th>组件</th>
+<th>文件</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>GlowNode</strong></td>
+<td><code>components/GlowNode.tsx</code></td>
+<td>霓虹发光节点，选中时有 conic-gradient 旋转边框</td>
+</tr>
+<tr>
+<td><strong>GradientEdge</strong></td>
+<td><code>components/GradientEdge.tsx</code></td>
+<td>渐变连线，支持动态颜色流动动画</td>
+</tr>
+<tr>
+<td><strong>SpotlightCard</strong></td>
+<td><code>components/SpotlightCard.tsx</code></td>
+<td>鼠标跟随 radial-gradient 高光效果</td>
+</tr>
+<tr>
+<td><strong>GlassPanel</strong></td>
+<td><code>components/GlassPanel.tsx</code></td>
+<td>毛玻璃面板容器</td>
+</tr>
+<tr>
+<td><strong>ChatInputBar</strong></td>
+<td><code>components/ChatInputBar.tsx</code></td>
+<td>底部悬浮 AI 对话输入栏</td>
+</tr>
+<tr>
+<td><strong>Sidebar</strong></td>
+<td><code>components/Sidebar.tsx</code></td>
+<td>可折叠侧边栏，带激活指示条动画</td>
+</tr>
+<tr>
+<td><strong>FloatingToolbar</strong></td>
+<td><code>components/Layout.tsx</code></td>
+<td>悬浮胶囊工具栏</td>
+</tr>
+</tbody>
+</table>
+
+<hr>
+
+<p><em>文档版本: 2.0</em></p>
+<p><em>更新日期: 2024-01</em></p>
+<p><em>主要变更: 从多页面架构重构为 3 界面一体化架构，采用 Taskade/n8n 深色主题风格</em></p>
+
+            </article>
+        </main>
+    </div>
+    <div id="mermaid-overlay" class="mermaid-overlay" onclick="closeMermaidFullscreen(event)">
+        <div class="mermaid-overlay-content">
+            <button class="mermaid-close-btn" onclick="closeMermaidFullscreen(event)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+                关闭
+            </button>
+            <div id="mermaid-overlay-diagram"></div>
+            <div class="mermaid-zoom-controls">
+                <button onclick="zoomOut()" title="缩小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <button onclick="zoomIn()" title="放大">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <div class="zoom-separator"></div>
+                <span id="mermaid-scale-display" class="zoom-scale">100%</span>
+                <div class="zoom-separator"></div>
+                <button onclick="zoomFit()" title="适应屏幕">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path>
+                    </svg>
+                </button>
+                <button onclick="zoomReset()" title="原始大小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="1 4 1 10 7 10"></polyline>
+                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>

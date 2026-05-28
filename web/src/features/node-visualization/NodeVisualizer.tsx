@@ -3,7 +3,7 @@ import SpotlightCard from '@/components/SpotlightCard'
 import { useNodeStore } from '@/stores/nodeStore'
 
 export default function NodeVisualizer() {
-  const { currentNode } = useNodeStore()
+  const { currentNode } = useNodeStore() as { currentNode: any }
 
   if (!currentNode) {
     return (
@@ -39,11 +39,10 @@ export default function NodeVisualizer() {
         </div>
       </SpotlightCard>
 
-      {/* 参数预览 */}
       <SpotlightCard className="p-6">
         <h3 className="text-white/70 font-medium text-sm mb-4">参数</h3>
         <div className="space-y-3">
-          {currentNode.parameters.map((param) => (
+          {currentNode.parameters.map((param: any) => (
             <motion.div
               key={param.name}
               className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/5"
@@ -69,7 +68,7 @@ export default function NodeVisualizer() {
         <SpotlightCard className="p-6">
           <h3 className="text-white/70 font-medium text-sm mb-4">Mock 测试结果</h3>
           <div className="rounded-xl bg-black/30 p-4 font-mono text-xs text-white/60 overflow-auto">
-            <pre>{JSON.stringify(currentNode.mockResult, null, 2)}</pre>
+            <pre>{JSON.stringify(currentNode.mockResult as Record<string, unknown>, null, 2)}</pre>
           </div>
         </SpotlightCard>
       )}

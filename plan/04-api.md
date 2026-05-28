@@ -417,6 +417,75 @@ event: execution_complete
 data: {"execution_id": 42, "status": "success", "duration_ms": 135000, "timestamp": "2025-01-20T10:02:15Z"}
 ```
 
+### 4.5.4 查询执行日志
+
+```http
+GET /api/v1/executions/:id/logs
+```
+
+**查询参数**：
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| node_id | string | 否 | 按节点过滤 |
+| level | string | 否 | 日志级别过滤（支持多级别：info,error） |
+| search | string | 否 | 关键词搜索（message 字段） |
+| limit | integer | 否 | 返回数量，默认 100，最大 1000 |
+| offset | integer | 否 | 分页偏移 |
+
+**响应示例**：
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "items": [
+      {
+        "id": 1024,
+        "execution_id": 42,
+        "node_id": "unsplash_downloader",
+        "node_name": "下载图片",
+        "step_name": "download_image",
+        "level": "info",
+        "message": "开始下载图片: https://unsplash.com/photo.jpg",
+        "output": "HTTP/1.1 200 OK\nContent-Length: 2048...",
+        "timestamp": "2025-01-20T10:00:01Z"
+      },
+      {
+        "id": 1025,
+        "execution_id": 42,
+        "node_id": "unsplash_downloader",
+        "node_name": "下载图片",
+        "level": "info",
+        "message": "图片下载完成，大小: 2048 bytes",
+        "timestamp": "2025-01-20T10:00:02Z"
+      }
+    ],
+    "total": 156,
+    "limit": 100,
+    "offset": 0
+  }
+}
+```
+
+### 4.5.5 导出执行日志
+
+```http
+POST /api/v1/executions/:id/logs/export
+```
+
+**请求体**：
+```json
+{
+  "format": "json",       // json | txt | markdown
+  "node_ids": ["download", "compress"],  // 可选：指定节点
+  "level": "info"         // 可选：最低日志级别
+}
+```
+
+**响应**：
+- Content-Type: `application/json` 或 `text/plain`
+- 返回日志文件下载
+
 ## 4.6 AI 对话 API
 
 ### 4.6.1 通用 AI 对话
@@ -541,7 +610,9 @@ PUT /api/v1/config/system
 ├── /executions
 │   ├── GET    /          获取执行历史
 │   ├── GET    /:id       获取执行详情
-│   └── GET    /:id/stream 实时日志流 (SSE)
+│   ├── GET    /:id/stream 实时日志流 (SSE)
+│   ├── GET    /:id/logs  查询执行日志
+│   └── POST   /:id/logs/export 导出执行日志
 │
 ├── /ai
 │   ├── POST   /chat      AI 对话（流式）

@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2. 系统架构设计 - FlowX Studio</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            themeVariables: {
+                primaryColor: '#1e1e3a',
+                primaryTextColor: '#e2e8f0',
+                primaryBorderColor: '#6366f1',
+                lineColor: '#a855f7',
+                secondaryColor: '#16162a',
+                tertiaryColor: '#0f0f1a',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                fontSize: '14px'
+            },
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            },
+            sequence: {
+                useMaxWidth: true
+            },
+            gantt: {
+                useMaxWidth: true
+            }
+        });
+    </script>
+</head>
+<body>
+    <div class="layout">
+        <nav class="sidebar">
+<div class="nav-header">
+<h2>FlowX Studio</h2>
+<p>技术设计文档</p>
+</div>
+<ul class="nav-links">
+<li><a href="README.html">FlowX Studio 技术设计文档</a></li>
+<li><a href="01-overview.html">1. 项目概述与愿景</a></li>
+<li><a href="02-architecture.html" class="active">2. 系统架构设计</a></li>
+<li><a href="03-database.html">3. 数据库设计</a></li>
+<li><a href="04-api.html">4. API 设计</a></li>
+<li><a href="05-frontend.html">5. 前端设计</a></li>
+<li><a href="06-ai-service.html">6. AI 服务层设计</a></li>
+<li><a href="07-node-system.html">7. 节点系统与执行引擎</a></li>
+<li><a href="08-runtime.html">8. 运行时与部署设计</a></li>
+<li><a href="09-security.html">9. 安全与错误处理设计</a></li>
+<li><a href="10-core-deps.html">10. FlowX 核心库依赖评估</a></li>
+</ul>
+</nav>
+        <main class="content">
+            <article>
+                <h1 id="2-系统架构设计">2. 系统架构设计</h1>
+
+<h2 id="21-项目组织">2.1 项目组织</h2>
+
+<p>本项目（FlowX Studio）是一个<strong>独立仓库</strong>，通过 Go Module 引入 FlowX 核心引擎库。</p>
+
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│                     独立仓库                                  │
+├─────────────────────────────────────────────────────────────┤
+│  github.com/LerkoX/flowx-studio                              │
+│  ├── cmd/flowx-studio/     # CLI 入口                       │
+│  ├── internal/             # 业务逻辑                       │
+│  │   ├── server/           # HTTP 服务层                    │
+│  │   ├── service/          # 业务服务层                    │
+│  │   ├── ai/               # AI 服务层                     │
+│  │   ├── db/               # SQLite 数据层                 │
+│  │   └── runtime/          # FlowX 运行时适配              │
+│  ├── web/                  # React 前端                     │
+│  └── go.mod                # require github.com/LerkoX/flowx │
+├─────────────────────────────────────────────────────────────┤
+│  外部依赖（Go Module）                                        │
+│  github.com/LerkoX/flowx v1.x.x                             │
+│  ├── dag/                  # DAG 引擎                       │
+│  ├── executor/             # 执行器（local/docker/k8s）     │
+│  ├── template/             # 模板引擎                      │
+│  ├── metadata/             # 元数据存储                    │
+│  ├── logger/               # 日志系统                      │
+│  └── core/                 # 核心模型                      │
+└─────────────────────────────────────────────────────────────┘</code></pre>
+
+<h2 id="22-整体架构">2.2 整体架构</h2>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    subgraph UserLayer["用户层"]
+        Browser1["浏览器 Web UI"]
+        Browser2["浏览器 移动端"]
+        CLI["CLI 终端 flowx-studio"]
+    end
+    
+    subgraph HTTPServer["HTTP 服务层"]
+        GoServer["Go HTTP Server net/http"]
+        Static["静态资源服务 go:embed"]
+        API["API 路由 RESTful"]
+        SSE["SSE 日志流"]
+    end
+    
+    subgraph BusinessLayer["业务服务层"]
+        NodeMgmt["节点管理"]
+        WorkflowMgmt["工作流管理"]
+        ExecMgmt["执行管理"]
+        ConfigMgmt["配置管理"]
+    end
+    
+    subgraph AIService["AI 服务层"]
+        OpenAI["OpenAI"]
+        Anthropic["Anthropic"]
+        Ollama["Ollama"]
+    end
+    
+    subgraph StorageLayer["存储服务层"]
+        SQLite["SQLite"]
+    end
+    
+    subgraph FlowXEngine["FlowX 核心引擎层"]
+        DAG["DAG Graph Engine"]
+        Pipeline["Pipeline Execution"]
+        ExecutorMgr["Executor Manager"]
+        Template["Template Engine"]
+        Metadata["Metadata Store"]
+        EventSys["Event System"]
+    end
+    
+    UserLayer --> HTTPServer
+    GoServer --> Static
+    GoServer --> API
+    GoServer --> SSE
+    HTTPServer --> BusinessLayer
+    HTTPServer --> AIService
+    HTTPServer --> StorageLayer
+    BusinessLayer --> FlowXEngine</pre>
+    </div>
+</div>
+
+<h2 id="22-模块划分">2.2 模块划分</h2>
+
+<h3 id="221-http-服务层-internalserver">2.2.1 HTTP 服务层 (internal/server)</h3>
+
+<p><strong>职责</strong>：提供 Web API 和静态资源服务</p>
+
+<p><strong>核心组件</strong>：</p>
+<ul>
+<li><code>Server</code>：HTTP 服务器主结构体，管理路由注册和中间件</li>
+<li><code>Router</code>：API 路由分发，按功能域分组</li>
+<li><code>Middleware</code>：CORS、日志、恢复、请求限流</li>
+<li><code>StaticHandler</code>：前端构建产物静态文件服务（通过 <code>go:embed</code> 嵌入）</li>
+</ul>
+<p><strong>设计要点</strong>：</p>
+<ul>
+<li>使用标准库 <code>net/http</code>，不引入额外 Web 框架，保持二进制体积最小化</li>
+<li>静态资源通过 <code>//go:embed web/dist/*</code> 嵌入二进制，无需外部文件</li>
+<li>SSE（Server-Sent Events）用于实时推送执行日志和状态变更</li>
+</ul>
+<h3 id="222-业务服务层-internalservice">2.2.2 业务服务层 (internal/service)</h3>
+
+<p><strong>职责</strong>：处理核心业务逻辑，协调各子系统</p>
+
+<p><strong>核心服务</strong>：</p>
+<ul>
+<li><code>NodeService</code>：节点注册、查询、Mock 测试执行</li>
+<li><code>WorkflowService</code>：工作流 CRUD、AI 生成、执行触发</li>
+<li><code>ExecutionService</code>：执行状态管理、日志收集、结果存储</li>
+<li><code>ConfigService</code>：AI 配置、系统设置管理</li>
+</ul>
+<p><strong>设计要点</strong>：</p>
+<ul>
+<li>采用依赖注入模式，各服务通过接口解耦</li>
+<li>服务层不直接操作 HTTP 或数据库，通过 Repository 接口隔离</li>
+<li>所有业务操作通过上下文 <code>context.Context</code> 传递，支持超时和取消</li>
+</ul>
+<h3 id="223-ai-服务层-internalai">2.2.3 AI 服务层 (internal/ai)</h3>
+
+<p><strong>职责</strong>：统一封装多 AI 提供商调用</p>
+
+<p><strong>核心组件</strong>：</p>
+<ul>
+<li><code>Provider</code> 接口：抽象所有 AI 提供商的通用能力</li>
+<li><code>OpenAIProvider</code>：OpenAI API 实现</li>
+<li><code>AnthropicProvider</code>：Anthropic Claude API 实现</li>
+<li><code>OllamaProvider</code>：本地 Ollama 服务实现</li>
+<li><code>AIService</code>：高阶业务封装，负责 Prompt 组装和结果解析</li>
+</ul>
+<p><strong>设计要点</strong>：</p>
+<ul>
+<li>统一的请求/响应结构，屏蔽不同提供商的差异</li>
+<li>支持模型能力声明（是否支持函数调用、JSON 模式等）</li>
+<li>内置重试机制和故障转移（主模型失败时切换备用模型）</li>
+</ul>
+<h3 id="224-存储服务层-internaldb">2.2.4 存储服务层 (internal/db)</h3>
+
+<p><strong>职责</strong>：SQLite 数据库操作和迁移管理</p>
+
+<p><strong>核心组件</strong>：</p>
+<ul>
+<li><code>DB</code>：数据库连接管理</li>
+<li><code>Repository</code> 接口：各实体（Node/Workflow/Execution）的数据访问抽象</li>
+<li><code>Migration</code>：数据库版本迁移管理</li>
+</ul>
+<p><strong>设计要点</strong>：</p>
+<ul>
+<li>使用 <code>modernc.org/sqlite</code> 纯 Go SQLite 驱动，无需 CGO</li>
+<li>数据库文件默认存储在用户 home 目录 <code>~/.flowx/flowx.db</code></li>
+<li>支持通过环境变量自定义数据库路径</li>
+</ul>
+<h3 id="225-核心引擎层-复用现有">2.2.5 核心引擎层 (复用现有)</h3>
+
+<p><strong>职责</strong>：保持现有 FlowX 引擎不变，通过适配层集成</p>
+
+<p><strong>集成点</strong>：</p>
+<ul>
+<li><code>RuntimeAdapter</code>：将 Web 层的执行请求转换为 FlowX <code>Runtime</code> 调用</li>
+<li><code>EventBridge</code>：将 FlowX 事件系统（12 种事件）桥接到 Web 层的 SSE 推送</li>
+<li><code>ConfigAdapter</code>：将数据库存储的 YAML 配置转换为 FlowX <code>PipelineConfig</code></li>
+</ul>
+<h2 id="23-模块依赖关系">2.3 模块依赖关系</h2>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    subgraph Studio["flowx-studio (本仓库)"]
+        HTTP[HTTP Server internal/server]
+        Service[Service Layer]
+        AI[AI Service]
+        DB[DB Layer]
+        Runtime[RuntimeAdapter internal/runtime]
+    end
+    
+    subgraph FlowX["github.com/LerkoX/flowx (外部依赖)"]
+        dag[dag package]
+        executor[executor package]
+        template[template package]
+        logger[logger package]
+        metadata[metadata package]
+        core[core package]
+    end
+    
+    HTTP --> Service
+    HTTP --> AI
+    HTTP --> DB
+    Service --> Runtime
+    AI --> Runtime
+    DB --> Runtime
+    Runtime --> FlowX</pre>
+    </div>
+</div>
+
+<p><strong>依赖规则</strong>：</p>
+<ul>
+<li>上层可依赖下层，下层不可反向依赖上层</li>
+<li>同层模块之间通过接口解耦，避免直接依赖</li>
+<li><strong>FlowX 核心库作为外部依赖，不感知 flowx-studio 的存在</strong></li>
+<li>flowx-studio 通过 <code>go.mod</code> 的 <code>require</code> 引入 FlowX 特定版本</li>
+</ul>
+<h2 id="24-数据流设计">2.4 数据流设计</h2>
+
+<h3 id="241-ai-生成节点数据流">2.4.1 AI 生成节点数据流</h3>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    A[用户输入需求] --> B[Frontend发送POST /api/ai/generate-node]
+    B --> C[Server接收请求调用AIService]
+    C --> D[AIService组装Prompt]
+    D --> E[AIProvider调用LLM API]
+    E --> F[AIService解析响应提取节点信息]
+    F --> G[NodeService保存节点到数据库]
+    G --> H[Frontend展示节点详情]</pre>
+    </div>
+</div>
+
+<h3 id="242-工作流执行数据流">2.4.2 工作流执行数据流</h3>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    A[用户点击运行工作流] --> B[Frontend发送POST /api/workflows/:id/run]
+    B --> C[Server调用WorkflowService]
+    C --> D[WorkflowService从数据库读取YAML配置]
+    D --> E[RuntimeAdapter构建FlowX Runtime]
+    E --> F[FlowX Runtime执行DAG工作流]
+    F --> G[EventBridge捕获执行事件]
+    G --> H[SSE Channel实时推送给前端]
+    H --> I[Frontend更新工作流图状态]</pre>
+    </div>
+</div>
+
+<h3 id="243-mock-测试数据流">2.4.3 Mock 测试数据流</h3>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    A[用户点击Mock测试] --> B[Frontend发送POST /api/nodes/:id/mock]
+    B --> C[NodeService读取节点Mock代码]
+    C --> D[MockExecutor在隔离环境运行Mock代码]
+    D --> E[MockExecutor返回模拟结果]
+    E --> F[Frontend展示Mock输出结果]</pre>
+    </div>
+</div>
+
+<h2 id="25-关键技术选型">2.5 关键技术选型</h2>
+
+<table>
+<thead>
+<tr>
+<th>层次</th>
+<th>技术</th>
+<th>选择理由</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>后端语言</td>
+<td>Go 1.25</td>
+<td>复用现有代码库，单二进制编译</td>
+</tr>
+<tr>
+<td>HTTP 服务</td>
+<td><code>net/http</code> 标准库</td>
+<td>避免框架依赖，最小化二进制体积</td>
+</tr>
+<tr>
+<td>数据库</td>
+<td>SQLite (<code>modernc.org/sqlite</code>)</td>
+<td>纯 Go 实现，无需 CGO，零配置</td>
+</tr>
+<tr>
+<td>前端框架</td>
+<td>React 18 + TypeScript</td>
+<td>生态成熟，类型安全</td>
+</tr>
+<tr>
+<td>构建工具</td>
+<td>Vite</td>
+<td>快速构建，热更新</td>
+</tr>
+<tr>
+<td>图可视化</td>
+<td>ReactFlow</td>
+<td>专业的工作流图渲染</td>
+</tr>
+<tr>
+<td>代码编辑</td>
+<td>Monaco Editor</td>
+<td>VS Code 同款，支持多语言高亮</td>
+</tr>
+<tr>
+<td>AI SDK</td>
+<td>官方 SDK / HTTP 客户端</td>
+<td>直接调用各提供商 API</td>
+</tr>
+<tr>
+<td>进程管理</td>
+<td><code>os/exec</code> + Docker API</td>
+<td>复用现有执行器能力</td>
+</tr>
+<tr>
+<td>实时通信</td>
+<td>SSE (Server-Sent Events)</td>
+<td>单向推送足够，比 WebSocket 简单</td>
+</tr>
+</tbody>
+</table>
+
+<h2 id="26-与-flowx-核心库的集成策略">2.6 与 FlowX 核心库的集成策略</h2>
+
+<h3 id="261-flowx-核心库作为外部依赖">2.6.1 FlowX 核心库作为外部依赖</h3>
+
+<p>FlowX 核心库（<code>github.com/LerkoX/flowx</code>）作为独立 Go Module，通过 <code>go.mod</code> 引入：</p>
+
+<pre><code class="language-go">// flowx-studio/go.mod
+module github.com/LerkoX/flowx-studio
+
+go 1.25
+
+require (
+    github.com/LerkoX/flowx v1.2.0
+    // ... 其他依赖
+)</code></pre>
+
+<p><strong>依赖原则</strong>：</p>
+<ul>
+<li>FlowX 核心库保持完全独立，不引入任何 Web/AI 相关代码</li>
+<li>flowx-studio 只使用 FlowX 公开的 API（<code>Runtime</code>、<code>Pipeline</code>、<code>Listener</code> 等接口）</li>
+<li>通过 Go Module 版本管理，锁定依赖的 FlowX 版本</li>
+</ul>
+<h3 id="262-适配层设计">2.6.2 适配层设计</h3>
+
+<p>在 <code>internal/runtime/</code> 创建适配层，桥接 FlowX 核心库与 flowx-studio 业务层：</p>
+
+<pre><code class="language-go">package runtime
+
+import (
+    "context"
+    
+    "github.com/LerkoX/flowx"
+    "github.com/LerkoX/flowx/dag"
+)
+
+// RuntimeAdapter 将 flowx-studio 的执行请求适配到 FlowX Runtime
+type RuntimeAdapter struct {
+    runtime flowx.Runtime
+    eventCh chan Event
+}
+
+// NewRuntimeAdapter 创建适配器
+func NewRuntimeAdapter() *RuntimeAdapter {
+    return &amp;RuntimeAdapter{
+        runtime: flowx.NewRuntime(context.Background()),
+    }
+}
+
+// ExecuteWorkflow 执行工作流并实时推送事件
+func (ra *RuntimeAdapter) ExecuteWorkflow(ctx context.Context, workflowID string, yamlConfig string) error {
+    // 1. 注册 FlowX 事件监听器
+    listener := &amp;studioListener{
+        eventCh: ra.eventCh,
+        pipelineID: workflowID,
+    }
+    
+    // 2. 调用 FlowX Runtime 异步执行
+    _, err := ra.runtime.RunAsync(ctx, workflowID, yamlConfig, listener)
+    return err
+}
+
+// studioListener 实现 dag.Listener 接口
+type studioListener struct {
+    eventCh    chan Event
+    pipelineID string
+}
+
+func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
+    // 将 FlowX 事件转换为 flowx-studio 内部事件
+    l.eventCh &lt;- Event{
+        Type:       string(event),
+        PipelineID: l.pipelineID,
+        Status:     p.Status(),
+    }
+}
+
+func (l *studioListener) Events() []dag.Event {
+    return []dag.Event{
+        dag.PipelineStart,
+        dag.PipelineFinish,
+        dag.PipelineNodeStart,
+        dag.PipelineNodeFinish,
+        dag.PipelinePaused,
+        dag.PipelineResumed,
+    }
+}</code></pre>
+
+<h3 id="263-命令行入口">2.6.3 命令行入口</h3>
+
+<p>flowx-studio 的 CLI 入口：</p>
+
+<pre><code class="language-go">// cmd/flowx-studio/main.go
+func main() {
+    switch os.Args[1] {
+    case "version":
+        printVersion()
+    case "help":
+        printHelp()
+    default:
+        // 默认启动 Web UI
+        runServer()
+    }
+}</code></pre>
+
+<p><strong>注意</strong>：FlowX 核心库原有的 <code>flowx run workflow.yaml</code> CLI 功能保持在核心库中，flowx-studio 不提供此命令。</p>
+
+            </article>
+        </main>
+    </div>
+    <div id="mermaid-overlay" class="mermaid-overlay" onclick="closeMermaidFullscreen(event)">
+        <div class="mermaid-overlay-content">
+            <button class="mermaid-close-btn" onclick="closeMermaidFullscreen(event)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+                关闭
+            </button>
+            <div id="mermaid-overlay-diagram"></div>
+            <div class="mermaid-zoom-controls">
+                <button onclick="zoomOut()" title="缩小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <button onclick="zoomIn()" title="放大">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <div class="zoom-separator"></div>
+                <span id="mermaid-scale-display" class="zoom-scale">100%</span>
+                <div class="zoom-separator"></div>
+                <button onclick="zoomFit()" title="适应屏幕">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path>
+                    </svg>
+                </button>
+                <button onclick="zoomReset()" title="原始大小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="1 4 1 10 7 10"></polyline>
+                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>

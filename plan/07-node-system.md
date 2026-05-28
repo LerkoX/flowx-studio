@@ -33,18 +33,14 @@ type Parameter struct {
 
 ### 7.1.2 节点生命周期
 
-```
-生成中 (AI 生成代码)
-    │
-    ▼
-已注册 (保存到数据库)
-    │
-    ├── Mock 测试 ──► 测试通过 ──► 可用
-    │                    │
-    │                    ▼
-    │               测试失败 ──► 回到生成中（AI 修复）
-    │
-    └── 被工作流引用 ──► 执行
+```mermaid
+flowchart TD
+    A[生成中 AI生成代码] --> B[已注册 保存到数据库]
+    B --> C[Mock测试]
+    C -->|测试通过| D[可用]
+    C -->|测试失败| A
+    B --> E[被工作流引用]
+    E --> F[执行]
 ```
 
 ### 7.1.3 节点版本管理
@@ -245,32 +241,20 @@ func (e *MockExecutor) Execute(ctx context.Context, node *db.Node, params map[st
 
 ### 7.3.3 Mock 测试流程
 
-```
-用户点击 Mock 测试
-    │
-    ▼
-[Frontend] 发送 POST /api/nodes/:id/mock
-    │
-    ▼
-[Server] 读取节点 Mock 代码
-    │
-    ▼
-[MockExecutor] 创建隔离环境
-    │
-    ├── Docker 可用？
-    │   ├── 是 → 启动容器，挂载代码，执行
-    │   └── 否 → 使用受限进程执行
-    │
-    ▼
-[MockExecutor] 收集输出（stdout/stderr）
-    │
-    ▼
-[Server] 解析 JSON 输出
-    │
-    ▼
-[Frontend] 展示结果
-    ├── 成功：显示输出数据和日志
-    └── 失败：显示错误信息和日志
+```mermaid
+flowchart TD
+    A[用户点击Mock测试] --> B[Frontend发送POST /api/nodes/:id/mock]
+    B --> C[Server读取节点Mock代码]
+    C --> D[MockExecutor创建隔离环境]
+    D --> E{Docker可用?}
+    E -->|是| F[启动容器执行]
+    E -->|否| G[使用受限进程执行]
+    F --> H[收集输出]
+    G --> H
+    H --> I[Server解析JSON输出]
+    I --> J{结果}
+    J -->|成功| K[显示输出数据和日志]
+    J -->|失败| L[显示错误信息和日志]
 ```
 
 ## 7.4 执行引擎集成
@@ -419,32 +403,116 @@ func (s *ExecutionService) runExecution(executionID int64) {
 
 ## 7.5 执行日志管理
 
-### 7.5.1 日志收集
+### 7.5.1 日志架构
 
-FlowX 引擎执行时产生的日志需要实时收集并推送：
+```mermaid
+flowchart LR
+    A[FlowX 引擎] --> B[logger.Pusher]
+    B --> C[LogCollector]
+    C --> D{实时?}
+    D -->|是| E[SSE Channel]
+    D -->|否| F[SQLite execution_logs]
+    E --> G[前端 LogViewer]
+    F --> H[历史日志查询]
+```
 
-1. **节点标准输出**：捕获 stdout/stderr
-2. **引擎事件**：节点开始、完成、失败等
-3. **系统日志**：执行器生命周期、超时等
+### 7.5.2 日志收集
 
-### 7.5.2 日志存储
+FlowX 引擎执行时产生的日志通过三层架构收集：
 
-日志存储策略：
+1. **Pusher 层**：FlowX 核心库的 `logger.Pusher` 接口推送日志
+2. **Collector 层**：`LogCollector` 组件接收并分发日志
+3. **存储层**：实时推送至前端 + 持久化到数据库
 
-- **实时日志**：存储在内存中，通过 SSE 推送，执行完成后写入数据库
-- **历史日志**：存储在数据库 `execution_nodes.logs` 字段
-- **日志清理**：定期清理超过 30 天的执行日志
+**日志来源**：
+- **节点标准输出**：捕获 stdout/stderr（Python print、Go fmt 等）
+- **引擎事件**：节点开始、完成、失败等状态变更
+- **系统日志**：执行器生命周期、超时、资源限制触发等
+- **AI 服务日志**：节点生成、工作流编排等操作记录
 
-### 7.5.3 日志格式
+### 7.5.3 实时日志推送
+
+通过 SSE 实时推送执行日志到前端：
+
+```go
+type LogCollector struct {
+    sseClients map[int64][]chan LogEntry  // execution_id -> clients
+    mu         sync.RWMutex
+}
+
+func (c *LogCollector) Collect(entry LogEntry) {
+    // 1. 保存到数据库
+    c.saveToDB(entry)
+    
+    // 2. 推送到 SSE 客户端
+    c.pushToClients(entry.ExecutionID, entry)
+}
+
+func (c *LogCollector) pushToClients(executionID int64, entry LogEntry) {
+    c.mu.RLock()
+    clients := c.sseClients[executionID]
+    c.mu.RUnlock()
+    
+    for _, ch := range clients {
+        select {
+        case ch <- entry:
+        default: // 客户端消费慢，丢弃旧日志
+        }
+    }
+}
+```
+
+### 7.5.4 日志存储
+
+**实时日志**：
+- 存储在内存环形缓冲区（每个执行最多 1000 条）
+- 通过 SSE 实时推送到前端
+- 执行完成后批量写入数据库
+
+**历史日志**：
+- 存储在 `execution_logs` 表（见 3.3.5 节）
+- 支持按执行 ID、节点 ID、日志级别查询
+- 分页加载，每页默认 100 条
+
+**日志清理**：
+- 自动清理：每天凌晨清理超过 30 天的日志
+- 手动清理：提供 API 按执行 ID 清理
+- 保留策略：可配置保留天数（默认 30 天）
+
+### 7.5.5 日志格式
 
 ```json
 {
-  "timestamp": "2025-01-20T10:00:01Z",
-  "level": "info",
+  "id": 1024,
+  "execution_id": 42,
   "node_id": "download",
-  "message": "开始下载图片: https://example.com/image.jpg"
+  "node_name": "下载图片",
+  "step_name": "download_image",
+  "level": "info",
+  "message": "开始下载图片: https://example.com/image.jpg",
+  "output": "HTTP/1.1 200 OK\nContent-Length: 2048...",
+  "timestamp": "2025-01-20T10:00:01.123Z"
 }
 ```
+
+**级别定义**：
+| 级别 | 颜色 | 使用场景 |
+|------|------|---------|
+| `debug` | 灰色 | 开发调试、详细的执行跟踪 |
+| `info` | 青色 | 节点开始/完成、正常操作 |
+| `warn` | 黄色 | 超时、降级、资源限制触发 |
+| `error` | 红色 | 节点执行失败、异常错误 |
+| `fatal` | 深红 | 系统级致命错误 |
+
+### 7.5.6 日志查询 API
+
+后端提供日志查询接口（详见 4.5.4 节）：
+- 按执行 ID 查询日志列表
+- 按节点 ID 过滤
+- 按日志级别过滤
+- 关键词搜索（message 字段）
+- 分页加载（limit/offset）
+- 导出日志为 JSON / TXT / Markdown
 
 ## 7.6 执行超时与取消
 

@@ -19,7 +19,7 @@ export function useSSE(url: string) {
       setData(event.data)
     }
 
-    es.onerror = (err) => {
+    es.onerror = () => {
       setError(new Error('SSE connection error'))
       setIsConnected(false)
     }

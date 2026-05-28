@@ -102,14 +102,12 @@ type Node interface {
 
 完全满足 Web 层对节点状态监控的需求。
 
-### 10.2.4 Listener 事件机制 —— **建议增强**
+### 10.2.4 Listener 事件机制 —— **已增强** ✅
 
-```go
 type Listener interface {
     Handle(p Pipeline, event Event)
     Events() []Event
 }
-```
 
 **现有事件类型**：
 ```go
@@ -120,28 +118,62 @@ PipelineExecutorPrepare     // 流水线执行器开始准备
 PipelineExecutorPrepareDone // 流水线执行器准备完毕
 PipelineNodeStart           // 节点开始
 PipelineNodeFinish          // 节点完成
+PipelineNodeFailed          // 节点执行失败（新增）
 PipelinePaused              // 流水线暂停
 PipelineResumed             // 流水线恢复
 PipelineGraphModified       // 图被修改
 ```
 
-**问题分析**：
+**解决方案**：通过 `Pipeline.CurrentNode()` 获取当前节点上下文
 
-在 `pipeline_execution.go` 中：
+在 `pipeline_execution.go` 中，`executeNodeWithLifecycle` 执行期间会在 Pipeline 上设置当前节点：
 ```go
 func (p *PipelineImpl) executeNodeWithLifecycle(ctx context.Context, node Node) error {
-    // ...
-    p.NotifyEvent(PipelineNodeStart)  // 未传入 node
-    // ...
-    p.NotifyEvent(PipelineNodeFinish) // 未传入 node
+    p.mu.Lock()
+    p.currentNode = node
+    p.mu.Unlock()
+    
+    p.NotifyEvent(PipelineNodeStart)
+    // ... 执行 ...
+    p.NotifyEvent(PipelineNodeFinish)
+    
+    p.mu.Lock()
+    p.currentNode = nil
+    p.mu.Unlock()
 }
 ```
 
-`NotifyEvent` 触发事件时**没有传入当前节点信息**，导致 Listener 的 `Handle` 方法只能收到 Pipeline 和 Event 类型，无法直接判断是哪个节点触发了事件。
+Listener 可通过 `p.CurrentNode()` 直接获取触发事件的节点：
+```go
+func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
+    switch event {
+    case dag.PipelineNodeStart:
+        if node := p.CurrentNode(); node != nil {
+            l.eventCh <- Event{
+                Type:   "node_start",
+                NodeID: node.Id(),
+            }
+        }
+    case dag.PipelineNodeFinish:
+        if node := p.CurrentNode(); node != nil {
+            l.eventCh <- Event{
+                Type:   "node_complete",
+                NodeID: node.Id(),
+                Status: node.GetRuntimeStatus().Status,
+            }
+        }
+    case dag.PipelineNodeFailed:
+        if node := p.CurrentNode(); node != nil {
+            l.eventCh <- Event{
+                Type:   "node_failed",
+                NodeID: node.Id(),
+            }
+        }
+    }
+}
+```
 
-**对 flowx-studio 的影响**：
-- Web 层收到 `PipelineNodeStart` 时，需要遍历所有节点，对比前后状态变化来推断哪个节点开始执行 —— 效率低且不可靠
-- 实时工作流图的状态高亮（节点变蓝/绿/红）需要精确的节点级事件
+**评估结论**：通过 `CurrentNode()` 接口，Listener 可精确获取事件关联的节点，无需遍历全图。完全满足 flowx-studio 的节点级事件需求。
 
 ### 10.2.5 Logger Pusher —— 满足
 
@@ -183,219 +215,152 @@ type Entry struct {
 
 **评估结论**：满足需求，无需核心库增强。
 
-## 10.3 建议增强项
+## 10.3 已实现增强项 ✅
 
-### 10.3.1 【建议】Pipeline 接口新增 CurrentNode() 方法
+### 10.3.1 Pipeline 接口新增 CurrentNode() 方法 —— **已实现**
 
-**问题**：Listener 事件缺少节点上下文
+**状态**：✅ 已在 `feat/studio-enhancements` 分支实现并合并
 
-**建议方案**（最小侵入式）：
+**实现文件**：
+- `dag/pipeline.go` —— Pipeline 接口添加 `CurrentNode() Node`
+- `dag/pipeline_impl.go` —— PipelineImpl 添加 `currentNode` 字段 + 线程安全实现
+- `dag/pipeline_execution.go` —— `executeNodeWithLifecycle` 中设置/清理
 
-在 `Pipeline` 接口中新增一个方法：
+**验证**：通过单元测试 `TestCurrentNode_*`
 
-```go
-type Pipeline interface {
-    // 现有方法...
-    
-    // 新增：返回当前正在执行的节点（如有）
-    CurrentNode() Node
-}
-```
-
-在 `PipelineImpl` 中实现：
-
-```go
-func (p *PipelineImpl) CurrentNode() Node {
-    p.mu.RLock()
-    defer p.mu.RUnlock()
-    return p.currentNode
-}
-```
-
-在 `executeNodeWithLifecycle` 中设置：
-
-```go
-func (p *PipelineImpl) executeNodeWithLifecycle(ctx context.Context, node Node) error {
-    p.mu.Lock()
-    p.currentNode = node
-    p.mu.Unlock()
-    
-    p.NotifyEvent(PipelineNodeStart)
-    // ... 执行 ...
-    p.NotifyEvent(PipelineNodeFinish)
-    
-    p.mu.Lock()
-    p.currentNode = nil
-    p.mu.Unlock()
-    
-    return nil
-}
-```
-
-**flowx-studio 使用方式**：
-
+**使用方式**：
 ```go
 func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
     switch event {
     case dag.PipelineNodeStart:
-        node := p.CurrentNode()
-        if node != nil {
+        if node := p.CurrentNode(); node != nil {
+            l.eventCh <- Event{Type: "node_start", NodeID: node.Id()}
+        }
+    case dag.PipelineNodeFinish:
+        if node := p.CurrentNode(); node != nil {
+            l.eventCh <- Event{Type: "node_complete", NodeID: node.Id()}
+        }
+    }
+}
+```
+
+### 10.3.2 新增 PipelineNodeFailed 事件 —— **已实现**
+
+**状态**：✅ 已实现
+
+**实现文件**：
+- `core/const.go` —— 新增 `EventPipelineNodeFailed = "pipeline-node-failed"`
+- `dag/pipeline.go` —— 新增 `PipelineNodeFailed` 事件变量
+- `dag/pipeline_execution.go` —— 节点执行失败时触发该事件
+
+**使用方式**：
+```go
+case dag.PipelineNodeFailed:
+    if node := p.CurrentNode(); node != nil {
+        l.eventCh <- Event{Type: "node_failed", NodeID: node.Id()}
+    }
+```
+
+### 10.3.3 Runtime 接口新增 ListPipelines() 方法 —— **已实现**
+
+**状态**：✅ 已实现
+
+**实现文件**：
+- `runtime.go` —— Runtime 接口添加 `ListPipelines() []string`
+- `runtime_impl.go` —— RuntimeImpl 实现方法
+
+**使用方式**：
+```go
+activeIDs := runtime.ListPipelines()
+for _, id := range activeIDs {
+    pipeline, _ := runtime.Get(id)
+    fmt.Printf("Pipeline %s status: %s\n", id, pipeline.Status())
+}
+```
+
+## 10.4 事件桥接实现策略
+
+### 10.4.1 推荐方案：基于 CurrentNode() 的精确事件推送
+
+由于核心库已增强 `CurrentNode()` 和 `PipelineNodeFailed` 事件，flowx-studio 可直接采用精确事件方案：
+
+```go
+type studioListener struct {
+    eventCh chan Event
+}
+
+func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
+    switch event {
+    case dag.PipelineNodeStart:
+        if node := p.CurrentNode(); node != nil {
             l.eventCh <- Event{
                 Type:   "node_start",
                 NodeID: node.Id(),
+                Status: node.GetRuntimeStatus().Status,
             }
         }
     case dag.PipelineNodeFinish:
-        node := p.CurrentNode()
-        if node != nil {
+        if node := p.CurrentNode(); node != nil {
             l.eventCh <- Event{
                 Type:   "node_complete",
                 NodeID: node.Id(),
                 Status: node.GetRuntimeStatus().Status,
             }
         }
-    }
-}
-```
-
-**影响范围**：新增方法，不影响现有接口的兼容性。
-
-### 10.3.2 【可选】新增 PipelineNodeFailed 事件
-
-**问题**：节点失败时只触发 `PipelineNodeFinish`，需要额外判断状态才能区分成功/失败
-
-**建议**：在节点执行失败时单独触发 `PipelineNodeFailed` 事件：
-
-```go
-// dag/pipeline.go
-var (
-    // 现有事件...
-    PipelineNodeFailed Event = core.EventPipelineNodeFailed // 节点执行失败
-)
-```
-
-**优先级**：低，可通过 `PipelineNodeFinish` + 状态判断替代。
-
-### 10.3.3 【可选】Runtime 接口新增 ListPipelines() 方法
-
-**问题**：Runtime 内部维护了 `pipelines` map，但没有公开方法列出所有活跃的流水线
-
-**建议**：
-
-```go
-type Runtime interface {
-    // 现有方法...
-    
-    // 新增：列出所有活跃的流水线
-    ListPipelines() []string
-}
-```
-
-**优先级**：低，flowx-studio 可自行维护执行 ID 列表。
-
-## 10.4 适配层实现策略
-
-### 10.4.1 事件桥接（基于现有接口）
-
-在核心库未增强前，flowx-studio 可通过以下策略处理节点事件：
-
-**方案 A：状态对比法**
-
-```go
-type studioListener struct {
-    eventCh       chan Event
-    pipelineID    string
-    prevNodeStates map[string]string // 记录上一轮节点状态
-}
-
-func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
-    switch event {
-    case dag.PipelineNodeStart, dag.PipelineNodeFinish:
-        // 遍历所有节点，对比状态变化
-        graph := p.GetGraph()
-        for nodeID, node := range graph.Nodes() {
-            status := ""
-            if rs := node.GetRuntimeStatus(); rs != nil {
-                status = rs.Status
-            }
-            
-            prevStatus := l.prevNodeStates[nodeID]
-            if status != prevStatus {
-                l.prevNodeStates[nodeID] = status
-                l.eventCh <- Event{
-                    Type:   "node_status_change",
-                    NodeID: nodeID,
-                    Status: status,
-                }
+    case dag.PipelineNodeFailed:
+        if node := p.CurrentNode(); node != nil {
+            l.eventCh <- Event{
+                Type:   "node_failed",
+                NodeID: node.Id(),
+                Status: core.StatusFailed,
             }
         }
+    case dag.PipelinePaused:
+        l.eventCh <- Event{Type: "pipeline_paused"}
+    case dag.PipelineResumed:
+        l.eventCh <- Event{Type: "pipeline_resumed"}
     }
 }
 ```
 
-**缺点**：效率较低，每次事件触发都要遍历所有节点。
-
-**方案 B：Pusher + 状态轮询法**
-
-```go
-// 1. 自定义 Pusher 捕获日志（已知 Node 字段）
-type ssePusher struct {
-    eventCh chan Event
-}
-
-func (p *ssePusher) Push(ctx context.Context, entry logger.Entry) error {
-    p.eventCh <- Event{
-        Type:   "node_log",
-        NodeID: entry.Node,
-        Level:  string(entry.Level),
-        Message: entry.Message,
-    }
-    return nil
-}
-
-// 2. 定期轮询 Pipeline 状态
-func (ra *RuntimeAdapter) pollPipelineStatus(pipelineID string) {
-    ticker := time.NewTicker(500 * time.Millisecond)
-    defer ticker.Stop()
-    
-    for range ticker.C {
-        pipeline, err := ra.runtime.Get(pipelineID)
-        if err != nil {
-            return // 流水线已结束
-        }
-        
-        // 遍历节点状态并推送变更
-        for nodeID, node := range pipeline.GetGraph().Nodes() {
-            status := ""
-            if rs := node.GetRuntimeStatus(); rs != nil {
-                status = rs.Status
-            }
-            // 推送状态...
-        }
-    }
-}
-```
-
-**推荐**：采用方案 B 作为过渡方案，同时向 FlowX 核心库提交增强建议（10.3.1）。
+**优势**：
+- 无需遍历全图，O(1) 获取当前节点
+- 精确的节点级事件，支持实时状态高亮
+- 原生支持失败事件，无需状态推断
 
 ## 10.5 版本兼容性矩阵
 
 | flowx-studio 版本 | 依赖 FlowX 版本 | 兼容性说明 |
 |-------------------|----------------|-----------|
-| v0.1.0 | v1.2.0+ | 初始版本，使用过渡方案处理节点事件 |
-| v0.2.0 | v1.3.0+ | 利用 FlowX 新增 `CurrentNode()` 接口，优化事件处理 |
+| v0.1.0 | v1.3.0+ | 初始版本，直接使用 `CurrentNode()` 和 `PipelineNodeFailed` 接口 |
 
-## 10.6 向 FlowX 核心库提交的建议
+> **注意**：所有增强功能已合并到 FlowX 主分支，flowx-studio v0.1.0 可直接依赖最新版本，无需过渡方案。
 
-建议以 Issue/PR 形式向 `github.com/LerkoX/flowx` 提交以下改进：
+## 10.6 实现记录
 
-1. **Issue**: "Pipeline 接口缺少 CurrentNode() 方法，导致外部监听器无法识别事件关联的节点"
-   - 说明使用场景（可视化工作流监控）
-   - 提供建议的实现方案（10.3.1）
-   - 强调向后兼容性（新增方法，不影响现有代码）
+所有增强功能已在 `github.com/LerkoX/flowx` 的 `feat/studio-enhancements` 分支实现并验证：
 
-2. **PR**: 实现 `CurrentNode()` 方法
-   - 修改 `dag/Pipeline` 接口
-   - 在 `PipelineImpl` 中实现
-   - 在 `executeNodeWithLifecycle` 中设置/清理
-   - 添加单元测试
+### 已实现功能清单
+
+| # | 功能 | 状态 | 验证 |
+|---|------|------|------|
+| 1 | `Pipeline.CurrentNode()` | ✅ 已合并 | `TestCurrentNode_*` |
+| 2 | `PipelineNodeFailed` 事件 | ✅ 已合并 | `TestPipelineNodeFailed_*` |
+| 3 | `Runtime.ListPipelines()` | ✅ 已合并 | `TestListPipelines_*` |
+
+### 相关提交
+
+- **分支**: `feat/studio-enhancements`
+- **修改文件**:
+  - `dag/pipeline.go` —— 接口扩展
+  - `dag/pipeline_impl.go` —— `currentNode` 字段 + 实现
+  - `dag/pipeline_execution.go` —— 生命周期中设置/清理
+  - `core/const.go` —— 新增事件常量
+  - `runtime.go` —— 接口扩展
+  - `runtime_impl.go` —— `ListPipelines()` 实现
+  - `dag/pipeline_studio_test.go` —— 新增测试（新增文件）
+  - `runtime_test.go` —— 新增测试
+
+### 向后兼容性
+
+所有增强均为**新增接口/方法**，不修改现有接口签名，完全向后兼容。现有代码无需任何调整。

@@ -32,51 +32,55 @@
 
 ## 2.2 整体架构
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        用户层                                    │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-│  │   浏览器     │  │   浏览器     │  │      CLI 终端        │  │
-│  │  (Web UI)    │  │  (移动端)    │  │   (flowx-studio)     │  │
-│  └──────┬───────┘  └──────┬───────┘  └──────────┬───────────┘  │
-└─────────┼─────────────────┼─────────────────────┼──────────────┘
-          │                 │                     │
-          └─────────────────┴─────────────────────┘
-                            │
-┌───────────────────────────▼─────────────────────────────────────┐
-│                      HTTP 服务层 (flowx-studio)                  │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │              Go HTTP Server (net/http)                  │   │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐ │   │
-│  │  │ 静态资源服务 │  │  API 路由   │  │  SSE 日志流     │ │   │
-│  │  │ (go:embed)  │  │  (RESTful)  │  │  (实时监控)     │ │   │
-│  │  └─────────────┘  └─────────────┘  └─────────────────┘ │   │
-│  └─────────────────────────────────────────────────────────┘   │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │
-          ┌─────────────────┼─────────────────┐
-          │                 │                 │
-┌─────────▼─────────┐ ┌────▼──────┐ ┌───────▼────────┐
-│     业务服务层     │ │  AI 服务层 │ │   存储服务层   │
-│  ┌─────────────┐  │ ┌─────────┐ │ ┌──────────────┐│
-│  │ 节点管理    │  │ │ OpenAI  │ │ │   SQLite     ││
-│  │ 工作流管理  │  │ │Anthropic│ │ │  (本地文件)  ││
-│  │ 执行管理    │  │ │ Ollama  │  │ │              ││
-│  │ 配置管理    │  │ │ ...     │  │ └──────────────┘│
-│  └─────────────┘  │ └─────────┘ │
-└─────────┬─────────┘ └───────────┘
-          │
-┌─────────▼───────────────────────────────────────────────────────┐
-│              FlowX 核心引擎层 (外部依赖)                          │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐│
-│  │ DAG Graph   │  │  Pipeline   │  │   Executor Manager      ││
-│  │   Engine    │  │  Execution  │  │  (local/docker/k8s)     ││
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘│
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐│
-│  │   Template  │  │   Metadata  │  │      Event System       ││
-│  │   Engine    │  │    Store    │  │    (12 event types)     ││
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘│
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph UserLayer["用户层"]
+        Browser1["浏览器 Web UI"]
+        Browser2["浏览器 移动端"]
+        CLI["CLI 终端 flowx-studio"]
+    end
+    
+    subgraph HTTPServer["HTTP 服务层"]
+        GoServer["Go HTTP Server net/http"]
+        Static["静态资源服务 go:embed"]
+        API["API 路由 RESTful"]
+        SSE["SSE 日志流"]
+    end
+    
+    subgraph BusinessLayer["业务服务层"]
+        NodeMgmt["节点管理"]
+        WorkflowMgmt["工作流管理"]
+        ExecMgmt["执行管理"]
+        ConfigMgmt["配置管理"]
+    end
+    
+    subgraph AIService["AI 服务层"]
+        OpenAI["OpenAI"]
+        Anthropic["Anthropic"]
+        Ollama["Ollama"]
+    end
+    
+    subgraph StorageLayer["存储服务层"]
+        SQLite["SQLite"]
+    end
+    
+    subgraph FlowXEngine["FlowX 核心引擎层"]
+        DAG["DAG Graph Engine"]
+        Pipeline["Pipeline Execution"]
+        ExecutorMgr["Executor Manager"]
+        Template["Template Engine"]
+        Metadata["Metadata Store"]
+        EventSys["Event System"]
+    end
+    
+    UserLayer --> HTTPServer
+    GoServer --> Static
+    GoServer --> API
+    GoServer --> SSE
+    HTTPServer --> BusinessLayer
+    HTTPServer --> AIService
+    HTTPServer --> StorageLayer
+    BusinessLayer --> FlowXEngine
 ```
 
 ## 2.2 模块划分
@@ -152,44 +156,32 @@
 
 ## 2.3 模块依赖关系
 
-```
-┌──────────────────────────────────────────────────────────┐
-│                  flowx-studio (本仓库)                    │
-│                                                          │
-│  ┌────────────────────────────────────────────────────┐  │
-│  │                HTTP Server                         │  │
-│  │              (internal/server)                     │  │
-│  └────────────────────────┬───────────────────────────┘  │
-│                           │ 依赖                          │
-│          ┌────────────────┼────────────────┐             │
-│          │                │                │             │
-│  ┌───────▼──────┐ ┌──────▼──────┐ ┌──────▼──────┐      │
-│  │   Service    │ │   AI        │ │   DB        │      │
-│  │   Layer      │ │   Service   │ │   Layer     │      │
-│  └───────┬──────┘ └──────┬──────┘ └──────┬──────┘      │
-│          │               │               │             │
-│          └───────────────┼───────────────┘             │
-│                          │ 依赖                          │
-│                 ┌────────▼────────┐                     │
-│                 │  RuntimeAdapter │                     │
-│                 │ (internal/      │                     │
-│                 │  runtime)       │                     │
-│                 └────────┬────────┘                     │
-│                          │ Go Module                     │
-└──────────────────────────┼───────────────────────────────┘
-                           │ require
-┌──────────────────────────▼───────────────────────────────┐
-│         github.com/LerkoX/flowx (外部依赖)                 │
-│                                                          │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐│
-│  │   dag    │ │ executor │ │ template │ │   logger     ││
-│  │  package │ │ package  │ │ package  │ │  package     ││
-│  └──────────┘ └──────────┘ └──────────┘ └──────────────┘│
-│  ┌──────────┐ ┌──────────┐                               │
-│  │ metadata │ │   core   │                               │
-│  │  package │ │  package │                               │
-│  └──────────┘ └──────────┘                               │
-└──────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph Studio["flowx-studio (本仓库)"]
+        HTTP[HTTP Server internal/server]
+        Service[Service Layer]
+        AI[AI Service]
+        DB[DB Layer]
+        Runtime[RuntimeAdapter internal/runtime]
+    end
+    
+    subgraph FlowX["github.com/LerkoX/flowx (外部依赖)"]
+        dag[dag package]
+        executor[executor package]
+        template[template package]
+        logger[logger package]
+        metadata[metadata package]
+        core[core package]
+    end
+    
+    HTTP --> Service
+    HTTP --> AI
+    HTTP --> DB
+    Service --> Runtime
+    AI --> Runtime
+    DB --> Runtime
+    Runtime --> FlowX
 ```
 
 **依赖规则**：
@@ -202,80 +194,40 @@
 
 ### 2.4.1 AI 生成节点数据流
 
-```
-用户输入需求
-    │
-    ▼
-[Frontend] 发送 POST /api/ai/generate-node
-    │
-    ▼
-[Server] 接收请求，调用 AIService
-    │
-    ▼
-[AIService] 组装 Prompt（包含 FlowX 节点规范）
-    │
-    ▼
-[AIProvider] 调用 LLM API
-    │
-    ▼
-[AIService] 解析响应，提取节点信息
-    │
-    ▼
-[NodeService] 保存节点到数据库
-    │
-    ▼
-[Frontend] 展示节点详情（参数、代码、Mock 按钮）
+```mermaid
+flowchart TD
+    A[用户输入需求] --> B[Frontend发送POST /api/ai/generate-node]
+    B --> C[Server接收请求调用AIService]
+    C --> D[AIService组装Prompt]
+    D --> E[AIProvider调用LLM API]
+    E --> F[AIService解析响应提取节点信息]
+    F --> G[NodeService保存节点到数据库]
+    G --> H[Frontend展示节点详情]
 ```
 
 ### 2.4.2 工作流执行数据流
 
-```
-用户点击"运行工作流"
-    │
-    ▼
-[Frontend] 发送 POST /api/workflows/:id/run
-    │
-    ▼
-[Server] 调用 WorkflowService
-    │
-    ▼
-[WorkflowService] 从数据库读取 YAML 配置
-    │
-    ▼
-[RuntimeAdapter] 构建 FlowX Runtime，注册事件监听
-    │
-    ▼
-[FlowX Runtime] 执行 DAG 工作流
-    │
-    ▼
-[EventBridge] 捕获执行事件（节点开始/完成/失败）
-    │
-    ▼
-[SSE Channel] 实时推送给前端
-    │
-    ▼
-[Frontend] 更新工作流图状态（节点高亮、日志显示）
+```mermaid
+flowchart TD
+    A[用户点击运行工作流] --> B[Frontend发送POST /api/workflows/:id/run]
+    B --> C[Server调用WorkflowService]
+    C --> D[WorkflowService从数据库读取YAML配置]
+    D --> E[RuntimeAdapter构建FlowX Runtime]
+    E --> F[FlowX Runtime执行DAG工作流]
+    F --> G[EventBridge捕获执行事件]
+    G --> H[SSE Channel实时推送给前端]
+    H --> I[Frontend更新工作流图状态]
 ```
 
 ### 2.4.3 Mock 测试数据流
 
-```
-用户点击"Mock 测试"
-    │
-    ▼
-[Frontend] 发送 POST /api/nodes/:id/mock
-    │
-    ▼
-[NodeService] 读取节点 Mock 代码
-    │
-    ▼
-[MockExecutor] 在隔离环境运行 Mock 代码
-    │         (优先 Docker，回退受限进程)
-    ▼
-[MockExecutor] 返回模拟结果
-    │
-    ▼
-[Frontend] 展示 Mock 输出结果
+```mermaid
+flowchart TD
+    A[用户点击Mock测试] --> B[Frontend发送POST /api/nodes/:id/mock]
+    B --> C[NodeService读取节点Mock代码]
+    C --> D[MockExecutor在隔离环境运行Mock代码]
+    D --> E[MockExecutor返回模拟结果]
+    E --> F[Frontend展示Mock输出结果]
 ```
 
 ## 2.5 关键技术选型

@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1. 项目概述与愿景 - FlowX Studio</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            themeVariables: {
+                primaryColor: '#1e1e3a',
+                primaryTextColor: '#e2e8f0',
+                primaryBorderColor: '#6366f1',
+                lineColor: '#a855f7',
+                secondaryColor: '#16162a',
+                tertiaryColor: '#0f0f1a',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                fontSize: '14px'
+            },
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            },
+            sequence: {
+                useMaxWidth: true
+            },
+            gantt: {
+                useMaxWidth: true
+            }
+        });
+    </script>
+</head>
+<body>
+    <div class="layout">
+        <nav class="sidebar">
+<div class="nav-header">
+<h2>FlowX Studio</h2>
+<p>技术设计文档</p>
+</div>
+<ul class="nav-links">
+<li><a href="README.html">FlowX Studio 技术设计文档</a></li>
+<li><a href="01-overview.html" class="active">1. 项目概述与愿景</a></li>
+<li><a href="02-architecture.html">2. 系统架构设计</a></li>
+<li><a href="03-database.html">3. 数据库设计</a></li>
+<li><a href="04-api.html">4. API 设计</a></li>
+<li><a href="05-frontend.html">5. 前端设计</a></li>
+<li><a href="06-ai-service.html">6. AI 服务层设计</a></li>
+<li><a href="07-node-system.html">7. 节点系统与执行引擎</a></li>
+<li><a href="08-runtime.html">8. 运行时与部署设计</a></li>
+<li><a href="09-security.html">9. 安全与错误处理设计</a></li>
+<li><a href="10-core-deps.html">10. FlowX 核心库依赖评估</a></li>
+</ul>
+</nav>
+        <main class="content">
+            <article>
+                <h1 id="1-项目概述与愿景">1. 项目概述与愿景</h1>
+
+<h2 id="11-项目背景">1.1 项目背景</h2>
+
+<p>FlowX 目前是一个成熟的 Go 语言工作流引擎，具备：</p>
+<ul>
+<li>DAG（有向无环图）工作流编排</li>
+<li>多执行后端（本地/Docker/Kubernetes）</li>
+<li>Mermaid 语法定义图结构</li>
+<li>运行时图修改与状态恢复</li>
+<li>条件边与循环支持</li>
+</ul>
+<p>但当前仅提供命令行界面，用户需要手动编写 YAML 配置文件来定义工作流，使用门槛较高。</p>
+
+<h2 id="12-项目愿景">1.2 项目愿景</h2>
+
+<p>将 FlowX 演进为一个<strong>AI 驱动的可视化工作流平台</strong>：</p>
+
+<blockquote><strong>用户只需用自然语言描述需求，AI 自动完成节点代码生成、工作流编排、执行和监控。</strong></blockquote>
+
+<h3 id="核心体验">核心体验</h3>
+
+<pre><code>用户输入: "帮我做一个图片处理工作流：下载图片 → 压缩 → 生成缩略图 → 上传到 S3"
+
+AI 处理:
+  1. 分析需求，识别需要 4 个节点
+  2. 检查节点注册中心，发现缺少 "压缩图片" 节点
+  3. 自动生成 "compress_image" 节点（Python 实现 + Mock 测试）
+  4. 生成完整 FlowX YAML 工作流配置
+  5. 在右侧渲染工作流图
+  6. 用户可点击 Mock 测试验证，或直接运行</code></pre>
+
+<h2 id="13-核心原则">1.3 核心原则</h2>
+
+<h3 id="原则-1零人工配置">原则 1：零人工配置</h3>
+<ul>
+<li>不提供节点拖拽界面</li>
+<li>不提供参数配置表单</li>
+<li>不提供手动连线功能</li>
+<li>一切通过 AI 对话完成</li>
+</ul>
+<h3 id="原则-2全-ai-驱动">原则 2：全 AI 驱动</h3>
+<ul>
+<li>AI 生成节点实现代码（Python/Go/Shell 等）</li>
+<li>AI 生成工作流编排逻辑</li>
+<li>AI 自动生成 Mock 测试代码</li>
+<li>AI 负责错误诊断和修复建议</li>
+</ul>
+<h3 id="原则-3本地优先">原则 3：本地优先</h3>
+<ul>
+<li>单二进制文件运行</li>
+<li>SQLite 本地存储</li>
+<li>支持离线模式（Ollama 本地模型）</li>
+<li>启动即自动打开浏览器</li>
+</ul>
+<h3 id="原则-4引擎复用">原则 4：引擎复用</h3>
+<ul>
+<li>复用现有 DAG 执行引擎</li>
+<li>复用现有 Docker/K8s 执行后端</li>
+<li>复用现有模板引擎和元数据系统</li>
+<li>在现有架构上增量扩展，不破坏已有功能</li>
+</ul>
+<h2 id="14-目标用户">1.4 目标用户</h2>
+
+<ul>
+<li><strong>开发者</strong>：快速搭建自动化流程，无需手动编写配置</li>
+<li><strong>内容创作者</strong>：图片/视频生成工作流自动化</li>
+<li><strong>运维人员</strong>：CI/CD 流程快速构建</li>
+<li><strong>数据分析师</strong>：ETL 流程自动生成</li>
+</ul>
+<h2 id="15-功能边界">1.5 功能边界</h2>
+
+<h3 id="在范围内">在范围内</h3>
+<ul>
+<li>AI 驱动的节点自动生成</li>
+<li>AI 驱动的工作流编排</li>
+<li>自然语言对话界面</li>
+<li>工作流图可视化展示</li>
+<li>节点代码查看与 Mock 测试</li>
+<li>实时执行状态监控</li>
+<li>本地单二进制部署</li>
+</ul>
+<h3 id="不在范围内v1">不在范围内（V1）</h3>
+<ul>
+<li>手动拖拽编辑节点位置</li>
+<li>手动修改节点参数</li>
+<li>手动连接/断开节点边</li>
+<li>多用户协作</li>
+<li>远程部署与分布式执行</li>
+<li>商业 SaaS 化</li>
+</ul>
+<h2 id="16-与现有工作流平台的差异">1.6 与现有工作流平台的差异</h2>
+
+<table>
+<thead>
+<tr>
+<th>特性</th>
+<th>Dify</th>
+<th>Flowise</th>
+<th>n8n</th>
+<th><strong>FlowX（新版）</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>工作流构建方式</td>
+<td>人拖拽节点</td>
+<td>人拖拽节点</td>
+<td>人拖拽节点</td>
+<td><strong>AI 自动生成</strong></td>
+</tr>
+<tr>
+<td>节点代码生成</td>
+<td>不支持</td>
+<td>不支持</td>
+<td>支持自定义代码</td>
+<td><strong>AI 自动生成任意语言</strong></td>
+</tr>
+<tr>
+<td>部署方式</td>
+<td>Docker</td>
+<td>Docker/Cloud</td>
+<td>Docker/Cloud</td>
+<td><strong>单二进制本地运行</strong></td>
+</tr>
+<tr>
+<td>Mock 测试</td>
+<td>无</td>
+<td>无</td>
+<td>无</td>
+<td><strong>每个节点自带 Mock</strong></td>
+</tr>
+<tr>
+<td>执行后端</td>
+<td>内置</td>
+<td>内置</td>
+<td>内置</td>
+<td><strong>本地/Docker/K8s</strong></td>
+</tr>
+<tr>
+<td>目标场景</td>
+<td>LLM 应用</td>
+<td>AI Agent</td>
+<td>通用自动化</td>
+<td><strong>通用工作流 + AI 生成</strong></td>
+</tr>
+</tbody>
+</table>
+
+<h2 id="17-成功指标">1.7 成功指标</h2>
+
+<ul>
+<li>用户能用自然语言在 3 分钟内生成并运行一个完整工作流</li>
+<li>节点 Mock 测试通过率达到 95% 以上</li>
+<li>工作流首次生成成功率达到 80% 以上</li>
+<li>单二进制文件大小控制在 50MB 以内（不含前端构建产物）</li>
+<li>启动时间控制在 3 秒以内</li>
+</ul>
+            </article>
+        </main>
+    </div>
+    <div id="mermaid-overlay" class="mermaid-overlay" onclick="closeMermaidFullscreen(event)">
+        <div class="mermaid-overlay-content">
+            <button class="mermaid-close-btn" onclick="closeMermaidFullscreen(event)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+                关闭
+            </button>
+            <div id="mermaid-overlay-diagram"></div>
+            <div class="mermaid-zoom-controls">
+                <button onclick="zoomOut()" title="缩小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <button onclick="zoomIn()" title="放大">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <div class="zoom-separator"></div>
+                <span id="mermaid-scale-display" class="zoom-scale">100%</span>
+                <div class="zoom-separator"></div>
+                <button onclick="zoomFit()" title="适应屏幕">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path>
+                    </svg>
+                </button>
+                <button onclick="zoomReset()" title="原始大小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="1 4 1 10 7 10"></polyline>
+                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>

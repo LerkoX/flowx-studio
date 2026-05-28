@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>9. 安全与错误处理设计 - FlowX Studio</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            themeVariables: {
+                primaryColor: '#1e1e3a',
+                primaryTextColor: '#e2e8f0',
+                primaryBorderColor: '#6366f1',
+                lineColor: '#a855f7',
+                secondaryColor: '#16162a',
+                tertiaryColor: '#0f0f1a',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                fontSize: '14px'
+            },
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            },
+            sequence: {
+                useMaxWidth: true
+            },
+            gantt: {
+                useMaxWidth: true
+            }
+        });
+    </script>
+</head>
+<body>
+    <div class="layout">
+        <nav class="sidebar">
+<div class="nav-header">
+<h2>FlowX Studio</h2>
+<p>技术设计文档</p>
+</div>
+<ul class="nav-links">
+<li><a href="README.html">FlowX Studio 技术设计文档</a></li>
+<li><a href="01-overview.html">1. 项目概述与愿景</a></li>
+<li><a href="02-architecture.html">2. 系统架构设计</a></li>
+<li><a href="03-database.html">3. 数据库设计</a></li>
+<li><a href="04-api.html">4. API 设计</a></li>
+<li><a href="05-frontend.html">5. 前端设计</a></li>
+<li><a href="06-ai-service.html">6. AI 服务层设计</a></li>
+<li><a href="07-node-system.html">7. 节点系统与执行引擎</a></li>
+<li><a href="08-runtime.html">8. 运行时与部署设计</a></li>
+<li><a href="09-security.html" class="active">9. 安全与错误处理设计</a></li>
+<li><a href="10-core-deps.html">10. FlowX 核心库依赖评估</a></li>
+</ul>
+</nav>
+        <main class="content">
+            <article>
+                <h1 id="9-安全与错误处理设计">9. 安全与错误处理设计</h1>
+
+<h2 id="91-安全设计">9.1 安全设计</h2>
+
+<h3 id="911-代码执行安全">9.1.1 代码执行安全</h3>
+
+<p>AI 生成的代码可能包含恶意逻辑，必须通过多层防护确保系统安全。</p>
+
+<h4 id="第一层输入验证">第一层：输入验证</h4>
+
+<ul>
+<li><strong>参数类型检查</strong>：确保输入参数符合声明的类型</li>
+<li><strong>参数范围限制</strong>：字符串长度、数值范围等</li>
+<li><strong>禁止字符过滤</strong>：过滤可能导致注入的特殊字符</li>
+</ul>
+<pre><code class="language-go">func validateParam(param db.Parameter, value interface{}) error {
+    switch param.Type {
+    case "string":
+        str, ok := value.(string)
+        if !ok {
+            return fmt.Errorf("parameter %s must be string", param.Name)
+        }
+        if len(str) &gt; 10000 {
+            return fmt.Errorf("parameter %s exceeds max length", param.Name)
+        }
+    case "integer":
+        // 验证整数范围和类型
+    }
+    return nil
+}</code></pre>
+
+<h4 id="第二层mock-沙箱执行">第二层：Mock 沙箱执行</h4>
+
+<p>Mock 测试在隔离环境中运行：</p>
+
+<p><strong>Docker 隔离</strong>：</p>
+<ul>
+<li>使用非 root 用户运行容器</li>
+<li>只读根文件系统（read-only rootfs）</li>
+<li>禁用网络访问（除非节点明确需要）</li>
+<li>限制 CPU 和内存使用</li>
+<li>设置执行超时</li>
+</ul>
+<pre><code class="language-dockerfile"># Mock 执行 Dockerfile 模板
+FROM python:3.11-slim
+
+# 创建非 root 用户
+RUN useradd -m -u 1000 flowx
+USER flowx
+
+# 设置工作目录
+WORKDIR /home/flowx
+
+# 复制脚本
+COPY --chown=flowx:flowx script.py .
+
+# 只读执行
+CMD ["python", "script.py"]</code></pre>
+
+<p><strong>进程隔离（无 Docker 时）</strong>：</p>
+
+<p>Linux：</p>
+<pre><code class="language-go">// 使用 seccomp 限制系统调用
+// 使用 cgroup 限制资源
+// 使用 chroot 隔离文件系统
+cmd := exec.Command("python", "script.py")
+cmd.SysProcAttr = &amp;syscall.SysProcAttr{
+    Chroot: "/tmp/sandbox",
+    Credential: &amp;syscall.Credential{
+        Uid: 1000, // 非 root
+        Gid: 1000,
+    },
+}</code></pre>
+
+<h4 id="第三层文件系统隔离">第三层：文件系统隔离</h4>
+
+<ul>
+<li>每个 Mock 执行使用独立的临时目录</li>
+<li>执行完成后立即清理临时文件</li>
+<li>禁止访问系统敏感目录（/etc, /proc, /sys 等）</li>
+</ul>
+<h4 id="第四层网络隔离">第四层：网络隔离</h4>
+
+<ul>
+<li>Mock 执行默认禁用网络访问</li>
+<li>需要网络的节点在 Docker 中限制为仅允许特定域名</li>
+<li>记录所有网络请求日志</li>
+</ul>
+<h3 id="912-api-安全">9.1.2 API 安全</h3>
+
+<h4 id="认证与授权">认证与授权</h4>
+
+<p>V1 版本为本地单用户应用，暂不需要多用户认证。但需防止外部未授权访问：</p>
+
+<ul>
+<li><strong>本地绑定</strong>：默认绑定 <code>127.0.0.1</code>，仅本机可访问</li>
+<li><strong>可选密码保护</strong>：可通过配置启用密码保护</li>
+<li><strong>CORS 限制</strong>：仅允许同源请求</li>
+</ul>
+<pre><code class="language-go">// CORS 中间件
+func corsMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        // 仅允许本地来源
+        origin := r.Header.Get("Origin")
+        if origin == "" || strings.HasPrefix(origin, "http://localhost") {
+            w.Header().Set("Access-Control-Allow-Origin", origin)
+        }
+        next.ServeHTTP(w, r)
+    })
+}</code></pre>
+
+<h4 id="请求限流">请求限流</h4>
+
+<p>防止 API 被滥用：</p>
+
+<pre><code class="language-go">type RateLimiter struct {
+    requests map[string][]time.Time
+    limit    int
+    window   time.Duration
+    mu       sync.Mutex
+}
+
+func (rl *RateLimiter) Allow(clientID string) bool {
+    rl.mu.Lock()
+    defer rl.mu.Unlock()
+    
+    now := time.Now()
+    requests := rl.requests[clientID]
+    
+    // 清理过期请求
+    var valid []time.Time
+    for _, t := range requests {
+        if now.Sub(t) &lt; rl.window {
+            valid = append(valid, t)
+        }
+    }
+    
+    if len(valid) &gt;= rl.limit {
+        return false
+    }
+    
+    rl.requests[clientID] = append(valid, now)
+    return true
+}</code></pre>
+
+<p>默认限流配置：</p>
+<ul>
+<li>AI 生成 API：每用户 10 请求/分钟</li>
+<li>其他 API：每用户 100 请求/分钟</li>
+</ul>
+<h3 id="913-数据安全">9.1.3 数据安全</h3>
+
+<h4 id="api-key-加密存储">API Key 加密存储</h4>
+
+<pre><code class="language-go">// 使用 AES-GCM 加密
+func encrypt(plaintext string, key []byte) (string, error) {
+    block, err := aes.NewCipher(key)
+    if err != nil {
+        return "", err
+    }
+    
+    gcm, err := cipher.NewGCM(block)
+    if err != nil {
+        return "", err
+    }
+    
+    nonce := make([]byte, gcm.NonceSize())
+    if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+        return "", err
+    }
+    
+    ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+    return base64.StdEncoding.EncodeToString(ciphertext), nil
+}</code></pre>
+
+<h4 id="加密密钥管理">加密密钥管理</h4>
+
+<ul>
+<li>优先从环境变量 <code>FLOWX_ENCRYPTION_KEY</code> 读取</li>
+<li>如未设置，自动生成并存储在 <code>~/.flowx/.key</code> 中</li>
+<li>文件权限设置为 0600（仅所有者可读写）</li>
+</ul>
+<h3 id="914-日志安全">9.1.4 日志安全</h3>
+
+<ul>
+<li>不在日志中记录 API Key、密码等敏感信息</li>
+<li>日志文件权限设置为 0640</li>
+<li>定期清理过期日志</li>
+</ul>
+<h2 id="92-错误处理设计">9.2 错误处理设计</h2>
+
+<h3 id="921-错误分类">9.2.1 错误分类</h3>
+
+<table>
+<thead>
+<tr>
+<th>类别</th>
+<th>示例</th>
+<th>处理策略</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>用户输入错误</td>
+<td>参数缺失、格式错误</td>
+<td>返回 400，提示具体错误</td>
+</tr>
+<tr>
+<td>资源不存在</td>
+<td>节点/工作流 ID 不存在</td>
+<td>返回 404</td>
+</tr>
+<tr>
+<td>资源冲突</td>
+<td>节点名称已存在</td>
+<td>返回 409，建议重命名</td>
+</tr>
+<tr>
+<td>AI 服务错误</td>
+<td>API Key 无效、模型不可用</td>
+<td>返回 502，记录日志</td>
+</tr>
+<tr>
+<td>AI 生成失败</td>
+<td>输出格式不符合预期</td>
+<td>返回 422，返回原始响应</td>
+</tr>
+<tr>
+<td>执行错误</td>
+<td>节点执行失败</td>
+<td>返回 200（执行已记录），详情在结果中</td>
+</tr>
+<tr>
+<td>内部错误</td>
+<td>数据库连接失败</td>
+<td>返回 500，记录详细错误</td>
+</tr>
+<tr>
+<td>超时错误</td>
+<td>执行超过时限</td>
+<td>返回 504，标记执行状态为 failed</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="922-错误响应格式">9.2.2 错误响应格式</h3>
+
+<p>遵循 RFC 7807 Problem Details：</p>
+
+<pre><code class="language-json">{
+  "type": "https://flowx.dev/errors/validation-error",
+  "title": "Validation Error",
+  "status": 400,
+  "detail": "Invalid request parameters",
+  "instance": "/api/v1/nodes",
+  "errors": [
+    {
+      "field": "name",
+      "message": "Node name is required"
+    },
+    {
+      "field": "language",
+      "message": "Language must be one of: python, go, bash, node"
+    }
+  ]
+}</code></pre>
+
+<h3 id="923-前端错误处理">9.2.3 前端错误处理</h3>
+
+<h4 id="全局错误边界">全局错误边界</h4>
+
+<pre><code class="language-typescript">// 捕获未处理的 React 组件错误
+class ErrorBoundary extends React.Component {
+  state = { hasError: false, error: null };
+  
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  
+  componentDidCatch(error, errorInfo) {
+    // 上报错误日志
+    logError(error, errorInfo);
+  }
+  
+  render() {
+    if (this.state.hasError) {
+      return (
+        &lt;div className="error-fallback"&gt;
+          &lt;h2&gt;应用出现错误&lt;/h2&gt;
+          &lt;p&gt;请刷新页面重试，或联系支持团队。&lt;/p&gt;
+          &lt;button onClick={() =&gt; window.location.reload()}&gt;
+            刷新页面
+          &lt;/button&gt;
+        &lt;/div&gt;
+      );
+    }
+    return this.props.children;
+  }
+}</code></pre>
+
+<h4 id="api-错误处理">API 错误处理</h4>
+
+<pre><code class="language-typescript">// Axios 全局错误拦截
+apiClient.interceptors.response.use(
+  (response) =&gt; response,
+  (error) =&gt; {
+    const status = error.response?.status;
+    const data = error.response?.data;
+    
+    switch (status) {
+      case 400:
+        toast.error(`请求错误: ${data.detail}`);
+        break;
+      case 401:
+        toast.error('API Key 无效或已过期');
+        break;
+      case 404:
+        toast.error('请求的资源不存在');
+        break;
+      case 409:
+        toast.error(`资源冲突: ${data.detail}`);
+        break;
+      case 422:
+        toast.error(`无法处理: ${data.detail}`);
+        break;
+      case 429:
+        toast.error('请求过于频繁，请稍后再试');
+        break;
+      case 502:
+        toast.error('AI 服务暂时不可用，请检查配置');
+        break;
+      case 504:
+        toast.error('请求超时，请稍后重试');
+        break;
+      default:
+        toast.error(`服务器错误: ${error.message}`);
+    }
+    
+    return Promise.reject(error);
+  }
+);</code></pre>
+
+<h3 id="924-ai-生成失败处理">9.2.4 AI 生成失败处理</h3>
+
+<p>AI 生成可能失败的场景：</p>
+
+<ol>
+<li><strong>模型输出格式错误</strong>：AI 未按要求的格式输出</li>
+<li><strong>生成内容不完整</strong>：AI 输出被截断</li>
+<li><strong>生成代码语法错误</strong>：AI 生成的代码有语法问题</li>
+<li><strong>模型服务不可用</strong>：网络问题或 API 限制</li>
+</ol>
+<p><strong>处理策略</strong>：</p>
+
+<pre><code class="language-go">func (g *NodeGenerator) GenerateNode(ctx context.Context, description string, opts GenerateOptions) (*db.Node, error) {
+    maxRetries := 3
+    
+    for i := 0; i &lt; maxRetries; i++ {
+        node, err := g.tryGenerate(ctx, description, opts)
+        if err == nil {
+            return node, nil
+        }
+        
+        // 记录失败原因
+        log.Printf("Generation attempt %d failed: %v", i+1, err)
+        
+        // 如果是可重试错误，继续重试
+        if isRetryableError(err) &amp;&amp; i &lt; maxRetries-1 {
+            time.Sleep(time.Second * time.Duration(i+1))
+            continue
+        }
+        
+        // 不可重试错误，直接返回
+        return nil, fmt.Errorf("failed to generate node after %d attempts: %w", maxRetries, err)
+    }
+    
+    return nil, fmt.Errorf("max retries exceeded")
+}</code></pre>
+
+<h3 id="925-执行错误处理">9.2.5 执行错误处理</h3>
+
+<p>工作流执行过程中可能出错：</p>
+
+<ol>
+<li><strong>节点执行失败</strong>：代码错误、超时、资源不足</li>
+<li><strong>依赖节点失败</strong>：上游节点失败导致下游跳过</li>
+<li><strong>系统错误</strong>：数据库错误、内存不足</li>
+</ol>
+<p><strong>处理策略</strong>：</p>
+
+<pre><code class="language-go">func (s *ExecutionService) handleExecutionError(executionID int64, nodeID string, err error) {
+    // 1. 记录错误
+    s.executionRepo.UpdateNodeError(executionID, nodeID, err.Error())
+    
+    // 2. 更新节点状态
+    s.executionRepo.UpdateNodeStatus(executionID, nodeID, "failed")
+    
+    // 3. 判断是否需要终止整个工作流
+    if isFatalError(err) {
+        s.executionRepo.UpdateStatus(executionID, "failed", time.Now())
+        s.eventBridge.EmitExecutionError(executionID, err)
+    }
+    
+    // 4. 推送错误事件到前端
+    s.eventBridge.EmitNodeError(executionID, nodeID, err)
+}</code></pre>
+
+<h2 id="93-日志与监控">9.3 日志与监控</h2>
+
+<h3 id="931-日志规范">9.3.1 日志规范</h3>
+
+<p><strong>日志级别使用规范</strong>：</p>
+
+<table>
+<thead>
+<tr>
+<th>级别</th>
+<th>使用场景</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DEBUG</td>
+<td>开发调试、详细的执行跟踪</td>
+</tr>
+<tr>
+<td>INFO</td>
+<td>系统启动、请求处理、状态变更</td>
+</tr>
+<tr>
+<td>WARN</td>
+<td>非致命错误、降级处理、配置缺失</td>
+</tr>
+<tr>
+<td>ERROR</td>
+<td>请求失败、执行错误、外部服务异常</td>
+</tr>
+<tr>
+<td>FATAL</td>
+<td>系统启动失败、数据库连接失败</td>
+</tr>
+</tbody>
+</table>
+
+<p><strong>日志字段规范</strong>：</p>
+
+<pre><code class="language-go">log.Info("Execution started",
+    "execution_id", executionID,
+    "workflow_id", workflowID,
+    "workflow_name", workflowName,
+    "trigger", "manual",
+    "timestamp", time.Now().UTC(),
+)</code></pre>
+
+<h3 id="932-关键指标监控">9.3.2 关键指标监控</h3>
+
+<p>需要监控的关键指标：</p>
+
+<table>
+<thead>
+<tr>
+<th>指标</th>
+<th>类型</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>http_requests_total</td>
+<td>Counter</td>
+<td>HTTP 请求总数</td>
+</tr>
+<tr>
+<td>http_request_duration</td>
+<td>Histogram</td>
+<td>HTTP 请求耗时</td>
+</tr>
+<tr>
+<td>ai_requests_total</td>
+<td>Counter</td>
+<td>AI 调用总数</td>
+</tr>
+<tr>
+<td>ai_request_duration</td>
+<td>Histogram</td>
+<td>AI 调用耗时</td>
+</tr>
+<tr>
+<td>ai_tokens_used</td>
+<td>Counter</td>
+<td>Token 使用量</td>
+</tr>
+<tr>
+<td>executions_total</td>
+<td>Counter</td>
+<td>执行总数</td>
+</tr>
+<tr>
+<td>execution_duration</td>
+<td>Histogram</td>
+<td>执行耗时</td>
+</tr>
+<tr>
+<td>active_executions</td>
+<td>Gauge</td>
+<td>当前活跃执行数</td>
+</tr>
+<tr>
+<td>nodes_total</td>
+<td>Gauge</td>
+<td>注册节点总数</td>
+</tr>
+<tr>
+<td>workflows_total</td>
+<td>Gauge</td>
+<td>工作流总数</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="933-健康检查">9.3.3 健康检查</h3>
+
+<p>提供健康检查端点：</p>
+
+<pre><code class="language-http">GET /api/v1/health</code></pre>
+
+<p><strong>响应</strong>：</p>
+
+<pre><code class="language-json">{
+  "status": "healthy",
+  "timestamp": "2025-01-20T10:00:00Z",
+  "version": "1.0.0",
+  "checks": {
+    "database": "ok",
+    "ai_service": "ok",
+    "disk_space": "ok"
+  }
+}</code></pre>
+
+<h2 id="94-备份与恢复">9.4 备份与恢复</h2>
+
+<h3 id="941-自动备份">9.4.1 自动备份</h3>
+
+<ul>
+<li>每次启动时自动创建数据库备份（保留最近 3 个）</li>
+<li>数据库文件变化超过 10% 时触发增量备份</li>
+</ul>
+<h3 id="942-手动导出">9.4.2 手动导出</h3>
+
+<p>提供 API 导出所有数据：</p>
+
+<pre><code class="language-http">POST /api/v1/export</code></pre>
+
+<p><strong>响应</strong>：JSON 文件包含所有节点、工作流、配置。</p>
+
+<h3 id="943-恢复">9.4.3 恢复</h3>
+
+<p>通过替换数据库文件恢复：</p>
+
+<pre><code class="language-bash"># 停止服务
+pkill flowx
+
+# 恢复备份
+cp ~/.flowx/flowx.db.backup ~/.flowx/flowx.db
+
+# 启动服务
+flowx</code></pre>
+
+<h2 id="95-安全审计">9.5 安全审计</h2>
+
+<h3 id="951-操作审计日志">9.5.1 操作审计日志</h3>
+
+<p>记录所有关键操作：</p>
+
+<pre><code class="language-sql">CREATE TABLE audit_logs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    action      TEXT NOT NULL,        -- create_node | delete_node | run_workflow | update_config
+    resource_type TEXT NOT NULL,      -- node | workflow | execution | config
+    resource_id TEXT,
+    details     TEXT,                 -- JSON 格式的操作详情
+    ip_address  TEXT,
+    user_agent  TEXT,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);</code></pre>
+
+<h3 id="952-审计事件">9.5.2 审计事件</h3>
+
+<p>需要审计的操作：</p>
+<ul>
+<li>节点创建、删除</li>
+<li>工作流创建、删除、执行</li>
+<li>AI 配置修改</li>
+<li>系统配置变更</li>
+<li>导出数据操作</li>
+</ul>
+            </article>
+        </main>
+    </div>
+    <div id="mermaid-overlay" class="mermaid-overlay" onclick="closeMermaidFullscreen(event)">
+        <div class="mermaid-overlay-content">
+            <button class="mermaid-close-btn" onclick="closeMermaidFullscreen(event)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+                关闭
+            </button>
+            <div id="mermaid-overlay-diagram"></div>
+            <div class="mermaid-zoom-controls">
+                <button onclick="zoomOut()" title="缩小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <button onclick="zoomIn()" title="放大">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <div class="zoom-separator"></div>
+                <span id="mermaid-scale-display" class="zoom-scale">100%</span>
+                <div class="zoom-separator"></div>
+                <button onclick="zoomFit()" title="适应屏幕">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path>
+                    </svg>
+                </button>
+                <button onclick="zoomReset()" title="原始大小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="1 4 1 10 7 10"></polyline>
+                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
