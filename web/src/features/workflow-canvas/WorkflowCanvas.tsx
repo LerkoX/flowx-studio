@@ -24,7 +24,7 @@ function WorkflowCanvasInner() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [, setSelectedNode] = useState<string | null>(null)
-  const { currentWorkflow, nodeStatuses } = useWorkflowStore()
+  const { currentWorkflow, nodeStatuses, nodeRuntimeData } = useWorkflowStore()
 
   // 初始加载
   useEffect(() => {
@@ -35,25 +35,59 @@ function WorkflowCanvasInner() {
           id: 'start',
           type: 'glowNode',
           position: { x: 0, y: 0 },
-          data: { id: 'start', name: 'Start', status: 'success', icon: '▶', accentColor: '#6366f1' },
+          data: {
+            id: 'start',
+            name: 'Start',
+            status: 'success',
+            icon: '▶',
+            accentColor: '#6366f1',
+            inputs: nodeRuntimeData.start?.inputs,
+            outputs: nodeRuntimeData.start?.outputs,
+          },
         },
         {
           id: 'build',
           type: 'glowNode',
           position: { x: 0, y: 0 },
-          data: { id: 'build', name: 'Build', status: 'running', icon: '🔨', accentColor: '#22d3ee', language: 'go' },
+          data: {
+            id: 'build',
+            name: 'Build',
+            status: 'running',
+            icon: '🔨',
+            accentColor: '#22d3ee',
+            language: 'go',
+            inputs: nodeRuntimeData.build?.inputs,
+            outputs: nodeRuntimeData.build?.outputs,
+          },
         },
         {
           id: 'test',
           type: 'glowNode',
           position: { x: 0, y: 0 },
-          data: { id: 'test', name: 'Test', status: 'idle', icon: '🧪', accentColor: '#a855f7', language: 'go' },
+          data: {
+            id: 'test',
+            name: 'Test',
+            status: 'idle',
+            icon: '🧪',
+            accentColor: '#a855f7',
+            language: 'go',
+            inputs: nodeRuntimeData.test?.inputs,
+            outputs: nodeRuntimeData.test?.outputs,
+          },
         },
         {
           id: 'deploy',
           type: 'glowNode',
           position: { x: 0, y: 0 },
-          data: { id: 'deploy', name: 'Deploy', status: 'idle', icon: '🚀', accentColor: '#34d399' },
+          data: {
+            id: 'deploy',
+            name: 'Deploy',
+            status: 'idle',
+            icon: '🚀',
+            accentColor: '#34d399',
+            inputs: nodeRuntimeData.deploy?.inputs,
+            outputs: nodeRuntimeData.deploy?.outputs,
+          },
         },
       ]
       const demoEdges: Edge[] = [
@@ -107,6 +141,34 @@ function WorkflowCanvasInner() {
       }))
     )
   }, [nodeStatuses, setNodes, setEdges])
+
+  // 同步节点运行时数据（入参和返回）
+  useEffect(() => {
+    if (!nodeRuntimeData || Object.keys(nodeRuntimeData).length === 0) return
+
+    setNodes((nds) =>
+      nds.map((node) => {
+        const runtime = nodeRuntimeData[node.id]
+        if (!runtime) return node
+
+        const hasChanges =
+          JSON.stringify(runtime.inputs) !== JSON.stringify(node.data.inputs) ||
+          JSON.stringify(runtime.outputs) !== JSON.stringify(node.data.outputs)
+
+        if (hasChanges) {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              inputs: runtime.inputs,
+              outputs: runtime.outputs,
+            },
+          }
+        }
+        return node
+      })
+    )
+  }, [nodeRuntimeData, setNodes])
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     setSelectedNode(node.id)

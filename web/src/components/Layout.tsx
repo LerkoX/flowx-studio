@@ -1,10 +1,21 @@
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { Outlet } from 'react-router-dom'
+import { PanelLeftClose, PanelLeftOpen, ChevronLeft, ChevronRight } from 'lucide-react'
 import Sidebar from './Sidebar'
 import ChatInputBar from './ChatInputBar'
 import ChatPanel from '@/features/chat/ChatPanel'
+import { useAppStore } from '@/stores/appStore'
 
 export default function Layout() {
+  const {
+    chatPanelCollapsed,
+    toggleChatPanel,
+    collapseAllPanels,
+    expandAllPanels,
+  } = useAppStore()
+
+  const allCollapsed = chatPanelCollapsed // can check both if needed
+
   return (
     <div className="h-screen w-screen overflow-hidden bg-gradient-to-br from-[#0a0e27] via-[#1a1f3a] to-[#0f172a]">
       {/* 左侧 Sidebar */}
@@ -16,14 +27,63 @@ export default function Layout() {
         style={{ marginLeft: 48 }}
       >
         {/* 顶部 Toolbar（悬浮胶囊） */}
-        <FloatingToolbar />
+        <FloatingToolbar
+          onCollapseAll={collapseAllPanels}
+          onExpandAll={expandAllPanels}
+          allCollapsed={allCollapsed}
+        />
 
         {/* 内容区域：左侧聊天 + 中间画布 */}
         <div className="flex-1 flex overflow-hidden">
-          {/* 左侧 AI 聊天历史 — 固定显示 */}
-          <div className="w-[420px] flex-shrink-0 h-full overflow-hidden border-r border-white/10 bg-black/20">
-            <ChatPanel compact />
-          </div>
+          {/* 左侧 AI 聊天历史 — 可折叠 */}
+          <AnimatePresence initial={false}>
+            {!chatPanelCollapsed && (
+              <motion.div
+                className="flex-shrink-0 h-full overflow-hidden border-r border-white/10 bg-black/20 flex"
+                initial={{ width: 0, opacity: 0 }}
+                animate={{ width: 420, opacity: 1 }}
+                exit={{ width: 0, opacity: 0 }}
+                transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+              >
+                <div className="flex-1 overflow-hidden">
+                  <ChatPanel compact />
+                </div>
+                {/* 折叠按钮 */}
+                <button
+                  onClick={toggleChatPanel}
+                  className="w-6 h-full flex items-center justify-center
+                           bg-white/5 hover:bg-white/10
+                           border-l border-white/5
+                           text-white/40 hover:text-white/70
+                           transition-colors"
+                  title="收起聊天窗口"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* 聊天窗口收起后的展开按钮 */}
+          <AnimatePresence>
+            {chatPanelCollapsed && (
+              <motion.button
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -10 }}
+                onClick={toggleChatPanel}
+                className="absolute left-0 top-1/2 -translate-y-1/2 z-40
+                         w-6 h-16 flex items-center justify-center
+                         bg-white/5 hover:bg-white/10
+                         border border-white/10 rounded-r-lg
+                         text-white/40 hover:text-white/70
+                         transition-colors"
+                title="展开聊天窗口"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </motion.button>
+            )}
+          </AnimatePresence>
 
           {/* 中间页面内容 */}
           <div className="flex-1 overflow-hidden relative">
@@ -42,7 +102,15 @@ export default function Layout() {
   )
 }
 
-function FloatingToolbar() {
+function FloatingToolbar({
+  onCollapseAll,
+  onExpandAll,
+  allCollapsed,
+}: {
+  onCollapseAll: () => void
+  onExpandAll: () => void
+  allCollapsed: boolean
+}) {
   return (
     <motion.div
       className="absolute top-4 left-1/2 -translate-x-1/2 z-50
@@ -59,6 +127,26 @@ function FloatingToolbar() {
       <ToolbarButton icon="ZoomIn" label="放大" />
       <ToolbarButton icon="ZoomOut" label="缩小" />
       <ToolbarButton icon="Maximize" label="全屏" />
+      <div className="w-px h-5 bg-white/10" />
+      <button
+        onClick={allCollapsed ? onExpandAll : onCollapseAll}
+        className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg
+                   text-white/60 hover:text-white hover:bg-white/10
+                   transition-colors text-xs"
+        title={allCollapsed ? '展开所有面板' : '收起所有面板'}
+      >
+        {allCollapsed ? (
+          <>
+            <PanelLeftOpen className="w-3.5 h-3.5" />
+            <span>展开</span>
+          </>
+        ) : (
+          <>
+            <PanelLeftClose className="w-3.5 h-3.5" />
+            <span>收起</span>
+          </>
+        )}
+      </button>
     </motion.div>
   )
 }

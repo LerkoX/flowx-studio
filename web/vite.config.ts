@@ -9,6 +9,10 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  optimizeDeps: {
+    include: ['react', 'react-dom', 'zustand', 'framer-motion', '@xyflow/react'],
+    force: true,
+  },
   server: {
     port: 8089,
     open: false,

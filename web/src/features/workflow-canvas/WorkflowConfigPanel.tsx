@@ -1,14 +1,219 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
+import { Save, RotateCcw } from 'lucide-react'
 import GlassPanel from '@/components/GlassPanel'
+import { useWorkflowStore } from '@/stores/workflowStore'
+import { updateWorkflowParams } from '@/services/workflowService'
+import type { PipelineParam } from '@/types/workflow'
 
 interface WorkflowConfigPanelProps {
-  view: 'graph' | 'yaml'
+  view: 'params' | 'yaml'
 }
 
 export default function WorkflowConfigPanel({ view }: WorkflowConfigPanelProps) {
-  const [yamlContent] = useState(`Version: "1.0"
+  const currentWorkflow = useWorkflowStore((s) => s.currentWorkflow)
+  const params = useWorkflowStore((s) => s.params)
+  const syncParamsFromYAML = useWorkflowStore((s) => s.syncParamsFromYAML)
+  const updateParam = useWorkflowStore((s) => s.updateParam)
+
+  const [editingValues, setEditingValues] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (currentWorkflow?.yamlConfig) {
+      syncParamsFromYAML(currentWorkflow.yamlConfig)
+    }
+  }, [currentWorkflow?.yamlConfig, syncParamsFromYAML])
+
+  useEffect(() => {
+    const initial: Record<string, string> = {}
+    Object.values(params).forEach((p) => {
+      initial[p.key] = String(p.value)
+    })
+    setEditingValues(initial)
+  }, [params])
+
+  const handleValueChange = (key: string, value: string) => {
+    setEditingValues((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const handleSave = async () => {
+    if (!currentWorkflow) return
+    setSaving(true)
+    try {
+      Object.entries(editingValues).forEach(([key, value]) => {
+        const param = params[key]
+        if (!param) return
+        if (value !== String(param.value)) {
+          const parsedValue = parseValue(value, typeof param.value)
+          updateParam(key, parsedValue)
+        }
+      })
+
+      await updateWorkflowParams(currentWorkflow.id, editingValues)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleReset = () => {
+    const initial: Record<string, string> = {}
+    Object.values(params).forEach((p) => {
+      initial[p.key] = String(p.originalValue)
+    })
+    setEditingValues(initial)
+  }
+
+  if (view === 'yaml') {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.2 }}
+      >
+        <GlassPanel className="p-4">
+          <pre className="text-xs text-white/70 font-mono whitespace-pre-wrap overflow-auto">
+            {currentWorkflow?.yamlConfig || defaultYAML}
+          </pre>
+        </GlassPanel>
+      </motion.div>
+    )
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.2 }}
+      className="space-y-4"
+    >
+      <div className="flex items-center justify-between">
+        <h3 className="text-white/90 font-semibold text-sm">流水线参数</h3>
+        <div className="flex gap-2">
+          <button
+            onClick={handleReset}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs
+                       bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80
+                       transition-colors"
+          >
+            <RotateCcw className="w-3 h-3" />
+            重置
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs
+                       bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30
+                       border border-indigo-500/30 transition-colors disabled:opacity-50"
+          >
+            <Save className="w-3 h-3" />
+            {saving ? '保存中...' : '保存'}
+          </button>
+        </div>
+      </div>
+
+      {Object.keys(params).length === 0 ? (
+        <GlassPanel className="p-4">
+          <div className="text-white/40 text-sm text-center py-8">
+            当前流水线没有定义参数
+            <br />
+            <span className="text-xs text-white/20 mt-1 block">
+              在 YAML 配置中添加 Param 字段
+            </span>
+          </div>
+        </GlassPanel>
+      ) : (
+        <div className="space-y-2">
+          {Object.values(params).map((param) => (
+            <ParamField
+              key={param.key}
+              param={param}
+              editingValue={editingValues[param.key] ?? String(param.value)}
+              onChange={(value) => handleValueChange(param.key, value)}
+            />
+          ))}
+        </div>
+      )}
+    </motion.div>
+  )
+}
+
+function ParamField({
+  param,
+  editingValue,
+  onChange,
+}: {
+  param: PipelineParam
+  editingValue: string
+  onChange: (value: string) => void
+}) {
+  const isModified = editingValue !== String(param.originalValue)
+  const isCurrentValueDifferent = editingValue !== String(param.value)
+
+  return (
+    <GlassPanel className="p-3">
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-white/80 text-sm font-mono font-medium">
+              {param.key}
+            </span>
+            {isModified && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20">
+                已修改
+              </span>
+            )}
+            {isCurrentValueDifferent && !isModified && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-400 border border-cyan-500/20">
+                编辑中
+              </span>
+            )}
+          </div>
+          {param.description && (
+            <div className="text-white/30 text-xs mb-2">{param.description}</div>
+          )}
+          <input
+            type="text"
+            value={editingValue}
+            onChange={(e) => onChange(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10
+                       text-white/80 text-sm font-mono
+                       focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.07]
+                       transition-colors placeholder:text-white/20"
+            placeholder={`当前值: ${String(param.originalValue)}`}
+          />
+          <div className="flex items-center gap-2 mt-1.5">
+            <span className="text-[10px] text-white/20">
+              类型: {typeof param.value}
+            </span>
+            <span className="text-[10px] text-white/20">
+              原始值: {String(param.originalValue)}
+            </span>
+          </div>
+        </div>
+      </div>
+    </GlassPanel>
+  )
+}
+
+function parseValue(value: string, originalType: string): string | number | boolean {
+  if (originalType === 'number') {
+    const num = Number(value)
+    return isNaN(num) ? value : num
+  }
+  if (originalType === 'boolean') {
+    return value === 'true'
+  }
+  return value
+}
+
+const defaultYAML = `Version: "1.0"
 Name: demo-pipeline
+
+Param:
+  env: "production"  # 部署环境
+  appName: "myapp"   # 应用名称
+  namespace: "myapp-production"  # 命名空间
 
 Executors:
   local:
@@ -28,86 +233,14 @@ Nodes:
     executor: local
     steps:
       - name: build
-        run: echo "Building..."
+        run: echo "Building {{ Param.appName }}..."
   Test:
     executor: local
     steps:
       - name: test
-        run: echo "Testing..."
+        run: echo "Testing {{ Param.appName }}..."
   Deploy:
     executor: local
     steps:
       - name: deploy
-        run: echo "Deploying..."`)
-
-  if (view === 'yaml') {
-    return (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.2 }}
-      >
-        <GlassPanel className="p-4">
-          <pre className="text-xs text-white/70 font-mono whitespace-pre-wrap overflow-auto">
-            {yamlContent}
-          </pre>
-        </GlassPanel>
-      </motion.div>
-    )
-  }
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.2 }}
-      className="space-y-4"
-    >
-      <GlassPanel className="p-4">
-        <h3 className="text-white/90 font-semibold text-sm mb-3">节点列表</h3>
-        <div className="space-y-2">
-          {['Start', 'Build', 'Test', 'Deploy'].map((node, i) => (
-            <div
-              key={node}
-              className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/5"
-            >
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500/30 to-purple-500/30
-                              flex items-center justify-center text-white/70 text-xs font-mono">
-                {i + 1}
-              </div>
-              <div>
-                <div className="text-white/80 text-sm font-medium">{node}</div>
-                <div className="text-white/40 text-xs">{['入口', '构建', '测试', '部署'][i]}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </GlassPanel>
-
-      <GlassPanel className="p-4">
-        <h3 className="text-white/90 font-semibold text-sm mb-3">执行状态</h3>
-        <div className="space-y-2">
-          <StatusBadge status="success" label="成功" count={1} />
-          <StatusBadge status="running" label="运行中" count={1} />
-          <StatusBadge status="idle" label="等待中" count={2} />
-        </div>
-      </GlassPanel>
-    </motion.div>
-  )
-}
-
-function StatusBadge({ status, label, count }: { status: string; label: string; count: number }) {
-  const colors: Record<string, string> = {
-    success: 'bg-emerald-400/20 text-emerald-400 border-emerald-400/30',
-    running: 'bg-cyan-400/20 text-cyan-400 border-cyan-400/30',
-    idle: 'bg-slate-400/20 text-slate-400 border-slate-400/30',
-    failed: 'bg-rose-400/20 text-rose-400 border-rose-400/30',
-  }
-
-  return (
-    <div className={`flex items-center justify-between px-3 py-2 rounded-lg border ${colors[status] || colors.idle}`}>
-      <span className="text-xs font-medium">{label}</span>
-      <span className="text-xs font-mono">{count}</span>
-    </div>
-  )
-}
+        run: echo "Deploying {{ Param.appName }} to {{ Param.namespace }}..."`

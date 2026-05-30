@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 PLAN_DIR = Path("/workspace/github.com/LerkoX/flowx-studio/plan")
-WEB_DIR = Path("/workspace/github.com/LerkoX/flowx-studio/web/docs")
+WEB_DIR = Path("/workspace/github.com/LerkoX/flowx-studio/plan/docs")
 
 FILES = [
     ("README.md", "FlowX Studio 技术设计文档"),

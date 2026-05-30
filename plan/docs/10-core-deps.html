@@ -160,10 +160,10 @@
 
 <h3 id="1024-listener-事件机制-已增强">10.2.4 Listener 事件机制 —— <strong>已增强</strong> ✅</h3>
 
-<pre><code class="language-go">type Listener interface {
-    Handle(p Pipeline, event Event)
-    Events() []Event
-}</code></pre>
+<p>type Listener interface {</p>
+<p>    Handle(p Pipeline, event Event)</p>
+<p>    Events() []Event</p>
+<p>}</p>
 
 <p><strong>现有事件类型</strong>：</p>
 <pre><code class="language-go">PipelineInit                // 流水线初始化
@@ -224,6 +224,7 @@ PipelineGraphModified       // 图被修改</code></pre>
 }</code></pre>
 
 <p><strong>评估结论</strong>：通过 <code>CurrentNode()</code> 接口，Listener 可精确获取事件关联的节点，无需遍历全图。完全满足 flowx-studio 的节点级事件需求。</p>
+
 <h3 id="1025-logger-pusher-满足">10.2.5 Logger Pusher —— 满足</h3>
 
 <pre><code class="language-go">type Pusher interface {
@@ -266,7 +267,7 @@ type Entry struct {
 
 <h2 id="103-已实现增强项">10.3 已实现增强项 ✅</h2>
 
-<h3 id="1031-pipeline-接口新增-currentnode-方法">10.3.1 Pipeline 接口新增 CurrentNode() 方法 —— <strong>已实现</strong></h3>
+<h3 id="1031-pipeline-接口新增-currentnode-方法-已实现">10.3.1 Pipeline 接口新增 CurrentNode() 方法 —— <strong>已实现</strong></h3>
 
 <p><strong>状态</strong>：✅ 已在 <code>feat/studio-enhancements</code> 分支实现并合并</p>
 
@@ -276,7 +277,6 @@ type Entry struct {
 <li><code>dag/pipeline_impl.go</code> —— PipelineImpl 添加 <code>currentNode</code> 字段 + 线程安全实现</li>
 <li><code>dag/pipeline_execution.go</code> —— <code>executeNodeWithLifecycle</code> 中设置/清理</li>
 </ul>
-
 <p><strong>验证</strong>：通过单元测试 <code>TestCurrentNode_*</code></p>
 
 <p><strong>使用方式</strong>：</p>
@@ -293,7 +293,7 @@ type Entry struct {
     }
 }</code></pre>
 
-<h3 id="1032-新增-pipelinenodefailed-事件">10.3.2 新增 PipelineNodeFailed 事件 —— <strong>已实现</strong></h3>
+<h3 id="1032-新增-pipelinenodefailed-事件-已实现">10.3.2 新增 PipelineNodeFailed 事件 —— <strong>已实现</strong></h3>
 
 <p><strong>状态</strong>：✅ 已实现</p>
 
@@ -303,15 +303,13 @@ type Entry struct {
 <li><code>dag/pipeline.go</code> —— 新增 <code>PipelineNodeFailed</code> 事件变量</li>
 <li><code>dag/pipeline_execution.go</code> —— 节点执行失败时触发该事件</li>
 </ul>
-
 <p><strong>使用方式</strong>：</p>
 <pre><code class="language-go">case dag.PipelineNodeFailed:
     if node := p.CurrentNode(); node != nil {
         l.eventCh &lt;- Event{Type: "node_failed", NodeID: node.Id()}
-    }
-</code></pre>
+    }</code></pre>
 
-<h3 id="1033-runtime-接口新增-listpipelines-方法">10.3.3 Runtime 接口新增 ListPipelines() 方法 —— <strong>已实现</strong></h3>
+<h3 id="1033-runtime-接口新增-listpipelines-方法-已实现">10.3.3 Runtime 接口新增 ListPipelines() 方法 —— <strong>已实现</strong></h3>
 
 <p><strong>状态</strong>：✅ 已实现</p>
 
@@ -320,14 +318,12 @@ type Entry struct {
 <li><code>runtime.go</code> —— Runtime 接口添加 <code>ListPipelines() []string</code></li>
 <li><code>runtime_impl.go</code> —— RuntimeImpl 实现方法</li>
 </ul>
-
 <p><strong>使用方式</strong>：</p>
 <pre><code class="language-go">activeIDs := runtime.ListPipelines()
 for _, id := range activeIDs {
     pipeline, _ := runtime.Get(id)
     fmt.Printf("Pipeline %s status: %s\n", id, pipeline.Status())
-}
-</code></pre>
+}</code></pre>
 
 <h2 id="104-事件桥接实现策略">10.4 事件桥接实现策略</h2>
 
@@ -370,8 +366,7 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
     case dag.PipelineResumed:
         l.eventCh &lt;- Event{Type: "pipeline_resumed"}
     }
-}
-</code></pre>
+}</code></pre>
 
 <p><strong>优势</strong>：</p>
 <ul>
@@ -379,7 +374,6 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 <li>精确的节点级事件，支持实时状态高亮</li>
 <li>原生支持失败事件，无需状态推断</li>
 </ul>
-
 <h2 id="105-版本兼容性矩阵">10.5 版本兼容性矩阵</h2>
 
 <table>
@@ -399,13 +393,13 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 </tbody>
 </table>
 
-<p><strong>注意</strong>：所有增强功能已合并到 FlowX 主分支，flowx-studio v0.1.0 可直接依赖最新版本，无需过渡方案。</p>
+<blockquote><strong>注意</strong>：所有增强功能已合并到 FlowX 主分支，flowx-studio v0.1.0 可直接依赖最新版本，无需过渡方案。</blockquote>
 
 <h2 id="106-实现记录">10.6 实现记录</h2>
 
 <p>所有增强功能已在 <code>github.com/LerkoX/flowx</code> 的 <code>feat/studio-enhancements</code> 分支实现并验证：</p>
 
-<h3>已实现功能清单</h3>
+<h3 id="已实现功能清单">已实现功能清单</h3>
 
 <table>
 <thead>
@@ -438,12 +432,11 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 </tbody>
 </table>
 
-<h3>相关提交</h3>
+<h3 id="相关提交">相关提交</h3>
 
 <ul>
-<li><strong>分支</strong>：<code>feat/studio-enhancements</code></li>
-<li><strong>修改文件</strong>：
-<ul>
+<li><strong>分支</strong>: <code>feat/studio-enhancements</code></li>
+<li><strong>修改文件</strong>:</li>
 <li><code>dag/pipeline.go</code> —— 接口扩展</li>
 <li><code>dag/pipeline_impl.go</code> —— <code>currentNode</code> 字段 + 实现</li>
 <li><code>dag/pipeline_execution.go</code> —— 生命周期中设置/清理</li>
@@ -453,12 +446,10 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 <li><code>dag/pipeline_studio_test.go</code> —— 新增测试（新增文件）</li>
 <li><code>runtime_test.go</code> —— 新增测试</li>
 </ul>
-</li>
-</ul>
-
-<h3>向后兼容性</h3>
+<h3 id="向后兼容性">向后兼容性</h3>
 
 <p>所有增强均为<strong>新增接口/方法</strong>，不修改现有接口签名，完全向后兼容。现有代码无需任何调整。</p>
+
             </article>
         </main>
     </div>

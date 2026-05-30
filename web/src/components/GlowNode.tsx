@@ -10,6 +10,8 @@ interface GlowNodeData {
   language?: string
   icon?: string
   accentColor?: string
+  inputs?: string[]
+  outputs?: Record<string, string>
 }
 
 const statusConfig = {
@@ -116,6 +118,50 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
           position={Position.Bottom}
           className="w-3 h-3 !bg-white/20 !border-white/30"
         />
+
+        {/* 入参与返回数据 */}
+        {(nodeData.inputs?.length || Object.keys(nodeData.outputs || {}).length) ? (
+          <div className="mt-3 pt-3 border-t border-white/10">
+            {/* 入参 */}
+            {nodeData.inputs && nodeData.inputs.length > 0 && (
+              <div className="mb-2">
+                <div className="text-[10px] text-white/30 uppercase tracking-wider mb-1">
+                  入参
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {nodeData.inputs.map((input) => (
+                    <span
+                      key={input}
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-white/50 border border-white/5"
+                    >
+                      {input}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 返回数据 */}
+            {nodeData.outputs && Object.keys(nodeData.outputs).length > 0 && (
+              <div>
+                <div className="text-[10px] text-white/30 uppercase tracking-wider mb-1">
+                  返回
+                </div>
+                <div className="space-y-1">
+                  {Object.entries(nodeData.outputs).map(([key, value]) => (
+                    <div
+                      key={key}
+                      className="flex items-center gap-2 text-[10px]"
+                    >
+                      <span className="text-white/40 font-mono">{key}:</span>
+                      <span className="text-white/60 font-mono truncate">{String(value)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : null}
       </div>
     </motion.div>
   )

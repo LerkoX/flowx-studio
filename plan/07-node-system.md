@@ -93,25 +93,63 @@ TIMEOUT="${FLOWX_PARAM_TIMEOUT:-30}"
 
 ### 7.2.2 输出规范
 
-节点将结果输出到 **stdout**，使用 JSON 格式：
+节点将结果输出到 **stdout**。为使下游节点能引用当前节点的输出，必须使用 `flowx-yaml` 代码块格式，FlowX 引擎会自动提取并写入 Metadata：
 
-```json
-{
-  "success": true,
-  "data": {
-    "file_path": "/tmp/image.jpg",
-    "size_bytes": 2048
-  },
-  "metadata": {
-    "duration_ms": 1500
-  }
-}
-```
-
-错误时输出到 **stderr** 并返回非 0 exit code：
+**标准输出（成功）**：
 
 ```bash
-# stderr
+echo '```flowx-yaml'
+echo "file_path: \"/tmp/image.jpg\"  # 下载文件路径"
+echo "size_bytes: 2048  # 文件大小字节数"
+echo '```'
+```
+
+提取后，FlowX 引擎将其存储到 Metadata 中的格式为：
+
+```go
+// Metadata["{nodeId}.file_path"] = FieldItem{
+//     Value:       "/tmp/image.jpg",
+//     Description: "下载文件路径",      // 从行尾注释提取
+//     SrcNode:     "{nodeId}",          // 自动设置为当前节点ID
+// }
+// Metadata["{nodeId}.size_bytes"] = FieldItem{
+//     Value:       2048,
+//     Description: "文件大小字节数",
+//     SrcNode:     "{nodeId}",
+// }
+```
+
+**下游节点引用方式**：
+
+```yaml
+Nodes:
+  Download:
+    # ... 执行下载 ...
+    extract:
+      type: codec-block
+    steps:
+      - name: download
+        run: |
+          echo '```flowx-yaml'
+          echo "file_path: \"/tmp/image.jpg\"  # 下载文件路径"
+          echo '```'
+
+  Process:
+    steps:
+      - name: process
+        run: |
+          echo "Processing {{ Metadata.Download.file_path }}"
+```
+
+**规则说明**：
+- 必须包裹在 ` ```flowx-yaml ` 代码块中
+- 字段值后可用 `# 描述` 添加行尾注释，自动提取为 `Description`
+- 提取的 key 会自动加上节点前缀：`{nodeId}.{key}`
+- 复杂类型（数组、对象）会被序列化为 JSON 字符串存储，下游节点自动解析
+
+**错误时输出到 stderr 并返回非 0 exit code**：
+
+```bash
 echo '{"success": false, "error": "下载失败：连接超时"}' >&2
 exit 1
 ```
@@ -121,10 +159,11 @@ exit 1
 在生成节点的 Prompt 中，必须明确要求 AI：
 
 1. 使用环境变量读取参数（`FLOWX_PARAM_*` 格式）
-2. 输出 JSON 到 stdout
+2. 使用 `flowx-yaml` 代码块输出结果到 stdout，以便下游节点通过 Metadata 引用
 3. 错误时输出 JSON 到 stderr 并 exit 1
 4. 包含基本的错误处理
 5. 提供有意义的日志输出
+6. 为 `flowx-yaml` 中的字段添加行尾注释（`# 描述`），方便生成字段说明
 
 ## 7.3 Mock 模式
 
@@ -141,7 +180,7 @@ exit 1
 
 ```python
 import os
-import json
+import sys
 import time
 
 # 读取参数
@@ -159,23 +198,14 @@ if not url.startswith(('http://', 'https://')):
 print("Mock: 模拟下载图片...")
 time.sleep(0.5)
 
-# 返回模拟结果
-result = {
-    "success": True,
-    "data": {
-        "file_path": "/tmp/mock_image_12345.jpg",
-        "size_bytes": 2048,
-        "format": "JPEG",
-        "width": 1920,
-        "height": 1080
-    },
-    "metadata": {
-        "duration_ms": 500,
-        "mock": True
-    }
-}
-
-print(json.dumps(result))
+# 返回模拟结果（flowx-yaml 格式，供下游节点引用）
+print('```flowx-yaml')
+print('file_path: "/tmp/mock_image_12345.jpg"  # 下载文件路径')
+print('size_bytes: 2048  # 文件大小字节数')
+print('format: "JPEG"  # 图片格式')
+print('width: 1920  # 图片宽度')
+print('height: 1080  # 图片高度')
+print('```')
 ```
 
 ### 7.3.2 Mock 执行器
