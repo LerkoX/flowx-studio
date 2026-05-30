@@ -17,7 +17,7 @@ export default defineConfig({
     port: 8089,
     open: false,
     host: '0.0.0.0',
-    allowedHosts: ['temp.docker.local', 'localhost', '0.0.0.0', '127.0.0.1'],
+    allowedHosts: ['temp.docker.local', 'localhost', '0.0.0.0', '127.0.0.1', '5ba5992d.r5.cpolar.top'],
     hmr: false,
   },
 })
