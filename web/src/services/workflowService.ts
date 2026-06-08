@@ -1,13 +1,114 @@
+import { apiClient } from './api'
 import type { ApiResponse } from '@/types/api'
+import type { Workflow } from '@/types/workflow'
+import type { ExecutionStatus } from '@/types/execution'
 
-// TODO: import axios and create apiClient when backend is ready
-// import axios from 'axios'
-// import { API_BASE_URL } from '@/utils/constants'
-// const apiClient = axios.create({
-//   baseURL: API_BASE_URL,
-//   headers: { 'Content-Type': 'application/json' },
-// })
+/**
+ * 获取工作流列表
+ * GET /api/v1/workflows
+ */
+export async function getWorkflows(params?: {
+  status?: string
+  search?: string
+  page?: number
+  page_size?: number
+}): Promise<ApiResponse<{ items: Workflow[]; total: number; page: number; pageSize: number }>> {
+  const response = await apiClient.get('/api/v1/workflows', { params })
+  return response.data
+}
 
+/**
+ * 获取工作流详情
+ * GET /api/v1/workflows/:id
+ */
+export async function getWorkflow(workflowId: string): Promise<ApiResponse<Workflow>> {
+  const response = await apiClient.get(`/api/v1/workflows/${workflowId}`)
+  return response.data
+}
+
+/**
+ * 创建工作流
+ * POST /api/v1/workflows
+ */
+export async function createWorkflow(
+  workflow: Omit<Workflow, 'id' | 'createdAt' | 'updatedAt'>
+): Promise<ApiResponse<Workflow>> {
+  const response = await apiClient.post('/api/v1/workflows', workflow)
+  return response.data
+}
+
+/**
+ * 更新工作流
+ * PUT /api/v1/workflows/:id
+ */
+export async function updateWorkflow(
+  workflowId: string,
+  workflow: Partial<Workflow>
+): Promise<ApiResponse<{ id: number }>> {
+  const response = await apiClient.put(`/api/v1/workflows/${workflowId}`, workflow)
+  return response.data
+}
+
+/**
+ * 删除工作流
+ * DELETE /api/v1/workflows/:id
+ */
+export async function deleteWorkflow(
+  workflowId: string
+): Promise<ApiResponse<{ message: string }>> {
+  const response = await apiClient.delete(`/api/v1/workflows/${workflowId}`)
+  return response.data
+}
+
+/**
+ * 执行工作流
+ * POST /api/v1/workflows/:id/run
+ */
+export async function runWorkflow(
+  workflowId: string,
+  params?: Record<string, unknown>,
+  dryRun = false
+): Promise<
+  ApiResponse<{
+    executionId: number
+    status: string
+    streamUrl: string
+  }>
+> {
+  const response = await apiClient.post(`/api/v1/workflows/${workflowId}/run`, {
+    parameters: params,
+    dry_run: dryRun,
+  })
+  return response.data
+}
+
+/**
+ * 获取执行历史
+ * GET /api/v1/executions
+ */
+export async function getExecutions(params?: {
+  workflow_id?: number
+  status?: string
+  page?: number
+  page_size?: number
+}): Promise<ApiResponse<{ items: ExecutionStatus[]; total: number; page: number; pageSize: number }>> {
+  const response = await apiClient.get('/api/v1/executions', { params })
+  return response.data
+}
+
+/**
+ * 获取执行详情
+ * GET /api/v1/executions/:id
+ */
+export async function getExecution(executionId: string): Promise<ApiResponse<ExecutionStatus>> {
+  const response = await apiClient.get(`/api/v1/executions/${executionId}`)
+  return response.data
+}
+
+/**
+ * 获取执行日志
+ * GET /api/v1/executions/:id/logs
+ */
 /**
  * 更新流水线参数
  * PUT /api/v1/workflows/:id/config
@@ -16,90 +117,37 @@ export async function updateWorkflowParams(
   workflowId: string,
   params: Record<string, string>
 ): Promise<ApiResponse<void>> {
-  // TODO: 后端 API 实现后移除 mock
-  console.log('[Mock API] updateWorkflowParams:', { workflowId, params })
-
-  // Mock: 模拟网络延迟
-  await new Promise((resolve) => setTimeout(resolve, 500))
-
-  // 实际实现（后端就绪后启用）:
-  // const response = await api.put(`/api/v1/workflows/${workflowId}/config`, {
-  //   param: params,
-  // })
-  // return response.data
-
-  return {
-    code: 200,
-    message: 'success',
-    data: undefined,
-  }
+  const response = await apiClient.put(`/api/v1/workflows/${workflowId}/config`, {
+    param: params,
+  })
+  return response.data
 }
 
-/**
- * 获取流水线配置
- * GET /api/v1/workflows/:id
- */
-export async function getWorkflow(workflowId: string): Promise<ApiResponse<unknown>> {
-  // TODO: 后端 API 实现后移除 mock
-  console.log('[Mock API] getWorkflow:', workflowId)
-
-  await new Promise((resolve) => setTimeout(resolve, 300))
-
-  // const response = await api.get(`/api/v1/workflows/${workflowId}`)
-  // return response.data
-
-  return {
-    code: 200,
-    message: 'success',
-    data: {},
+export async function getExecutionLogs(
+  executionId: string,
+  params?: {
+    node_id?: string
+    level?: string
+    limit?: number
+    offset?: number
   }
-}
-
-/**
- * 执行流水线
- * POST /api/v1/workflows/:id/run
- */
-export async function runWorkflow(
-  workflowId: string,
-  params?: Record<string, unknown>,
-  dryRun = false
-): Promise<ApiResponse<{ executionId: string; status: string; streamUrl: string }>> {
-  // TODO: 后端 API 实现后移除 mock
-  console.log('[Mock API] runWorkflow:', { workflowId, params, dryRun })
-
-  await new Promise((resolve) => setTimeout(resolve, 800))
-
-  // const response = await api.post(`/api/v1/workflows/${workflowId}/run`, {
-  //   parameters: params,
-  //   dry_run: dryRun,
-  // })
-  // return response.data
-
-  return {
-    code: 200,
-    message: 'Workflow execution started',
-    data: {
-      executionId: `exec_${Date.now()}`,
-      status: 'running',
-      streamUrl: `/api/v1/executions/exec_${Date.now()}/stream`,
-    },
-  }
-}
-
-/**
- * 获取执行详情
- * GET /api/v1/executions/:id
- */
-export async function getExecution(
-  executionId: string
-): Promise<ApiResponse<unknown>> {
-  console.log('[Mock API] getExecution:', executionId)
-
-  await new Promise((resolve) => setTimeout(resolve, 300))
-
-  return {
-    code: 200,
-    message: 'success',
-    data: {},
-  }
+): Promise<
+  ApiResponse<{
+    items: Array<{
+      id: number
+      execution_id: number
+      node_id: string
+      node_name: string
+      level: string
+      message: string
+      output: string
+      timestamp: string
+    }>
+    total: number
+    limit: number
+    offset: number
+  }>
+> {
+  const response = await apiClient.get(`/api/v1/executions/${executionId}/logs`, { params })
+  return response.data
 }

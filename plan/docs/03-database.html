@@ -79,26 +79,49 @@ FLOWX_DB_PATH=/custom/path/flowx.db</code></pre>
 
 <h3 id="331-节点注册中心-nodes">3.3.1 节点注册中心 (nodes)</h3>
 
-<p>存储 AI 生成的可复用节点。</p>
+<p>存储可复用节点，支持代码节点和镜像节点两种类型。</p>
 
 <pre><code class="language-sql">CREATE TABLE nodes (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     name            TEXT NOT NULL UNIQUE,           -- 节点唯一标识（蛇形命名）
+    display_name    TEXT,                            -- 展示名称
     description     TEXT,                            -- 节点功能描述
-    language        TEXT NOT NULL,                   -- 编程语言: python | go | bash | node
-    code            TEXT NOT NULL,                   -- 节点实现代码
-    mock_code       TEXT NOT NULL,                   -- Mock 测试代码
-    parameters      TEXT NOT NULL,                   -- JSON: 参数定义列表
-    dockerfile      TEXT,                            -- 可选：自定义 Dockerfile
-    requirements    TEXT,                            -- 可选：依赖列表（如 requirements.txt）
-    tags            TEXT,                            -- 标签，逗号分隔
+    version         TEXT,                            -- 版本号
+    author          TEXT,                            -- 作者
+    icon            TEXT,                            -- 图标 emoji 或 URL
+
+    -- 节点类型
+    node_type       TEXT NOT NULL DEFAULT 'code',    -- code | image
+
+    -- 代码节点字段（node_type='code' 时有效）
+    language        TEXT,                            -- 编程语言: python | go | bash | node
+    code            TEXT,                            -- 节点实现代码
+    entry           TEXT,                            -- 入口文件
+    requirements    TEXT,                            -- 依赖列表（JSON 数组）
+
+    -- 镜像节点字段（node_type='image' 时有效）
+    image           TEXT,                            -- Docker 镜像地址，如 jrottenberg/ffmpeg:4.4
+
+    -- 通用配置
+    parameters      TEXT NOT NULL DEFAULT '[]',      -- JSON: 参数定义列表
+    outputs         TEXT DEFAULT '[]',               -- JSON: 输出定义列表
+    docker_config   TEXT,                            -- JSON: Docker 运行配置
+    mock_config     TEXT,                            -- JSON: Mock 测试配置
+
+    -- 来源信息
+    source_type     TEXT DEFAULT 'manual',           -- git | manual
+    source_url      TEXT,                            -- Git 仓库地址或镜像来源
+    source_path     TEXT,                            -- 本地路径
+
+    tags            TEXT DEFAULT '[]',               -- JSON: 标签数组
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 索引
+CREATE INDEX idx_nodes_node_type ON nodes(node_type);
 CREATE INDEX idx_nodes_language ON nodes(language);
-CREATE INDEX idx_nodes_tags ON nodes(tags);</code></pre>
+CREATE INDEX idx_nodes_source_type ON nodes(source_type);</code></pre>
 
 <p><strong>parameters JSON 结构示例</strong>：</p>
 <pre><code class="language-json">[
@@ -118,9 +141,15 @@ CREATE INDEX idx_nodes_tags ON nodes(tags);</code></pre>
   }
 ]</code></pre>
 
+<p><strong>代码节点 vs 镜像节点</strong>：</p>
+<ul>
+<li><strong>代码节点</strong>（<code>node_type='code'</code>）：通过 Git 仓库导入，包含 <code>language</code>、<code>code</code>、<code>entry</code>、<code>requirements</code> 字段</li>
+<li><strong>镜像节点</strong>（<code>node_type='image'</code>）：直接使用 Docker 镜像，<code>image</code> 字段存储镜像地址，如 <code>jrottenberg/ffmpeg:4.4-alpine</code></li>
+</ul>
+
 <h3 id="332-工作流-workflows">3.3.2 工作流 (workflows)</h3>
 
-<p>存储 AI 生成的工作流定义。</p>
+<p>存储工作流定义。</p>
 
 <pre><code class="language-sql">CREATE TABLE workflows (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -129,7 +158,6 @@ CREATE INDEX idx_nodes_tags ON nodes(tags);</code></pre>
     intent          TEXT,                            -- 用户需求原文
     yaml_config     TEXT NOT NULL,                   -- 完整 FlowX YAML 配置
     status          TEXT DEFAULT 'draft',            -- draft | active | archived
-    node_ids        TEXT,                            -- JSON: 引用的节点 ID 列表
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -137,6 +165,36 @@ CREATE INDEX idx_nodes_tags ON nodes(tags);</code></pre>
 -- 索引
 CREATE INDEX idx_workflows_status ON workflows(status);
 CREATE INDEX idx_workflows_created ON workflows(created_at);</code></pre>
+
+<h3 id="333-工作流节点关联-workflow_nodes">3.3.3 工作流节点关联 (workflow_nodes)</h3>
+
+<p>存储工作流与节点的关联关系，替代原有的 <code>node_ids</code> JSON 数组，支持外键约束和更灵活的节点配置。</p>
+
+<pre><code class="language-sql">CREATE TABLE workflow_nodes (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    workflow_id     INTEGER NOT NULL,                -- 关联工作流
+    node_id         INTEGER NOT NULL,                -- 关联节点
+    node_name       TEXT NOT NULL,                   -- 工作流中的节点别名
+    sort_order      INTEGER DEFAULT 0,               -- 执行顺序
+    param_override  TEXT DEFAULT '{}',               -- JSON: 参数覆盖
+    condition       TEXT,                            -- 执行条件表达式
+    is_enabled      BOOLEAN DEFAULT 1,               -- 是否启用
+
+    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE,
+    FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE RESTRICT,
+    UNIQUE(workflow_id, node_name)
+);
+
+-- 索引
+CREATE INDEX idx_wf_nodes_workflow ON workflow_nodes(workflow_id);
+CREATE INDEX idx_wf_nodes_node ON workflow_nodes(node_id);
+CREATE INDEX idx_wf_nodes_order ON workflow_nodes(workflow_id, sort_order);</code></pre>
+
+<p><strong>param_override JSON 结构示例</strong>：</p>
+<pre><code class="language-json">{
+  "timeout": 60,
+  "retries": 3
+}</code></pre>
 
 <p><strong>yaml_config 示例</strong>：</p>
 <pre><code class="language-yaml">name: image_processing
@@ -161,7 +219,7 @@ nodes:
         commands:
           - python {{.node.code}}</code></pre>
 
-<h3 id="333-执行记录-executions">3.3.3 执行记录 (executions)</h3>
+<h3 id="334-执行记录-executions">3.3.4 执行记录 (executions)</h3>
 
 <p>存储工作流执行历史和结果。</p>
 
@@ -199,7 +257,7 @@ CREATE INDEX idx_executions_created ON executions(created_at);</code></pre>
   }
 }</code></pre>
 
-<h3 id="334-执行节点状态-execution_nodes">3.3.4 执行节点状态 (execution_nodes)</h3>
+<h3 id="335-执行节点状态-execution_nodes">3.3.5 执行节点状态 (execution_nodes)</h3>
 
 <p>存储每次执行中各节点的详细状态（用于支持运行时监控）。</p>
 
@@ -261,7 +319,7 @@ CREATE INDEX idx_exec_logs_timestamp ON execution_logs(timestamp);</code></pre>
 
 <pre><code class="language-sql">CREATE TABLE ai_configs (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    provider        TEXT NOT NULL,                   -- openai | anthropic | ollama
+    provider        TEXT NOT NULL,                   -- openai | anthropic | ollama | custom
     name            TEXT NOT NULL,                   -- 配置名称（用户自定义）
     model           TEXT NOT NULL,                   -- 模型名称
     api_key         TEXT,                            -- API 密钥（加密存储）
@@ -286,7 +344,44 @@ CREATE UNIQUE INDEX idx_ai_configs_active ON ai_configs(is_active) WHERE is_acti
   "max_context_length": 128000
 }</code></pre>
 
-<h3 id="336-系统配置-system_configs">3.3.6 系统配置 (system_configs)</h3>
+<h3 id="337-mcp-配置-mcp_configs">3.3.7 MCP 配置 (mcp_configs)</h3>
+
+<p>存储 MCP 服务器配置，支持本地命令模式和远程 SSE 模式。</p>
+
+<pre><code class="language-sql">CREATE TABLE mcp_configs (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                TEXT NOT NULL,                   -- 配置名称
+    mode                TEXT NOT NULL DEFAULT 'local',   -- local | remote
+
+    -- 本地模式字段
+    command             TEXT,                            -- 命令
+    args                TEXT DEFAULT '[]',               -- JSON: 参数数组
+    env                 TEXT DEFAULT '{}',               -- JSON: 环境变量
+
+    -- 远程 SSE 模式字段
+    url                 TEXT,                            -- SSE 地址
+    auth_header_key     TEXT,                            -- Auth Header Key
+    auth_header_value   TEXT,                            -- Auth Header Value（加密存储）
+
+    -- 通用字段
+    is_enabled          BOOLEAN DEFAULT 1,               -- 是否启用
+    status              TEXT DEFAULT 'disconnected',     -- connected | disconnected | error
+    last_error          TEXT,                            -- 上次错误信息
+    created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 索引
+CREATE INDEX idx_mcp_mode ON mcp_configs(mode);
+CREATE INDEX idx_mcp_enabled ON mcp_configs(is_enabled);</code></pre>
+
+<p><strong>env JSON 结构示例</strong>：</p>
+<pre><code class="language-json">{
+  "API_KEY": "sk-xxxx",
+  "DEBUG": "true"
+}</code></pre>
+
+<h3 id="338-系统配置-system_configs">3.3.8 系统配置 (system_configs)</h3>
 
 <p>存储系统级配置参数。</p>
 
@@ -307,9 +402,17 @@ INSERT INTO system_configs (key, value, description) VALUES
 ('server_port', '8080', 'HTTP 服务端口'),
 ('log_retention_days', '30', '执行日志保留天数'),
 ('log_max_buffer_size', '1000', '实时日志内存缓冲区大小'),
-('log_auto_scroll', 'true', '日志查看器默认自动滚动');</code></pre>
+('log_auto_scroll', 'true', '日志查看器默认自动滚动'),
+('theme', 'dark', '主题: dark | light | system'),
+('language', 'zh-CN', '界面语言'),
+('auto_save', 'true', '是否自动保存'),
+('auto_save_interval', '30', '自动保存间隔（秒）'),
+('show_notifications', 'true', '是否显示通知'),
+('confirm_before_delete', 'true', '删除前是否确认'),
+('default_node_timeout', '300', '默认节点超时（秒）'),
+('max_concurrent_executions', '5', '最大并发执行数');</code></pre>
 
-<h3 id="337-对话历史-chat_history">3.3.7 对话历史 (chat_history)</h3>
+<h3 id="339-对话历史-chat_history">3.3.9 对话历史 (chat_history)</h3>
 
 <p>存储用户与 AI 的对话记录。</p>
 
@@ -340,7 +443,8 @@ CREATE INDEX idx_chat_context ON chat_history(context_type, context_id);</code><
     </div>
     <div class="mermaid-wrapper">
         <pre class="mermaid">erDiagram
-    nodes ||--o{ workflows : "被引用"
+    nodes ||--o{ workflow_nodes : "被引用"
+    workflows ||--o{ workflow_nodes : "包含"
     workflows ||--o{ executions : "1:N"
     executions ||--o{ execution_nodes : "1:N"
     executions ||--o{ execution_logs : "1:N"
@@ -350,9 +454,17 @@ CREATE INDEX idx_chat_context ON chat_history(context_type, context_id);</code><
     nodes {
         int id PK
         string name UK
+        string display_name
+        string node_type
         string language
         text code
+        string image
         text parameters
+        text outputs
+        string source_type
+        string source_url
+        text tags
+        datetime created_at
     }
 
     workflows {
@@ -360,7 +472,17 @@ CREATE INDEX idx_chat_context ON chat_history(context_type, context_id);</code><
         string name
         text yaml_config
         string status
-        text node_ids
+        datetime created_at
+    }
+
+    workflow_nodes {
+        int id PK
+        int workflow_id FK
+        int node_id FK
+        string node_name
+        int sort_order
+        text param_override
+        boolean is_enabled
     }
 
     executions {
@@ -369,6 +491,7 @@ CREATE INDEX idx_chat_context ON chat_history(context_type, context_id);</code><
         string status
         text logs
         text result
+        datetime started_at
     }
 
     execution_nodes {
@@ -377,14 +500,7 @@ CREATE INDEX idx_chat_context ON chat_history(context_type, context_id);</code><
         string node_id
         string status
         text logs
-    }
-
-    ai_configs {
-        int id PK
-        string provider
-        string model
-        string api_key
-        boolean is_active
+        text output
     }
 
     execution_logs {
@@ -392,11 +508,34 @@ CREATE INDEX idx_chat_context ON chat_history(context_type, context_id);</code><
         int execution_id FK
         string node_id
         string node_name
-        string step_name
         string level
         text message
         text output
         datetime timestamp
+    }
+
+    ai_configs {
+        int id PK
+        string provider
+        string name
+        string model
+        string api_key
+        real temperature
+        boolean is_active
+        boolean is_enabled
+    }
+
+    mcp_configs {
+        int id PK
+        string name
+        string mode
+        string command
+        text args
+        text env
+        string url
+        string auth_header_key
+        boolean is_enabled
+        string status
     }
 
     chat_history {
@@ -418,9 +557,110 @@ CREATE INDEX idx_chat_context ON chat_history(context_type, context_id);</code><
 <p>使用简单的版本化迁移机制：</p>
 
 <pre><code>migrations/
-├── 001_init.sql          -- 初始 Schema
-├── 002_add_node_tags.sql -- 添加节点标签
-└── 003_add_workflow_intent.sql -- 添加意图字段</code></pre>
+├── 001_init.sql                  -- 初始 Schema
+├── 002_add_node_tags.sql         -- 添加节点标签
+├── 003_add_workflow_intent.sql   -- 添加意图字段
+├── 004_refactor_nodes.sql        -- 重构节点表（支持 code/image 双模式）
+├── 005_add_workflow_nodes.sql    -- 新增工作流节点关联表
+├── 006_add_mcp_configs.sql       -- 新增 MCP 配置表
+└── 007_update_system_configs.sql -- 更新系统配置项</code></pre>
+
+<h3 id="353-关键迁移脚本示例">3.5.3 关键迁移脚本示例</h3>
+
+<p><strong>004_refactor_nodes.sql</strong> — 重构节点表：</p>
+<pre><code class="language-sql">-- 1. 备份原表
+ALTER TABLE nodes RENAME TO nodes_old;
+
+-- 2. 创建新表
+CREATE TABLE nodes (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL UNIQUE,
+    display_name    TEXT,
+    description     TEXT,
+    version         TEXT,
+    author          TEXT,
+    icon            TEXT,
+    node_type       TEXT NOT NULL DEFAULT 'code',
+    language        TEXT,
+    code            TEXT,
+    entry           TEXT,
+    requirements    TEXT,
+    image           TEXT,
+    parameters      TEXT NOT NULL DEFAULT '[]',
+    outputs         TEXT DEFAULT '[]',
+    docker_config   TEXT,
+    mock_config     TEXT,
+    source_type     TEXT DEFAULT 'manual',
+    source_url      TEXT,
+    source_path     TEXT,
+    tags            TEXT DEFAULT '[]',
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 3. 迁移数据（旧数据默认为代码节点）
+INSERT INTO nodes (
+    id, name, description, language, code, parameters,
+    requirements, tags, created_at, updated_at
+)
+SELECT 
+    id, name, description, language, code, parameters,
+    requirements, 
+    CASE WHEN tags IS NOT NULL THEN json_array(tags) ELSE '[]' END,
+    created_at, updated_at
+FROM nodes_old;
+
+-- 4. 删除旧表
+DROP TABLE nodes_old;
+
+-- 5. 创建索引
+CREATE INDEX idx_nodes_node_type ON nodes(node_type);
+CREATE INDEX idx_nodes_language ON nodes(language);
+CREATE INDEX idx_nodes_source_type ON nodes(source_type);</code></pre>
+
+<p><strong>005_add_workflow_nodes.sql</strong> — 新增关联表：</p>
+<pre><code class="language-sql">-- 从 workflows.node_ids 迁移到 workflow_nodes
+CREATE TABLE workflow_nodes (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    workflow_id     INTEGER NOT NULL,
+    node_id         INTEGER NOT NULL,
+    node_name       TEXT NOT NULL,
+    sort_order      INTEGER DEFAULT 0,
+    param_override  TEXT DEFAULT '{}',
+    condition       TEXT,
+    is_enabled      BOOLEAN DEFAULT 1,
+    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE,
+    FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE RESTRICT,
+    UNIQUE(workflow_id, node_name)
+);
+
+CREATE INDEX idx_wf_nodes_workflow ON workflow_nodes(workflow_id);
+CREATE INDEX idx_wf_nodes_node ON workflow_nodes(node_id);
+CREATE INDEX idx_wf_nodes_order ON workflow_nodes(workflow_id, sort_order);
+
+-- 迁移数据（从 workflows.node_ids JSON 数组）
+-- 注：需要在应用层执行，SQLite 无内置 JSON 遍历函数</code></pre>
+
+<p><strong>006_add_mcp_configs.sql</strong> — 新增 MCP 配置：</p>
+<pre><code class="language-sql">CREATE TABLE mcp_configs (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                TEXT NOT NULL,
+    mode                TEXT NOT NULL DEFAULT 'local',
+    command             TEXT,
+    args                TEXT DEFAULT '[]',
+    env                 TEXT DEFAULT '{}',
+    url                 TEXT,
+    auth_header_key     TEXT,
+    auth_header_value   TEXT,
+    is_enabled          BOOLEAN DEFAULT 1,
+    status              TEXT DEFAULT 'disconnected',
+    last_error          TEXT,
+    created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_mcp_mode ON mcp_configs(mode);
+CREATE INDEX idx_mcp_enabled ON mcp_configs(is_enabled);</code></pre>
 
 <h3 id="352-迁移执行逻辑">3.5.2 迁移执行逻辑</h3>
 

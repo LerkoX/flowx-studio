@@ -1,3 +1,27 @@
 node_modules
 .vite
 .playwright-mcp
+
+# Build artifacts
+flowx-studio
+*.exe
+
+# Go
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Package lock (optional)
+package-lock.json

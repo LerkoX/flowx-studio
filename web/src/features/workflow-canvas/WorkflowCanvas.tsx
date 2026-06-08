@@ -16,6 +16,7 @@ import GlowNode from '@/components/GlowNode'
 import GradientEdge from '@/components/GradientEdge'
 import { autoLayout } from './AutoLayout'
 import { useWorkflowStore } from '@/stores/workflowStore'
+import { useIsMobile } from '@/hooks/useMediaQuery'
 
 const nodeTypes = { glowNode: GlowNode }
 const edgeTypes = { gradientEdge: GradientEdge }
@@ -174,6 +175,8 @@ function WorkflowCanvasInner() {
     setSelectedNode(node.id)
   }, [])
 
+  const isMobile = useIsMobile()
+
   return (
     <div className="w-full h-full relative">
       <ReactFlow
@@ -185,50 +188,57 @@ function WorkflowCanvasInner() {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         fitView
-        fitViewOptions={{ padding: 0.2 }}
-        minZoom={0.2}
+        fitViewOptions={{ padding: isMobile ? 0.1 : 0.2 }}
+        minZoom={0.1}
         maxZoom={2}
-        nodesDraggable={true}
+        nodesDraggable={!isMobile}
         nodesConnectable={false}
         elementsSelectable={true}
+        panOnScroll={true}
+        panOnDrag={true}
+        selectionOnDrag={false}
         className="canvas-background"
       >
         {/* 星空点阵背景 */}
         <Background
           color="rgba(255,255,255,0.03)"
-          gap={24}
+          gap={isMobile ? 16 : 24}
           size={1}
           style={{ background: 'transparent' }}
         />
 
-        {/* 控制按钮 */}
-        <Controls
-          className="!bg-white/5 !border-white/10 !backdrop-blur-xl !rounded-xl"
-          style={{
-            // @ts-expect-error React Flow custom style
-            button: { background: 'transparent', color: 'rgba(255,255,255,0.6)', border: 'none' },
-          }}
-        />
+        {/* 控制按钮 - 移动端隐藏 */}
+        {!isMobile && (
+          <Controls
+            className="!bg-white/5 !border-white/10 !backdrop-blur-xl !rounded-xl"
+            style={{
+              // @ts-expect-error React Flow custom style
+              button: { background: 'transparent', color: 'rgba(255,255,255,0.6)', border: 'none' },
+            }}
+          />
+        )}
 
-        {/* 小地图 */}
-        <MiniMap
-          className="!bg-white/5 !border-white/10 !rounded-xl !backdrop-blur-xl"
-          nodeColor={(node) => {
-            const colors: Record<string, string> = {
-              idle: '#94a3b8',
-              running: '#22d3ee',
-              success: '#34d399',
-              failed: '#fb7185',
-              skipped: '#64748b',
-            }
-            return colors[node.data?.status as string] || '#94a3b8'
-          }}
-          maskColor="rgba(10, 14, 39, 0.7)"
-        />
+        {/* 小地图 - 移动端隐藏 */}
+        {!isMobile && (
+          <MiniMap
+            className="!bg-white/5 !border-white/10 !rounded-xl !backdrop-blur-xl"
+            nodeColor={(node) => {
+              const colors: Record<string, string> = {
+                idle: '#94a3b8',
+                running: '#22d3ee',
+                success: '#34d399',
+                failed: '#fb7185',
+                skipped: '#64748b',
+              }
+              return colors[node.data?.status as string] || '#94a3b8'
+            }}
+            maskColor="rgba(10, 14, 39, 0.7)"
+          />
+        )}
 
         {/* 状态面板 */}
-        <Panel position="top-right" className="m-4">
-          <div className="glass-panel px-4 py-2 text-xs text-white/60">
+        <Panel position="top-right" className={`${isMobile ? 'm-2' : 'm-4'}`}>
+          <div className={`glass-panel px-3 py-1.5 text-white/60 ${isMobile ? 'text-[10px]' : 'text-xs'}`}>
             {currentWorkflow?.name || '演示工作流'}
           </div>
         </Panel>

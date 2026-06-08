@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import { Server, Container, Cloud } from 'lucide-react'
 import ExecutorForm from '@/features/executor-config/ExecutorForm'
 import ExecutorMonitor from '@/features/executor-config/ExecutorMonitor'
+import { useIsMobile } from '@/hooks/useMediaQuery'
 
 const executorTypes = [
   { id: 'local', name: 'Local', icon: Server, description: '本地 Shell 执行器' },
@@ -12,6 +13,62 @@ const executorTypes = [
 
 export default function ExecutorConfigPage() {
   const [selectedExecutor, setSelectedExecutor] = useState<string>('local')
+  const isMobile = useIsMobile()
+
+  if (isMobile) {
+    return (
+      <div className="h-full overflow-auto p-4 space-y-4">
+        <h2 className="text-white/90 font-semibold text-lg">执行器</h2>
+
+        {/* 执行器类型卡片 - 横向滚动 */}
+        <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
+          {executorTypes.map((type) => {
+            const Icon = type.icon
+            const isActive = selectedExecutor === type.id
+
+            return (
+              <motion.button
+                key={type.id}
+                onClick={() => setSelectedExecutor(type.id)}
+                className={`
+                  flex-shrink-0 p-3 rounded-xl text-left transition-all
+                  ${isActive
+                    ? 'bg-white/10 border border-white/20'
+                    : 'bg-white/5 border border-white/10 hover:bg-white/[0.07]'
+                  }
+                `}
+                whileTap={{ scale: 0.98 }}
+              >
+                <div className="flex items-center gap-2">
+                  <div
+                    className={`
+                      w-8 h-8 rounded-lg flex items-center justify-center
+                      ${isActive
+                        ? 'bg-gradient-to-br from-indigo-500 to-purple-500'
+                        : 'bg-white/5'
+                      }
+                    `}
+                  >
+                    <Icon size={16} className={isActive ? 'text-white' : 'text-white/50'} />
+                  </div>
+                  <div>
+                    <div className="text-white/90 font-medium text-sm">{type.name}</div>
+                    <div className="text-white/40 text-xs">{type.description}</div>
+                  </div>
+                </div>
+              </motion.button>
+            )
+          })}
+        </div>
+
+        {/* 配置表单 */}
+        <div className="space-y-4">
+          <ExecutorForm type={selectedExecutor} />
+          <ExecutorMonitor type={selectedExecutor} />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="h-full flex p-6 gap-6">

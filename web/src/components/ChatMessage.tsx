@@ -4,6 +4,7 @@ import type { ChatMessage as ChatMessageType } from '@/types/ai'
 import ReactMarkdown from 'react-markdown'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { useIsMobile } from '@/hooks/useMediaQuery'
 
 interface ChatMessageProps {
   message: ChatMessageType
@@ -11,34 +12,39 @@ interface ChatMessageProps {
 
 export default function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === 'user'
+  const isMobile = useIsMobile()
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-      className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
+      className={`flex gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
     >
       {/* 头像 */}
       <div
-        className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+        className={`rounded-full flex items-center justify-center flex-shrink-0 ${
+          isMobile ? 'w-7 h-7' : 'w-8 h-8'
+        } ${
           isUser
             ? 'bg-white/10'
             : 'bg-gradient-to-br from-indigo-500 to-purple-500'
         }`}
       >
-        {isUser ? <User size={16} className="text-white/70" /> : <Bot size={16} className="text-white" />}
+        {isUser ? <User size={isMobile ? 14 : 16} className="text-white/70" /> : <Bot size={isMobile ? 14 : 16} className="text-white" />}
       </div>
 
       {/* 消息内容 */}
       <div
-        className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+        className={`rounded-2xl px-3 py-2 ${
+          isMobile ? 'max-w-[85%]' : 'max-w-[80%]'
+        } ${
           isUser
             ? 'bg-indigo-500/20 border border-indigo-500/30'
             : 'bg-white/5 border border-white/10'
         }`}
       >
-        <div className="text-sm text-white/90 prose prose-invert prose-sm max-w-none">
+        <div className={`text-white/90 prose prose-invert max-w-none ${isMobile ? 'prose-sm text-xs' : 'prose-sm'}`}>
           <ReactMarkdown
             components={{
               code({ node, inline, className, children, ...props }: {
@@ -68,7 +74,7 @@ export default function ChatMessage({ message }: ChatMessageProps) {
             {message.content}
           </ReactMarkdown>
         </div>
-        <div className="text-[10px] text-white/30 mt-2">
+        <div className={`text-white/30 mt-1 ${isMobile ? 'text-[9px]' : 'text-[10px]'}`}>
           {message.timestamp.toLocaleTimeString()}
         </div>
       </div>

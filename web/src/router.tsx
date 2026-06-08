@@ -1,8 +1,9 @@
 import { RouterProvider, createBrowserRouter } from 'react-router-dom'
 import Layout from '@/components/Layout'
 import WorkflowCanvasPage from '@/pages/WorkflowCanvasPage'
-import NodeGeneratorPage from '@/pages/NodeGeneratorPage'
+import NodeManagerPage from '@/pages/NodeManagerPage'
 import ExecutorConfigPage from '@/pages/ExecutorConfigPage'
+import SettingsPage from '@/pages/SettingsPage'
 
 const router = createBrowserRouter([
   {
@@ -10,8 +11,9 @@ const router = createBrowserRouter([
     element: <Layout />,
     children: [
       { path: '/', element: <WorkflowCanvasPage /> },
-      { path: '/node-generator', element: <NodeGeneratorPage /> },
+      { path: '/nodes', element: <NodeManagerPage /> },
       { path: '/executors', element: <ExecutorConfigPage /> },
+      { path: '/settings', element: <SettingsPage /> },
     ],
   },
 ])
