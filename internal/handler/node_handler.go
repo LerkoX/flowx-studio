@@ -3,23 +3,30 @@ package handler
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/LerkoX/flowx-studio/internal/db"
 	"github.com/LerkoX/flowx-studio/internal/model"
+	"github.com/LerkoX/flowx-studio/internal/sandbox"
 	"github.com/gin-gonic/gin"
 )
 
 // NodeHandler 节点处理器
 type NodeHandler struct {
-	db *db.DB
+	db       *db.DB
+	executor *sandbox.Executor
 }
 
 // NewNodeHandler 创建节点处理器
 func NewNodeHandler(database *db.DB) *NodeHandler {
-	return &NodeHandler{db: database}
+	return &NodeHandler{
+		db:       database,
+		executor: sandbox.NewExecutor(),
+	}
 }
 
 // RegisterRoutes 注册路由
@@ -235,7 +242,13 @@ func (h *NodeHandler) Delete(c *gin.Context) {
 	Success(c, gin.H{"message": "node deleted"})
 }
 
-// MockTest Mock 测试节点
+// MockTestRequest Mock 测试请求
+type MockTestRequest struct {
+	Parameters map[string]string `json:"parameters"` // 用户输入的参数值
+	Timeout    int               `json:"timeout"`    // 超时时间（秒，默认30）
+}
+
+// MockTest Mock 测试节点（真实子进程执行）
 func (h *NodeHandler) MockTest(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -243,6 +256,7 @@ func (h *NodeHandler) MockTest(c *gin.Context) {
 		return
 	}
 
+	// 获取节点
 	row := h.db.QueryRowx("SELECT * FROM nodes WHERE id = ?", id)
 	var node model.Node
 	if err := scanNode(row, &node); err != nil {
@@ -254,15 +268,69 @@ func (h *NodeHandler) MockTest(c *gin.Context) {
 		return
 	}
 
-	// V1: 返回模拟结果
+	// 只支持代码节点
+	if node.NodeType != "code" {
+		Error(c, http.StatusBadRequest, "mock test only supports code nodes")
+		return
+	}
+
+	if strings.TrimSpace(node.Code) == "" {
+		Error(c, http.StatusBadRequest, "node code is empty")
+		return
+	}
+
+	// 解析请求参数
+	var req MockTestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// 没有请求体也允许，使用默认参数
+		req.Parameters = make(map[string]string)
+	}
+
+	// 构建环境变量（参数通过环境变量注入）
+	envVars := make(map[string]string)
+
+	// 注入节点定义的参数默认值
+	for _, param := range node.Parameters {
+		key := strings.ToUpper(param.Name)
+		// 优先使用用户传入的值
+		if val, ok := req.Parameters[param.Name]; ok && val != "" {
+			envVars[key] = val
+		} else if param.Default != nil {
+			// 使用默认值
+			envVars[key] = fmt.Sprintf("%v", param.Default)
+		}
+	}
+
+	// 设置超时
+	timeout := 30 * time.Second
+	if req.Timeout > 0 {
+		timeout = time.Duration(req.Timeout) * time.Second
+	}
+	if timeout > 5*time.Minute {
+		timeout = 5 * time.Minute // 最大 5 分钟
+	}
+	h.executor.Timeout = timeout
+
+	// 执行代码
+	opts := sandbox.ExecuteOptions{
+		Code:     node.Code,
+		Language: node.Language,
+		Entry:    node.Entry,
+		EnvVars:  envVars,
+	}
+
+	result := h.executor.Execute(opts)
+
+	// 返回结果
 	Success(c, gin.H{
-		"status":      "success",
-		"duration_ms": 520,
-		"output": gin.H{
-			"message": "Mock test executed (V1 placeholder)",
-			"node":    node.Name,
-		},
-		"logs": "Mock: 模拟执行节点 " + node.Name + "\nMock: 执行完成",
+		"status":      result.Status,
+		"duration_ms": result.DurationMs,
+		"output":      result.Output,
+		"stdout":      result.Stdout,
+		"stderr":      result.Stderr,
+		"logs":        result.Logs,
+		"error":       result.Error,
+		"exit_code":   result.ExitCode,
 	})
 }
 

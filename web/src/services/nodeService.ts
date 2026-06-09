@@ -65,15 +65,20 @@ export async function deleteNode(nodeId: string): Promise<ApiResponse<{ message:
  */
 export async function mockTestNode(
   nodeId: string,
-  parameters?: Record<string, unknown>
+  parameters?: Record<string, string>,
+  timeout?: number
 ): Promise<
   ApiResponse<{
     status: string
     duration_ms: number
     output: Record<string, unknown>
+    stdout: string
+    stderr: string
     logs: string
+    error: string
+    exit_code: number
   }>
 > {
-  const response = await apiClient.post(`/api/v1/nodes/${nodeId}/mock`, { parameters })
+  const response = await apiClient.post(`/api/v1/nodes/${nodeId}/mock`, { parameters, timeout })
   return response.data
 }

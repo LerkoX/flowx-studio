@@ -1,14 +1,15 @@
 import { motion } from 'framer-motion'
-import { GitBranch, Container, Code, Trash2, Eye } from 'lucide-react'
+import { GitBranch, Container, Code, Trash2, Eye, Play } from 'lucide-react'
 import type { NodeDefinition } from '@/types/node'
 
 interface NodeCardProps {
   node: NodeDefinition
   onView: (node: NodeDefinition) => void
+  onTest: (node: NodeDefinition) => void
   onDelete: (nodeId: string) => void
 }
 
-export default function NodeCard({ node, onView, onDelete }: NodeCardProps) {
+export default function NodeCard({ node, onView, onTest, onDelete }: NodeCardProps) {
   const isImageNode = node.nodeType === 'image'
 
   return (
@@ -100,6 +101,17 @@ export default function NodeCard({ node, onView, onDelete }: NodeCardProps) {
           <Eye size={12} />
           查看
         </button>
+        {!isImageNode && (
+          <button
+            onClick={() => onTest(node)}
+            className="flex items-center gap-1 text-[11px] px-3 py-1.5 rounded-lg
+                       bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20
+                       transition-all"
+          >
+            <Play size={12} />
+            测试
+          </button>
+        )}
         <button
           onClick={() => onDelete(node.id)}
           className="flex items-center gap-1 text-[11px] px-3 py-1.5 rounded-lg

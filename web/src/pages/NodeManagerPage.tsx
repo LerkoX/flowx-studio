@@ -5,6 +5,7 @@ import { useNodeStore } from '@/stores/nodeStore'
 import NodeCard from '@/features/node-manager/NodeCard'
 import NodeImportModal from '@/features/node-manager/NodeImportModal'
 import NodeDetailModal from '@/features/node-manager/NodeDetailModal'
+import NodeTestPanel from '@/features/node-manager/NodeTestPanel'
 import type { NodeDefinition } from '@/types/node'
 
 export default function NodeManagerPage() {
@@ -30,6 +31,7 @@ export default function NodeManagerPage() {
   const [showImportModal, setShowImportModal] = useState(false)
   const [selectedNode, setSelectedNode] = useState<NodeDefinition | null>(null)
   const [showDetailModal, setShowDetailModal] = useState(false)
+  const [showTestPanel, setShowTestPanel] = useState(false)
 
   const filteredNodes = getFilteredNodes()
   const allTags = getAllTags()
@@ -77,6 +79,11 @@ export default function NodeManagerPage() {
   const handleViewNode = (node: NodeDefinition) => {
     setSelectedNode(node)
     setShowDetailModal(true)
+  }
+
+  const handleTestNode = (node: NodeDefinition) => {
+    setSelectedNode(node)
+    setShowTestPanel(true)
   }
 
   const handleDeleteNode = (nodeId: string) => {
@@ -262,6 +269,7 @@ export default function NodeManagerPage() {
                     key={node.id}
                     node={node}
                     onView={handleViewNode}
+                    onTest={handleTestNode}
                     onDelete={handleDeleteNode}
                   />
                 ))}
@@ -285,6 +293,16 @@ export default function NodeManagerPage() {
         isOpen={showDetailModal}
         onClose={() => {
           setShowDetailModal(false)
+          setSelectedNode(null)
+        }}
+      />
+
+      {/* 节点测试面板 */}
+      <NodeTestPanel
+        node={selectedNode}
+        isOpen={showTestPanel}
+        onClose={() => {
+          setShowTestPanel(false)
           setSelectedNode(null)
         }}
       />
