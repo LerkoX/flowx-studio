@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Terminal, Globe } from 'lucide-react'
+import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Terminal, Globe, 
+         Plug, Unplug, Wrench, Loader2, RefreshCw } from 'lucide-react'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { connectMCP, disconnectMCP, getMCPConnections, getMCPTools } from '@/services/configService'
 import type { MCPConfig } from '@/types/settings'
 import GlassPanel from '@/components/GlassPanel'
 
@@ -33,10 +35,7 @@ function MCPConfigForm({ config, onSave, onCancel }: MCPConfigFormProps) {
     e.preventDefault()
     if (!formData.name) return
 
-    // Parse args
     const args = argsInput.trim() ? argsInput.split(/\s+/) : []
-    
-    // Parse env
     const env: Record<string, string> = {}
     envInput.split('\n').forEach((line) => {
       const [key, ...valueParts] = line.split('=')
@@ -76,7 +75,6 @@ function MCPConfigForm({ config, onSave, onCancel }: MCPConfigFormProps) {
         />
       </div>
 
-      {/* 模式切换 */}
       <div className="flex gap-2">
         <button
           type="button"
@@ -235,6 +233,93 @@ export default function MCPConfigTab() {
   const { mcpConfigs, addMCPConfig, updateMCPConfig, deleteMCPConfig, toggleMCPConfig } = useSettingsStore()
   const [editingConfig, setEditingConfig] = useState<MCPConfig | null>(null)
   const [isAdding, setIsAdding] = useState(false)
+  const [connections, setConnections] = useState<Map<string, {
+    status: string
+    last_error: string
+    tools_count: number
+    isConnecting: boolean
+  }>>(new Map())
+  const [selectedTools, setSelectedTools] = useState<Map<string, {
+    name: string
+    description: string
+    parameters: Record<string, unknown>
+  }[]>>(new Map())
+  const [showTools, setShowTools] = useState<string | null>(null)
+
+  // 加载连接状态
+  const loadConnections = async () => {
+    try {
+      const response = await getMCPConnections()
+      if (response.code === 200) {
+        const newConnections = new Map(connections)
+        response.data.forEach((conn) => {
+          const existing = newConnections.get(String(conn.id))
+          newConnections.set(String(conn.id), {
+            status: conn.status,
+            last_error: conn.last_error,
+            tools_count: conn.tools_count,
+            isConnecting: existing?.isConnecting || false,
+          })
+        })
+        setConnections(newConnections)
+      }
+    } catch (err) {
+      console.error('Failed to load MCP connections:', err)
+    }
+  }
+
+  useEffect(() => {
+    loadConnections()
+    const interval = setInterval(loadConnections, 5000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const handleConnect = async (id: string) => {
+    const newConnections = new Map(connections)
+    const existing = newConnections.get(id) || { status: 'disconnected', last_error: '', tools_count: 0, isConnecting: false }
+    newConnections.set(id, { ...existing, isConnecting: true })
+    setConnections(newConnections)
+
+    try {
+      const response = await connectMCP(id)
+      if (response.code === 200) {
+        await loadConnections()
+      } else {
+        const newConn = new Map(connections)
+        const curr = newConn.get(id) || { status: 'error', last_error: response.message || '', tools_count: 0, isConnecting: false }
+        newConn.set(id, { ...curr, status: 'error', last_error: response.message || '', isConnecting: false })
+        setConnections(newConn)
+      }
+    } catch (err) {
+      const newConn = new Map(connections)
+      const curr = newConn.get(id) || { status: 'error', last_error: String(err), tools_count: 0, isConnecting: false }
+      newConn.set(id, { ...curr, status: 'error', last_error: String(err), isConnecting: false })
+      setConnections(newConn)
+    }
+  }
+
+  const handleDisconnect = async (id: string) => {
+    try {
+      await disconnectMCP(id)
+      await loadConnections()
+    } catch (err) {
+      console.error('Failed to disconnect:', err)
+    }
+  }
+
+  const handleLoadTools = async (id: string) => {
+    try {
+      const response = await getMCPTools(id)
+      if (response.code === 200) {
+        const newTools = new Map(selectedTools)
+        newTools.set(id, response.data)
+        setSelectedTools(newTools)
+        setShowTools(id)
+      }
+    } catch (err) {
+      console.error('Failed to load tools:', err)
+    }
+  }
 
   const handleSave = (config: MCPConfig) => {
     if (editingConfig) {
@@ -252,6 +337,8 @@ export default function MCPConfigTab() {
         return 'text-emerald-400'
       case 'error':
         return 'text-rose-400'
+      case 'connecting':
+        return 'text-amber-400'
       default:
         return 'text-white/30'
     }
@@ -263,6 +350,8 @@ export default function MCPConfigTab() {
         return '已连接'
       case 'error':
         return '错误'
+      case 'connecting':
+        return '连接中'
       default:
         return '未连接'
     }
@@ -270,8 +359,8 @@ export default function MCPConfigTab() {
 
   return (
     <div className="space-y-6">
-      {/* 添加按钮 */}
-      {!isAdding && !editingConfig && (
+      {/* 刷新按钮 */}
+      <div className="flex items-center justify-between">
         <button
           onClick={() => setIsAdding(true)}
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl
@@ -282,7 +371,16 @@ export default function MCPConfigTab() {
           <Plus size={16} />
           添加 MCP 服务器
         </button>
-      )}
+        <button
+          onClick={loadConnections}
+          className="flex items-center gap-2 px-3 py-2 rounded-lg
+                   bg-white/5 text-white/40 text-xs
+                   hover:bg-white/10 hover:text-white transition-all"
+        >
+          <RefreshCw size={12} />
+          刷新状态
+        </button>
+      </div>
 
       {/* 表单 */}
       <AnimatePresence>
@@ -311,74 +409,160 @@ export default function MCPConfigTab() {
 
       {/* 列表 */}
       <div className="space-y-3">
-        {mcpConfigs.map((config) => (
-          <GlassPanel key={config.id} className="p-4">
-            <div className="flex items-start justify-between">
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-white/90 font-medium text-sm">{config.name}</span>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full border
-                    ${config.isEnabled 
-                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
-                      : 'bg-white/5 text-white/30 border-white/10'
-                    }`}
-                  >
-                    {config.isEnabled ? '已启用' : '已禁用'}
-                  </span>
-                  <span className={`text-[10px] ${getStatusColor(config.status)}`}>
-                    {getStatusText(config.status)}
-                  </span>
-                </div>
-                <div className="text-white/40 text-xs space-y-1">
-                  <p className="flex items-center gap-1">
-                    {config.mode === 'local' ? (
-                      <>
-                        <Terminal size={10} />
-                        <span className="font-mono">{config.command} {config.args?.join(' ')}</span>
-                      </>
-                    ) : (
-                      <>
-                        <Globe size={10} />
-                        <span className="font-mono">{config.url}</span>
-                      </>
+        {mcpConfigs.map((config) => {
+          const conn = connections.get(config.id)
+          const isConnected = conn?.status === 'connected'
+          const isConnecting = conn?.isConnecting || false
+          const tools = selectedTools.get(config.id)
+
+          return (
+            <GlassPanel key={config.id} className="p-4">
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-white/90 font-medium text-sm">{config.name}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full border
+                      ${config.isEnabled 
+                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
+                        : 'bg-white/5 text-white/30 border-white/10'
+                      }`}
+                    >
+                      {config.isEnabled ? '已启用' : '已禁用'}
+                    </span>
+                    <span className={`text-[10px] ${getStatusColor(conn?.status || config.status)}`}>
+                      {isConnecting ? '连接中...' : getStatusText(conn?.status || config.status)}
+                    </span>
+                    {conn && conn.tools_count > 0 && (
+                      <span className="text-[10px] text-indigo-400">
+                        {conn.tools_count} 个工具
+                      </span>
                     )}
-                  </p>
+                  </div>
+                  <div className="text-white/40 text-xs space-y-1">
+                    <p className="flex items-center gap-1">
+                      {config.mode === 'local' ? (
+                        <>
+                          <Terminal size={10} />
+                          <span className="font-mono">{config.command} {config.args?.join(' ')}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Globe size={10} />
+                          <span className="font-mono">{config.url}</span>
+                        </>
+                      )}
+                    </p>
+                    {conn?.last_error && (
+                      <p className="text-rose-400 text-[10px]">{conn.last_error}</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1">
+                  {/* 连接/断开按钮 */}
+                  {config.isEnabled && (
+                    <>
+                      {isConnected ? (
+                        <>
+                          <button
+                            onClick={() => handleLoadTools(config.id)}
+                            className="p-2 rounded-lg text-white/40 hover:text-indigo-400 hover:bg-indigo-500/10
+                                     transition-all"
+                            title="查看工具"
+                          >
+                            <Wrench size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleDisconnect(config.id)}
+                            className="p-2 rounded-lg text-white/40 hover:text-rose-400 hover:bg-rose-500/10
+                                     transition-all"
+                            title="断开连接"
+                          >
+                            <Unplug size={14} />
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => handleConnect(config.id)}
+                          disabled={isConnecting}
+                          className="p-2 rounded-lg text-white/40 hover:text-emerald-400 hover:bg-emerald-500/10
+                                   transition-all disabled:opacity-50"
+                          title="连接"
+                        >
+                          {isConnecting ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Plug size={14} />
+                          )}
+                        </button>
+                      )}
+                    </>
+                  )}
+                  <button
+                    onClick={() => toggleMCPConfig(config.id)}
+                    className="p-2 rounded-lg text-white/40 hover:text-white hover:bg-white/10
+                             transition-all"
+                    title={config.isEnabled ? '禁用' : '启用'}
+                  >
+                    {config.isEnabled ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
+                  </button>
+                  <button
+                    onClick={() => setEditingConfig(config)}
+                    className="p-2 rounded-lg text-white/40 hover:text-white hover:bg-white/10
+                             transition-all"
+                    title="编辑"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (confirm('确定要删除这个 MCP 配置吗？')) {
+                        deleteMCPConfig(config.id)
+                      }
+                    }}
+                    className="p-2 rounded-lg text-white/40 hover:text-rose-400 hover:bg-rose-500/10
+                             transition-all"
+                    title="删除"
+                  >
+                    <Trash2 size={14} />
+                  </button>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => toggleMCPConfig(config.id)}
-                  className="p-2 rounded-lg text-white/40 hover:text-white hover:bg-white/10
-                           transition-all"
-                  title={config.isEnabled ? '禁用' : '启用'}
-                >
-                  {config.isEnabled ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
-                </button>
-                <button
-                  onClick={() => setEditingConfig(config)}
-                  className="p-2 rounded-lg text-white/40 hover:text-white hover:bg-white/10
-                           transition-all"
-                  title="编辑"
-                >
-                  <Pencil size={14} />
-                </button>
-                <button
-                  onClick={() => {
-                    if (confirm('确定要删除这个 MCP 配置吗？')) {
-                      deleteMCPConfig(config.id)
-                    }
-                  }}
-                  className="p-2 rounded-lg text-white/40 hover:text-rose-400 hover:bg-rose-500/10
-                           transition-all"
-                  title="删除"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            </div>
-          </GlassPanel>
-        ))}
+              {/* 工具列表 */}
+              <AnimatePresence>
+                {showTools === config.id && tools && tools.length > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="mt-4 pt-4 border-t border-white/10"
+                  >
+                    <h4 className="text-white/60 text-xs font-medium mb-3">可用工具</h4>
+                    <div className="space-y-2">
+                      {tools.map((tool) => (
+                        <GlassPanel key={tool.name} className="p-3">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <span className="text-white/80 text-sm font-medium">{tool.name}</span>
+                              <p className="text-white/30 text-xs">{tool.description}</p>
+                            </div>
+                          </div>
+                        </GlassPanel>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => setShowTools(null)}
+                      className="mt-3 text-white/30 text-xs hover:text-white/60 transition-all"
+                    >
+                      收起工具列表
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </GlassPanel>
+          )
+        })}
       </div>
     </div>
   )

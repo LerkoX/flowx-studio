@@ -84,6 +84,90 @@ export async function testMCPConfig(
   return response.data
 }
 
+// ========== MCP Connection Management ==========
+
+export async function getMCPConnections(): Promise<
+  ApiResponse<
+    {
+      id: number
+      name: string
+      mode: string
+      is_enabled: boolean
+      status: string
+      last_error: string
+      tools_count: number
+    }[]
+  >
+> {
+  const response = await apiClient.get('/api/v1/mcp/connections')
+  return response.data
+}
+
+export async function connectMCP(id: string): Promise<
+  ApiResponse<{
+    id: number
+    status: string
+    message: string
+  }>
+> {
+  const response = await apiClient.post(`/api/v1/mcp/${id}/connect`)
+  return response.data
+}
+
+export async function disconnectMCP(id: string): Promise<
+  ApiResponse<{
+    id: number
+    status: string
+    message: string
+  }>
+> {
+  const response = await apiClient.post(`/api/v1/mcp/${id}/disconnect`)
+  return response.data
+}
+
+export async function getMCPStatus(id: string): Promise<
+  ApiResponse<{
+    id: number
+    status: string
+    connected: boolean
+    last_error: string
+    tools_count: number
+  }>
+> {
+  const response = await apiClient.get(`/api/v1/mcp/${id}/status`)
+  return response.data
+}
+
+export async function getMCPTools(id: string): Promise<
+  ApiResponse<
+    {
+      name: string
+      description: string
+      parameters: Record<string, unknown>
+    }[]
+  >
+> {
+  const response = await apiClient.get(`/api/v1/mcp/${id}/tools`)
+  return response.data
+}
+
+export async function callMCPTool(
+  id: string,
+  toolName: string,
+  parameters: Record<string, unknown>
+): Promise<
+  ApiResponse<{
+    success: boolean
+    result: Record<string, unknown>
+    error: string
+  }>
+> {
+  const response = await apiClient.post(`/api/v1/mcp/${id}/tools/${toolName}/call`, {
+    parameters,
+  })
+  return response.data
+}
+
 // ========== System Config ==========
 
 export async function getSystemConfig(): Promise<ApiResponse<Record<string, string>>> {
