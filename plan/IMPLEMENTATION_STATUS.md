@@ -15,7 +15,7 @@
 | 4 | API 设计 | ✅ 已完成 | 基础 CRUD + AI Provider 真实调用 + FlowX Runtime 集成已完成 |
 | 5 | 前端设计 | ✅ 已完成 | React + TS + Vite 前端已完成并构建 |
 | 6 | AI 服务层 | ✅ 已完成 | OpenAI/Anthropic/Ollama Provider + SSE 流式已实现 |
-| 7 | 节点系统 | 🟡 部分实现 | CRUD + Mock API 完成，真实沙箱待实现 |
+| 7 | 节点系统 | ✅ 已完成 | CRUD + Mock 子进程执行已实现 |
 | 8 | FlowX 运行时 | ✅ 已完成 | RuntimeAdapter + EventBridge + LogPusher 已实现 |
 | 9 | 运行时与部署 | ✅ 已完成 | 单二进制 + go:embed + Cobra CLI 已完成 |
 | 10 | 安全设计 | 🟡 部分实现 | 加密 + 黑名单已完成，完整沙箱待实现 |
@@ -70,7 +70,7 @@
 - [x] `POST /api/v1/workflows/:id/run` — 触发执行
 - [x] `GET /api/v1/executions` — 执行历史
 - [x] `GET /api/v1/executions/:id` — 执行详情
-- [x] `GET /api/v1/executions/:id/stream` — SSE 实时日志流（V1 模拟事件）
+- [x] `GET /api/v1/executions/:id/stream` — SSE 实时日志流（FlowX Runtime 真实事件）
 - [x] `GET /api/v1/executions/:id/logs` — 查询执行日志
 
 #### 6. AI 对话 API
@@ -122,12 +122,13 @@
 #### 3. Mock 执行沙箱
 - [x] Mock 测试 API 端点
 - [x] 黑名单校验（危险命令拦截）
-- [ ] **真实子进程执行** (`os/exec` + 环境变量注入)
-- [ ] **执行超时控制** (默认 30s)
+- [x] **真实子进程执行** (`os/exec` + 环境变量注入)
+- [x] **执行超时控制** (默认 30s, 最大 5min)
+- [x] **代码安全校验** (危险模式/敏感路径检测)
 - [ ] **Docker 沙箱隔离** (V2 目标)
 - [ ] **受限进程回退** (Linux seccomp/cgroup)
 
-**当前行为**：Mock 测试返回固定模拟结果，不执行真实代码。
+**当前行为**：Mock 测试真实执行节点代码，支持 Python/Go/Bash/JS/TS/Ruby/PHP。
 
 #### 4. MCP 连接管理
 - [x] MCP 配置 CRUD + 加密存储
@@ -213,6 +214,8 @@ flowx-studio/
 │   │   └── service.go                # AI Service + Prompt 模板 + 重试
 │   ├── runtime/
 │   │   └── adapter.go                # FlowX RuntimeAdapter + EventBridge + LogPusher
+│   ├── sandbox/
+│   │   └── executor.go               # 子进程沙箱执行器 (os/exec + 安全校验)
 │   ├── db/db.go                      # SQLite + 迁移
 │   ├── model/model.go                # 所有数据模型
 │   ├── crypto/crypto.go              # AES-GCM 加密
@@ -240,8 +243,8 @@ web/src/stores/
 
 ## 下一步建议（按优先级）
 
-1. **高优先级**：实现 Mock 子进程执行（`os/exec` + 环境变量注入 + 超时控制），让节点测试真实可用
-2. **高优先级**：实现 MCP 本地命令真实启动 + 远程 SSE 连接，让 MCP 工具可用
-3. **中优先级**：实现日志系统完整桥接（FlowX `logger.Pusher` → 数据库 + SSE）
-4. **中优先级**：实现安全增强（请求限流、参数验证、审计日志）
+1. **🔥 高优先级**：实现 MCP 本地命令真实启动 + 远程 SSE 连接，让 MCP 工具可用
+2. **🔥 高优先级**：实现日志系统完整桥接（FlowX `logger.Pusher` → 数据库 + SSE）
+3. **中优先级**：实现安全增强（请求限流、参数验证、审计日志）
+4. **中优先级**：AI Provider 故障转移 + Token 使用量统计
 5. **低优先级**：FAP 标签解析、自动打开浏览器、数据备份等增强功能
