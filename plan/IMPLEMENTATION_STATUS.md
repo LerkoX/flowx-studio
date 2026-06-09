@@ -133,12 +133,12 @@
 #### 4. MCP 连接管理
 - [x] MCP 配置 CRUD + 加密存储
 - [x] 本地命令黑名单校验
-- [ ] **本地命令模式真实启动** (`os/exec` 启动 MCP server)
-- [ ] **远程 SSE 模式真实连接** (HTTP SSE 长连接)
-- [ ] **MCP 工具发现与调用**
-- [ ] **连接状态心跳检测**
+- [x] **本地命令模式真实启动** (`os/exec` 启动 MCP server + stdin/stdout JSON-RPC)
+- [x] **远程 SSE 模式真实连接** (HTTP SSE 长连接 + 事件解析)
+- [x] **MCP 工具发现与调用** (tools/list + tools/call)
+- [x] **连接状态心跳检测** (30s 间隔)
 
-**当前行为**：MCP 配置仅存储，不建立真实连接。
+**当前行为**：MCP 配置可建立真实连接，支持本地命令和远程 SSE 两种模式。
 
 #### 5. 日志系统
 - [x] `execution_logs` 表结构
@@ -207,6 +207,7 @@ flowx-studio/
 │   │   ├── common.go                 # 统一响应
 │   │   ├── node_handler.go           # 节点 API
 │   │   ├── config_handler.go         # 配置 API
+│   │   ├── mcp_handler.go            # MCP 连接管理 API
 │   │   ├── workflow_handler.go       # 工作流 + 执行 API
 │   │   └── ai_handler.go             # AI 对话 API
 │   ├── ai/
@@ -216,6 +217,8 @@ flowx-studio/
 │   │   └── adapter.go                # FlowX RuntimeAdapter + EventBridge + LogPusher
 │   ├── sandbox/
 │   │   └── executor.go               # 子进程沙箱执行器 (os/exec + 安全校验)
+│   ├── mcp/
+│   │   └── manager.go                # MCP 连接管理器 (本地命令 + 远程 SSE)
 │   ├── db/db.go                      # SQLite + 迁移
 │   ├── model/model.go                # 所有数据模型
 │   ├── crypto/crypto.go              # AES-GCM 加密
@@ -243,8 +246,7 @@ web/src/stores/
 
 ## 下一步建议（按优先级）
 
-1. **🔥 高优先级**：实现 MCP 本地命令真实启动 + 远程 SSE 连接，让 MCP 工具可用
-2. **🔥 高优先级**：实现日志系统完整桥接（FlowX `logger.Pusher` → 数据库 + SSE）
-3. **中优先级**：实现安全增强（请求限流、参数验证、审计日志）
-4. **中优先级**：AI Provider 故障转移 + Token 使用量统计
-5. **低优先级**：FAP 标签解析、自动打开浏览器、数据备份等增强功能
+1. **🔥 高优先级**：实现日志系统完整桥接（FlowX `logger.Pusher` → 数据库 + SSE）
+2. **中优先级**：实现安全增强（请求限流、参数验证、审计日志）
+3. **中优先级**：AI Provider 故障转移 + Token 使用量统计
+4. **低优先级**：FAP 标签解析、自动打开浏览器、数据备份等增强功能
