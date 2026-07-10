@@ -48,7 +48,7 @@ export interface NodeDefinition {
   image?: string
   
   // 来源信息
-  sourceType?: 'git' | 'manual'
+  sourceType?: 'git' | 'image' | 'folder' | 'manual'
   sourceURL?: string
   sourcePath?: string
   

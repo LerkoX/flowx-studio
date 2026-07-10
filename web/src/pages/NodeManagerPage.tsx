@@ -37,7 +37,7 @@ export default function NodeManagerPage() {
   const allTags = getAllTags()
   const allLanguages = getAllLanguages()
 
-  const handleAddNode = async (data: { type: 'git' | 'image'; url: string }) => {
+  const handleAddNode = async (data: { type: 'git' | 'image' | 'folder'; url: string }) => {
     setIsAdding(true)
     setAddError(null)
 
@@ -46,22 +46,39 @@ export default function NodeManagerPage() {
       // 模拟添加
       await new Promise((resolve) => setTimeout(resolve, 1500))
 
+      const deriveName = () => {
+        if (data.type === 'folder') {
+          return data.url.split('/').pop() || 'new-folder-node'
+        }
+        if (data.type === 'git') {
+          return data.url.split('/').pop()?.replace('.git', '') || 'new-node'
+        }
+        return data.url.split(':').pop() || 'new-image'
+      }
+
+      const deriveDisplayName = () => {
+        if (data.type === 'folder') return '文件夹节点'
+        if (data.type === 'git') return '新节点'
+        return data.url.split('/').pop() || '新镜像'
+      }
+
+      const deriveDescription = () => {
+        if (data.type === 'folder') return `从文件夹 ${data.url} 导入`
+        if (data.type === 'git') return `从 ${data.url} 导入`
+        return `镜像: ${data.url}`
+      }
+
       const newNode: NodeDefinition = {
         id: `node-${Date.now()}`,
-        name: data.type === 'git' 
-          ? data.url.split('/').pop()?.replace('.git', '') || 'new-node'
-          : data.url.split(':').pop() || 'new-image',
-        displayName: data.type === 'git' 
-          ? '新节点'
-          : data.url.split('/').pop() || '新镜像',
-        description: data.type === 'git' 
-          ? `从 ${data.url} 导入`
-          : `镜像: ${data.url}`,
-        nodeType: data.type === 'git' ? 'code' : 'image',
-        language: data.type === 'git' ? 'unknown' : undefined,
+        name: deriveName(),
+        displayName: deriveDisplayName(),
+        description: deriveDescription(),
+        nodeType: data.type === 'image' ? 'image' : 'code',
+        language: data.type === 'git' || data.type === 'folder' ? 'unknown' : undefined,
         image: data.type === 'image' ? data.url : undefined,
-        sourceURL: data.type === 'git' ? data.url : undefined,
-        sourceType: data.type === 'git' ? 'git' : 'manual',
+        sourceURL: data.type === 'git' || data.type === 'image' ? data.url : undefined,
+        sourcePath: data.type === 'folder' ? data.url : undefined,
+        sourceType: data.type,
         parameters: [],
         tags: [],
         createdAt: new Date(),

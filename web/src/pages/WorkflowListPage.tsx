@@ -47,7 +47,7 @@ export default function WorkflowListPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-white/90">工作流列表</h1>
-            <p className="text-white/40 text-sm mt-1">实时查看由 AI 生成的流水线</p>
+            <p className="text-white/40 text-sm mt-1">实时查看流水线</p>
           </div>
           <Link
             to="/canvas"
