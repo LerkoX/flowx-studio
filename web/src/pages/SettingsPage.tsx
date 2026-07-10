@@ -1,18 +1,14 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { Cpu, Server, Settings } from 'lucide-react'
-import AIProviderTab from '@/features/settings/AIProviderTab'
-import MCPConfigTab from '@/features/settings/MCPConfigTab'
+import { Settings } from 'lucide-react'
 import SystemSettingsTab from '@/features/settings/SystemSettingsTab'
 
 const tabs = [
-  { id: 'ai', label: 'AI 提供商', icon: Cpu },
-  { id: 'mcp', label: 'MCP 配置', icon: Server },
   { id: 'system', label: '系统设置', icon: Settings },
 ]
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState('ai')
+  const [activeTab, setActiveTab] = useState('system')
 
   return (
     <motion.div
@@ -24,7 +20,7 @@ export default function SettingsPage() {
         {/* 标题 */}
         <div>
           <h1 className="text-2xl font-bold text-white/90">设置</h1>
-          <p className="text-white/40 text-sm mt-1">配置 AI 提供商、MCP 服务器和系统偏好</p>
+          <p className="text-white/40 text-sm mt-1">配置系统偏好</p>
         </div>
 
         {/* 标签切换 */}
@@ -56,8 +52,6 @@ export default function SettingsPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.2 }}
         >
-          {activeTab === 'ai' && <AIProviderTab />}
-          {activeTab === 'mcp' && <MCPConfigTab />}
           {activeTab === 'system' && <SystemSettingsTab />}
         </motion.div>
       </div>

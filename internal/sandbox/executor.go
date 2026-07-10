@@ -3,6 +3,7 @@ package sandbox
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -400,8 +401,6 @@ func parseJSONOutput(output string, result *map[string]interface{}) error {
 
 // jsonUnmarshal 包装 json.Unmarshal
 func jsonUnmarshal(data []byte, v *map[string]interface{}) error {
-	// 简单实现，实际可以用 encoding/json
-	// 这里为了避免循环依赖，使用简单的检测
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 {
 		return fmt.Errorf("empty data")
@@ -409,8 +408,7 @@ func jsonUnmarshal(data []byte, v *map[string]interface{}) error {
 	if data[0] != '{' && data[0] != '[' {
 		return fmt.Errorf("not JSON")
 	}
-	// 实际解析在 handler 层做
-	return nil
+	return json.Unmarshal(data, v)
 }
 
 // IsLanguageSupported 检查语言是否支持

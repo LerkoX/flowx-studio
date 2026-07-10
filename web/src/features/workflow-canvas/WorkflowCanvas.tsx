@@ -17,101 +17,73 @@ import GradientEdge from '@/components/GradientEdge'
 import { autoLayout } from './AutoLayout'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { useIsMobile } from '@/hooks/useMediaQuery'
+import { parseWorkflowGraph } from '@/utils/mermaidParser'
+import { useEventStream } from '@/services/eventService'
 
 const nodeTypes = { glowNode: GlowNode }
 const edgeTypes = { gradientEdge: GradientEdge }
+
+const statusMap: Record<string, string> = {
+  running: 'running',
+  success: 'success',
+  failed: 'failed',
+}
 
 function WorkflowCanvasInner() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [, setSelectedNode] = useState<string | null>(null)
-  const { currentWorkflow, nodeStatuses, nodeRuntimeData } = useWorkflowStore()
+  const {
+    currentWorkflow,
+    nodeStatuses,
+    nodeRuntimeData,
+    updateNodeStatus,
+    setNodeStatuses,
+  } = useWorkflowStore()
 
-  // 初始加载
+  // 解析 YAML Graph 并渲染工作流
   useEffect(() => {
     if (!currentWorkflow?.yamlConfig) {
-      // 演示数据
-      const demoNodes: Node[] = [
-        {
-          id: 'start',
-          type: 'glowNode',
-          position: { x: 0, y: 0 },
-          data: {
-            id: 'start',
-            name: 'Start',
-            status: 'success',
-            icon: '▶',
-            accentColor: '#6366f1',
-            inputs: nodeRuntimeData.start?.inputs,
-            outputs: nodeRuntimeData.start?.outputs,
-          },
-        },
-        {
-          id: 'build',
-          type: 'glowNode',
-          position: { x: 0, y: 0 },
-          data: {
-            id: 'build',
-            name: 'Build',
-            status: 'running',
-            icon: '🔨',
-            accentColor: '#22d3ee',
-            language: 'go',
-            inputs: nodeRuntimeData.build?.inputs,
-            outputs: nodeRuntimeData.build?.outputs,
-          },
-        },
-        {
-          id: 'test',
-          type: 'glowNode',
-          position: { x: 0, y: 0 },
-          data: {
-            id: 'test',
-            name: 'Test',
-            status: 'idle',
-            icon: '🧪',
-            accentColor: '#a855f7',
-            language: 'go',
-            inputs: nodeRuntimeData.test?.inputs,
-            outputs: nodeRuntimeData.test?.outputs,
-          },
-        },
-        {
-          id: 'deploy',
-          type: 'glowNode',
-          position: { x: 0, y: 0 },
-          data: {
-            id: 'deploy',
-            name: 'Deploy',
-            status: 'idle',
-            icon: '🚀',
-            accentColor: '#34d399',
-            inputs: nodeRuntimeData.deploy?.inputs,
-            outputs: nodeRuntimeData.deploy?.outputs,
-          },
-        },
-      ]
-      const demoEdges: Edge[] = [
-        { id: 'e1', source: 'start', target: 'build', type: 'gradientEdge', data: { animated: true } },
-        { id: 'e2', source: 'build', target: 'test', type: 'gradientEdge' },
-        { id: 'e3', source: 'test', target: 'deploy', type: 'gradientEdge' },
-      ]
-
-      const { nodes: layoutedNodes, edges: layoutedEdges } = autoLayout(demoNodes, demoEdges, { direction: 'TB' })
-      setNodes(layoutedNodes)
-      setEdges(layoutedEdges)
+      setNodes([])
+      setEdges([])
       return
     }
 
-    try {
-      // 实际解析 YAML 和 Mermaid
-      const { nodes: rawNodes, edges: rawEdges } = parseWorkflowToFlow(currentWorkflow.yamlConfig, nodeStatuses)
-      const { nodes: layoutedNodes, edges: layoutedEdges } = autoLayout(rawNodes, rawEdges, { direction: 'TB' })
-      setNodes(layoutedNodes)
-      setEdges(layoutedEdges)
-    } catch (err) {
-      console.error('Failed to parse workflow graph:', err)
-    }
+    parseWorkflowGraph(currentWorkflow.yamlConfig)
+      .then(({ nodes: parsedNodes, edges: parsedEdges }) => {
+        const rawNodes: Node[] = parsedNodes.map((n) => ({
+          id: n.id,
+          type: 'glowNode',
+          position: { x: 0, y: 0 },
+          data: {
+            id: n.id,
+            name: n.label,
+            status: nodeStatuses[n.id] || 'idle',
+            accentColor: '#6366f1',
+            inputs: nodeRuntimeData[n.id]?.inputs,
+            outputs: nodeRuntimeData[n.id]?.outputs,
+          },
+        }))
+
+        const rawEdges: Edge[] = parsedEdges.map((e, idx) => ({
+          id: `e${idx}`,
+          source: e.source,
+          target: e.target,
+          type: 'gradientEdge',
+          data: {
+            animated: nodeStatuses[e.source] === 'running',
+          },
+        }))
+
+        const { nodes: layoutedNodes, edges: layoutedEdges } = autoLayout(rawNodes, rawEdges, { direction: 'TB' })
+        setNodes(layoutedNodes)
+        setEdges(layoutedEdges)
+      })
+      .catch((err) => {
+        console.error('Failed to parse workflow graph:', err)
+        setNodes([])
+        setEdges([])
+      })
   }, [currentWorkflow, setNodes, setEdges])
 
   // 实时同步执行状态
@@ -170,6 +142,32 @@ function WorkflowCanvasInner() {
       })
     )
   }, [nodeRuntimeData, setNodes])
+
+  // 订阅 SSE 事件
+  useEventStream('/api/v1/events', (type, data) => {
+    if (type === 'execution.started') {
+      setNodeStatuses({})
+      return
+    }
+
+    if (type === 'node_start') {
+      const payload = data as { node_id?: string }
+      if (payload.node_id) updateNodeStatus(payload.node_id, 'running')
+      return
+    }
+
+    if (type === 'node_complete') {
+      const payload = data as { node_id?: string; status?: string }
+      if (payload.node_id) {
+        updateNodeStatus(payload.node_id, statusMap[payload.status || ''] || 'idle')
+      }
+      return
+    }
+
+    if (type === 'execution.completed') {
+      // 执行结束后整体状态由 node_complete 覆盖
+    }
+  })
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     setSelectedNode(node.id)
@@ -239,7 +237,7 @@ function WorkflowCanvasInner() {
         {/* 状态面板 */}
         <Panel position="top-right" className={`${isMobile ? 'm-2' : 'm-4'}`}>
           <div className={`glass-panel px-3 py-1.5 text-white/60 ${isMobile ? 'text-[10px]' : 'text-xs'}`}>
-            {currentWorkflow?.name || '演示工作流'}
+            {currentWorkflow?.name || '未选择工作流'}
           </div>
         </Panel>
       </ReactFlow>
@@ -253,12 +251,4 @@ export default function WorkflowCanvas() {
       <WorkflowCanvasInner />
     </ReactFlowProvider>
   )
-}
-
-// 简单的解析函数（实际项目中需要完整实现）
-function parseWorkflowToFlow(yamlConfig: string, _statuses?: Record<string, string>): { nodes: Node[]; edges: Edge[] } {
-  // 这里应该解析 YAML 和 Mermaid 图
-  // 目前返回空数组，依赖 useEffect 中的演示数据
-  console.log('Parsing workflow:', yamlConfig)
-  return { nodes: [], edges: [] }
 }

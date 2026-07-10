@@ -11,6 +11,7 @@ interface WorkflowState {
   setCurrentWorkflow: (workflow: Workflow | null) => void
   addWorkflow: (workflow: Workflow) => void
   updateNodeStatus: (nodeId: string, status: string) => void
+  setNodeStatuses: (statuses: Record<string, string>) => void
   syncParamsFromYAML: (yamlConfig: string) => void
   updateParam: (key: string, value: string | number | boolean | object) => void
   setNodeRuntimeData: (nodeId: string, data: Partial<NodeRuntimeData>) => void
@@ -81,6 +82,8 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
   updateNodeStatus: (nodeId, status) => set((state) => ({
     nodeStatuses: { ...state.nodeStatuses, [nodeId]: status },
   })),
+
+  setNodeStatuses: (statuses) => set({ nodeStatuses: statuses }),
 
   syncParamsFromYAML: (yamlConfig: string) => {
     try {

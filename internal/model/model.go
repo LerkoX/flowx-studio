@@ -132,58 +132,12 @@ type ExecutionLog struct {
 	Timestamp   time.Time `json:"timestamp" db:"timestamp"`
 }
 
-// AIConfig AI 提供商配置
-type AIConfig struct {
-	ID           int64     `json:"id" db:"id"`
-	Provider     string    `json:"provider" db:"provider"` // openai | anthropic | ollama | custom
-	Name         string    `json:"name" db:"name"`
-	Model        string    `json:"model" db:"model"`
-	APIKey       string    `json:"apiKey,omitempty" db:"api_key"`
-	BaseURL      string    `json:"baseURL,omitempty" db:"base_url"`
-	Temperature  float64   `json:"temperature" db:"temperature"`
-	MaxTokens    int       `json:"maxTokens,omitempty" db:"max_tokens"`
-	IsActive     bool      `json:"isActive" db:"is_active"`
-	IsEnabled    bool      `json:"isEnabled" db:"is_enabled"`
-	Capabilities string    `json:"capabilities,omitempty" db:"capabilities"`
-	CreatedAt    time.Time `json:"createdAt" db:"created_at"`
-	UpdatedAt    time.Time `json:"updatedAt" db:"updated_at"`
-}
-
-// MCPConfig MCP 服务器配置
-type MCPConfig struct {
-	ID              int64             `json:"id" db:"id"`
-	Name            string            `json:"name" db:"name"`
-	Mode            string            `json:"mode" db:"mode"` // local | remote
-	Command         string            `json:"command,omitempty" db:"command"`
-	Args            []string          `json:"args,omitempty" db:"args"`
-	Env             map[string]string `json:"env,omitempty" db:"env"`
-	URL             string            `json:"url,omitempty" db:"url"`
-	AuthHeaderKey   string            `json:"authHeaderKey,omitempty" db:"auth_header_key"`
-	AuthHeaderValue string            `json:"authHeaderValue,omitempty" db:"auth_header_value"`
-	IsEnabled       bool              `json:"isEnabled" db:"is_enabled"`
-	Status          string            `json:"status" db:"status"` // connected | disconnected | error
-	LastError       string            `json:"lastError,omitempty" db:"last_error"`
-	CreatedAt       time.Time         `json:"createdAt" db:"created_at"`
-	UpdatedAt       time.Time         `json:"updatedAt" db:"updated_at"`
-}
-
 // SystemConfig 系统配置
 type SystemConfig struct {
 	Key         string    `json:"key" db:"key"`
 	Value       string    `json:"value" db:"value"`
 	Description string    `json:"description,omitempty" db:"description"`
 	UpdatedAt   time.Time `json:"updatedAt" db:"updated_at"`
-}
-
-// ChatMessage 对话消息
-type ChatMessage struct {
-	ID           int64     `json:"id" db:"id"`
-	SessionID    string    `json:"sessionId" db:"session_id"`
-	Role         string    `json:"role" db:"role"` // user | assistant | system
-	Content      string    `json:"content" db:"content"`
-	ContextType  string    `json:"contextType,omitempty" db:"context_type"` // node_generate | workflow_generate | general
-	ContextID    *int64    `json:"contextId,omitempty" db:"context_id"`
-	CreatedAt    time.Time `json:"createdAt" db:"created_at"`
 }
 
 // PaginatedResponse 分页响应
