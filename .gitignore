@@ -5,6 +5,7 @@ node_modules
 # Build artifacts
 flowx-studio
 *.exe
+internal/server/web/dist
 
 # Go
 vendor/

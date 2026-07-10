@@ -29,11 +29,11 @@ build: copy-web
 
 # 运行开发服务器
 run: build-dev
-	./$(BINARY_NAME) server --port 8080
+	./$(BINARY_NAME) server
 
 # 运行生产服务器
 run-prod: build
-	./$(BINARY_NAME) server --port 8080
+	./$(BINARY_NAME) server
 
 # 清理构建产物
 clean:
