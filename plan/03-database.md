@@ -124,10 +124,11 @@ CREATE TABLE executions (
     started_at      DATETIME,
     completed_at    DATETIME,
     duration_ms     INTEGER,
-    logs            TEXT,                            -- 执行日志（聚合）
+    logs            TEXT,                            -- 执行日志（聚合，已弃用/备用）
     result          TEXT,                            -- 执行结果摘要（JSON）
     error_message   TEXT,                            -- 错误信息
     error_node_id   TEXT,                            -- 失败节点 ID
+    metadata_json   TEXT,                            -- 运行时元数据快照（JSON）：渲染后参数、节点输出、状态等
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     
     FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
@@ -177,6 +178,7 @@ CREATE TABLE execution_nodes (
 -- 索引
 CREATE INDEX idx_exec_nodes_execution ON execution_nodes(execution_id);
 CREATE INDEX idx_exec_nodes_status ON execution_nodes(status);
+CREATE UNIQUE INDEX idx_exec_nodes_unique ON execution_nodes(execution_id, node_id);
 ```
 
 ### 3.3.5 执行日志 (execution_logs)
@@ -374,9 +376,10 @@ erDiagram
 
 ```
 migrations/
-├── 001_init.sql          -- 初始 Schema
-├── 002_add_node_tags.sql -- 添加节点标签
-└── 003_add_workflow_intent.sql -- 添加意图字段
+├── 001_init.sql                    -- 初始 Schema
+├── 002_remove_ai_mcp.sql           -- 移除 AI/MCP 相关表
+├── 003_execution_nodes_unique.sql  -- execution_nodes 增加唯一索引
+└── 004_execution_metadata.sql      -- executions 增加 metadata_json 字段
 ```
 
 ### 3.5.2 迁移执行逻辑

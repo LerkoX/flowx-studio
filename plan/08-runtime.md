@@ -530,3 +530,60 @@ mock:
   timeout: "30s"
   use_docker: true
 ```
+
+## 8.9 运行时事件与元数据
+
+### 8.9.1 事件桥接（EventBridge）
+
+`RuntimeAdapter` 实现了 `dag.Listener` 接口，把 FlowX 流水线事件转换为 `ExecutionEvent`，再通过事件总线持久化并转发到 SSE 客户端：
+
+| 事件类型 | 来源 | 处理逻辑 |
+|----------|------|----------|
+| `execution_start` | `PipelineStart` | 记录执行开始，收集并保存渲染后参数 |
+| `node_start` | `PipelineNodeStart` | 插入/更新 `execution_nodes` 为 `running` |
+| `node_complete` | `PipelineNodeFinish/Failed` | 更新节点状态、耗时 |
+| `execution_complete` | `PipelineFinish` | 更新执行状态、耗时，保存运行时元数据 |
+
+### 8.9.2 运行时元数据
+
+为了在前端“元数据”面板展示“执行时的真实信息”，`WorkflowService` 在执行生命周期中收集并持久化：
+
+- **渲染后参数**：通过 `Pipeline.GetParam()` 从 FlowX 引擎获取（需要 FlowX 提供 `GetParam()` 方法）。
+- **运行时 metadata**：通过 `Pipeline.Metadata()` 获取节点输出、中间结果等。
+- **状态 / 错误 / 耗时**：从事件和 DB 中汇总。
+
+这些数据在执行结束时合并为 JSON，保存到 `executions.metadata_json`。
+
+示例结构：
+
+```json
+{
+  "status": "success",
+  "trigger": "manual",
+  "params": {
+    "env": "production",
+    "appName": "myapp"
+  },
+  "metadata": {
+    "Build.output": "build done",
+    "Test.output": "all tests passed"
+  },
+  "error": ""
+}
+```
+
+### 8.9.3 日志桥接（LogPusher）
+
+`LogPusher` 实现 FlowX 的 `logger.Pusher` 接口，把日志 `Entry` 写入 `execution_logs` 表并推送到 SSE：
+
+- 通过 `pipelineMap` 把 FlowX pipeline 内部 ID 映射到 execution ID。
+- `Entry` 中的 `Node` 字段用于记录 `node_id` / `node_name`。
+- SSE 客户端收到 `execution.log` 事件后追加到 `executionStore.executionLog`。
+
+### 8.9.4 单例锁与优雅关闭
+
+- 启动时写入 `~/.flowx-studio/flowx-studio.pid`，若已存在则优雅终止旧进程。
+- 收到 `SIGINT`/`SIGTERM` 后：
+  1. 调用 `http.Server.Shutdown()` 关闭 HTTP 服务。
+  2. 停止 FlowX Runtime 后台循环。
+  3. 删除 PID 文件并退出。

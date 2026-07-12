@@ -387,12 +387,51 @@ GET /api/v1/executions/:id
     "result": {
       "summary": "所有节点执行成功",
       "s3_url": "https://bucket.s3.amazonaws.com/nature_20250120.jpg"
+    },
+    "metadata": {
+      "status": "success",
+      "trigger": "manual",
+      "params": {
+        "env": "production",
+        "appName": "myapp"
+      },
+      "metadata": {
+        "Build.output": "build done",
+        "Test.output": "all tests passed"
+      }
     }
   }
 }
 ```
 
-### 4.5.3 实时日志流 (SSE)
+### 4.5.3 获取执行节点状态
+
+```http
+GET /api/v1/executions/:id/nodes
+```
+
+**响应示例**：
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "id": 1,
+      "execution_id": 42,
+      "node_id": "Build",
+      "node_name": "Build",
+      "status": "success",
+      "started_at": "2025-01-20T10:00:00Z",
+      "completed_at": "2025-01-20T10:00:30Z",
+      "duration_ms": 30000
+    }
+  ]
+}
+```
+
+### 4.5.4 实时日志流 (SSE)
 
 ```http
 GET /api/v1/executions/:id/stream
@@ -610,6 +649,7 @@ PUT /api/v1/config/system
 ├── /executions
 │   ├── GET    /          获取执行历史
 │   ├── GET    /:id       获取执行详情
+│   ├── GET    /:id/nodes 获取执行节点状态
 │   ├── GET    /:id/stream 实时日志流 (SSE)
 │   ├── GET    /:id/logs  查询执行日志
 │   └── POST   /:id/logs/export 导出执行日志
