@@ -1,12 +1,14 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useExecutionStore, type LogLevel } from '@/stores/executionStore'
+import type { ExecutionLog } from '@/types/execution'
 
 const levelColors: Record<LogLevel, string> = {
   INFO: 'bg-emerald-400/20 text-emerald-400 border-emerald-400/30',
   WARN: 'bg-amber-400/20 text-amber-400 border-amber-400/30',
   ERROR: 'bg-rose-400/20 text-rose-400 border-rose-400/30',
   DEBUG: 'bg-slate-400/20 text-slate-400 border-slate-400/30',
+  FATAL: 'bg-purple-400/20 text-purple-400 border-purple-400/30',
 }
 
 const levelShortColors: Record<LogLevel, string> = {
@@ -14,6 +16,7 @@ const levelShortColors: Record<LogLevel, string> = {
   WARN: 'text-amber-400',
   ERROR: 'text-rose-400',
   DEBUG: 'text-slate-400',
+  FATAL: 'text-purple-400',
 }
 
 export default function LogViewer() {
@@ -84,7 +87,7 @@ export default function LogViewer() {
 
         {/* 级别过滤 */}
         <div className="flex gap-1">
-          {(['INFO', 'WARN', 'ERROR', 'DEBUG'] as LogLevel[]).map((level) => (
+          {(['INFO', 'WARN', 'ERROR', 'DEBUG', 'FATAL'] as LogLevel[]).map((level) => (
             <button
               key={level}
               onClick={() => {
@@ -107,22 +110,34 @@ export default function LogViewer() {
 
         {/* 节点过滤 */}
         {uniqueNodes.length > 0 && (
-          <select
-            value={logFilter.nodeFilter || ''}
-            onChange={(e) =>
-              setLogFilter({ nodeFilter: e.target.value || null })
-            }
-            className="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5
-                       text-xs text-white/80 focus:outline-none focus:border-white/30
-                       cursor-pointer"
-          >
-            <option value="" className="bg-[#1a1f3a]">全部节点</option>
-            {uniqueNodes.map((node) => (
-              <option key={node} value={node} className="bg-[#1a1f3a]">
-                {node}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-1">
+            <select
+              value={logFilter.nodeFilter || ''}
+              onChange={(e) =>
+                setLogFilter({ nodeFilter: e.target.value || null })
+              }
+              className="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5
+                         text-xs text-white/80 focus:outline-none focus:border-white/30
+                         cursor-pointer"
+            >
+              <option value="" className="bg-[#1a1f3a]">全部节点</option>
+              {uniqueNodes.map((node) => (
+                <option key={node} value={node} className="bg-[#1a1f3a]">
+                  {node}
+                </option>
+              ))}
+            </select>
+            {logFilter.nodeFilter && (
+              <button
+                onClick={() => setLogFilter({ nodeFilter: null })}
+                className="px-1.5 py-1 rounded text-[10px] bg-white/10 text-white/70
+                           hover:bg-white/20 hover:text-white transition-colors"
+                title="清除节点过滤"
+              >
+                清除
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -176,13 +191,7 @@ function LogEntryRow({
   log,
   searchQuery,
 }: {
-  log: {
-    id: string
-    timestamp: Date
-    level: LogLevel
-    nodeName: string
-    message: string
-  }
+  log: ExecutionLog
   searchQuery: string
 }) {
   const isError = log.level === 'ERROR'

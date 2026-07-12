@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Save, RotateCcw } from 'lucide-react'
+import { Save, RotateCcw, FileJson, AlertCircle } from 'lucide-react'
 import GlassPanel from '@/components/GlassPanel'
 import { useWorkflowStore } from '@/stores/workflowStore'
+import { useExecutionStore } from '@/stores/executionStore'
 import { updateWorkflowParams } from '@/services/workflowService'
-import type { PipelineParam } from '@/types/workflow'
+import ExecutionHistoryPanel from '@/features/workflow-canvas/ExecutionHistoryPanel'
+import type { PipelineParam, Workflow } from '@/types/workflow'
+import type { ExecutionStatus } from '@/types/execution'
 
 interface WorkflowConfigPanelProps {
-  view: 'params' | 'yaml'
+  view: 'params' | 'yaml' | 'metadata' | 'history'
 }
 
 export default function WorkflowConfigPanel({ view }: WorkflowConfigPanelProps) {
@@ -76,6 +79,32 @@ export default function WorkflowConfigPanel({ view }: WorkflowConfigPanelProps) 
             {currentWorkflow?.yamlConfig || defaultYAML}
           </pre>
         </GlassPanel>
+      </motion.div>
+    )
+  }
+
+  if (view === 'metadata') {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.2 }}
+        className="space-y-3"
+      >
+        <MetadataView currentWorkflow={currentWorkflow} />
+      </motion.div>
+    )
+  }
+
+  if (view === 'history') {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.2 }}
+        className="h-full"
+      >
+        <ExecutionHistoryPanel workflowId={currentWorkflow?.id} />
       </motion.div>
     )
   }
@@ -205,6 +234,196 @@ function parseValue(value: string, originalType: string): string | number | bool
     return value === 'true'
   }
   return value
+}
+
+function MetadataRow({ label, value }: { label: string; value?: string }) {
+  return (
+    <div className="flex items-center justify-between text-sm">
+      <span className="text-white/40">{label}</span>
+      <span className="text-white/80 font-mono truncate max-w-[200px]">{value || '-'}</span>
+    </div>
+  )
+}
+
+function formatDate(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date
+  return d.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
+function MetadataView({ currentWorkflow }: { currentWorkflow: Workflow | null }) {
+  const selectedExecution = useExecutionStore((s) => s.selectedExecution)
+  const executions = useExecutionStore((s) => s.executions)
+  const loadExecutions = useExecutionStore((s) => s.loadExecutions)
+
+  useEffect(() => {
+    if (currentWorkflow?.id && executions.length === 0) {
+      loadExecutions(currentWorkflow.id)
+    }
+  }, [currentWorkflow?.id, executions.length, loadExecutions])
+
+  const execution = selectedExecution || (executions.length > 0 ? executions[0] : null)
+
+  if (execution) {
+    return <RuntimeMetadataPanel execution={execution} />
+  }
+
+  return <StaticMetadataPanel workflow={currentWorkflow} />
+}
+
+function RuntimeMetadataPanel({ execution }: { execution: ExecutionStatus }) {
+  const metadata = (execution.metadata || {}) as Record<string, unknown>
+  const params = (metadata.params || {}) as Record<string, unknown>
+  const runtime = (metadata.metadata || {}) as Record<string, unknown>
+  const status = String(metadata.status || execution.status || 'pending')
+  const error = execution.errorMessage || (metadata.error as string) || undefined
+
+  return (
+    <div className="space-y-3">
+      <GlassPanel className="p-4 space-y-2">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-white/40">当前执行</span>
+          <StatusBadge status={status} />
+        </div>
+        <MetadataRow label="执行 ID" value={`#${execution.id}`} />
+        <MetadataRow label="触发方式" value={execution.trigger || (metadata.trigger as string)} />
+        <MetadataRow label="开始时间" value={execution.startedAt ? formatDate(execution.startedAt) : '-'} />
+        <MetadataRow label="结束时间" value={execution.completedAt ? formatDate(execution.completedAt) : '-'} />
+        <MetadataRow label="耗时" value={execution.durationMs ? formatDuration(execution.durationMs) : '-'} />
+      </GlassPanel>
+
+      {error && (
+        <GlassPanel className="p-4 border-rose-500/20">
+          <div className="flex items-center gap-2 text-rose-400 text-xs font-medium mb-1">
+            <AlertCircle className="w-3.5 h-3.5" />
+            错误信息
+          </div>
+          <div className="text-xs text-rose-300/80 break-all font-mono">{error}</div>
+        </GlassPanel>
+      )}
+
+      <GlassPanel className="p-4">
+        <div className="flex items-center gap-2 text-xs text-white/60 font-medium mb-2">
+          <FileJson className="w-3.5 h-3.5" />
+          渲染后的参数
+        </div>
+        {Object.keys(params).length === 0 ? (
+          <div className="text-xs text-white/30">暂无参数</div>
+        ) : (
+          <div className="space-y-1.5">
+            {Object.entries(params).map(([key, value]) => (
+              <div
+                key={key}
+                className="flex items-start justify-between gap-3 text-xs py-1 px-2 rounded bg-white/5"
+              >
+                <span className="text-white/50 font-mono shrink-0">{key}</span>
+                <span className="text-white/80 font-mono break-all text-right">{formatValue(value)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </GlassPanel>
+
+      <GlassPanel className="p-4">
+        <div className="flex items-center gap-2 text-xs text-white/60 font-medium mb-2">
+          <FileJson className="w-3.5 h-3.5" />
+          运行时元数据
+        </div>
+        {Object.keys(runtime).length === 0 ? (
+          <div className="text-xs text-white/30">暂无运行时数据</div>
+        ) : (
+          <MetadataTree data={runtime} />
+        )}
+      </GlassPanel>
+    </div>
+  )
+}
+
+function StaticMetadataPanel({ workflow }: { workflow: Workflow | null }) {
+  return (
+    <div className="space-y-3">
+      <GlassPanel className="p-4 space-y-2">
+        <MetadataRow label="名称" value={workflow?.name} />
+        <MetadataRow label="ID" value={workflow?.id} />
+        <MetadataRow label="状态" value={workflow?.status} />
+        <MetadataRow
+          label="创建时间"
+          value={workflow?.createdAt ? formatDate(workflow.createdAt) : '-'}
+        />
+        <MetadataRow
+          label="更新时间"
+          value={workflow?.updatedAt ? formatDate(workflow.updatedAt) : '-'}
+        />
+      </GlassPanel>
+      {workflow?.description && (
+        <GlassPanel className="p-4">
+          <div className="text-xs text-white/40 mb-1">描述</div>
+          <div className="text-sm text-white/80">{workflow.description}</div>
+        </GlassPanel>
+      )}
+      {workflow?.intent && (
+        <GlassPanel className="p-4">
+          <div className="text-xs text-white/40 mb-1">意图</div>
+          <div className="text-sm text-white/80">{workflow.intent}</div>
+        </GlassPanel>
+      )}
+    </div>
+  )
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const colors: Record<string, string> = {
+    success: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
+    failed: 'bg-rose-500/15 text-rose-400 border-rose-500/20',
+    running: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/20',
+    pending: 'bg-amber-500/15 text-amber-400 border-amber-500/20',
+    cancelled: 'bg-slate-500/15 text-slate-400 border-slate-500/20',
+  }
+  return (
+    <span
+      className={`text-[10px] px-1.5 py-0.5 rounded border ${colors[status] || colors.pending}`}
+    >
+      {status}
+    </span>
+  )
+}
+
+function MetadataTree({ data }: { data: Record<string, unknown> }) {
+  return (
+    <div className="space-y-1.5">
+      {Object.entries(data).map(([key, value]) => (
+        <div
+          key={key}
+          className="flex items-start justify-between gap-3 text-xs py-1 px-2 rounded bg-white/5"
+        >
+          <span className="text-white/50 font-mono shrink-0">{key}</span>
+          <span className="text-white/80 font-mono break-all text-right">{formatValue(value)}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+  return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`
+}
+
+function formatValue(value: unknown): string {
+  if (value === null || value === undefined) return '-'
+  if (typeof value === 'string') return value
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
 }
 
 const defaultYAML = `Version: "1.0"

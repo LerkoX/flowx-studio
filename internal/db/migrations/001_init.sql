@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS execution_nodes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_exec_nodes_execution ON execution_nodes(execution_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_exec_nodes_unique ON execution_nodes(execution_id, node_id);
 CREATE INDEX IF NOT EXISTS idx_exec_nodes_status ON execution_nodes(status);
 
 -- 执行日志

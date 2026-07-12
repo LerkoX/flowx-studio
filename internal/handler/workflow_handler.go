@@ -39,6 +39,7 @@ func (h *WorkflowHandler) RegisterRoutes(r *gin.RouterGroup) {
 		executions.GET("/:id", h.GetExecution)
 		executions.GET("/:id/stream", h.StreamExecution)
 		executions.GET("/:id/logs", h.GetExecutionLogs)
+		executions.GET("/:id/nodes", h.GetExecutionNodes)
 	}
 }
 
@@ -199,6 +200,45 @@ func (h *WorkflowHandler) GetExecution(c *gin.Context) {
 	Success(c, exec)
 }
 
+// GetExecutionLogs 获取执行日志
+func (h *WorkflowHandler) GetExecutionLogs(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		Error(c, http.StatusBadRequest, "invalid execution id")
+		return
+	}
+
+	nodeID := c.Query("node_id")
+	level := c.Query("level")
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+
+	result, err := h.service.GetExecutionLogs(id, nodeID, level, limit, offset)
+	if err != nil {
+		Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	Success(c, result)
+}
+
+// GetExecutionNodes 获取执行节点状态
+func (h *WorkflowHandler) GetExecutionNodes(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		Error(c, http.StatusBadRequest, "invalid execution id")
+		return
+	}
+
+	nodes, err := h.service.GetExecutionNodes(id)
+	if err != nil {
+		Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	Success(c, nodes)
+}
+
 // StreamExecution SSE 实时日志流
 func (h *WorkflowHandler) StreamExecution(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -255,26 +295,4 @@ func (h *WorkflowHandler) StreamExecution(c *gin.Context) {
 			flusher.Flush()
 		}
 	}
-}
-
-// GetExecutionLogs 获取执行日志
-func (h *WorkflowHandler) GetExecutionLogs(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		Error(c, http.StatusBadRequest, "invalid execution id")
-		return
-	}
-
-	nodeID := c.Query("node_id")
-	level := c.Query("level")
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
-	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
-
-	result, err := h.service.GetExecutionLogs(id, nodeID, level, limit, offset)
-	if err != nil {
-		Error(c, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	Success(c, result)
 }

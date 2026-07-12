@@ -1,7 +1,7 @@
 import { apiClient } from './api'
 import type { ApiResponse } from '@/types/api'
 import type { Workflow } from '@/types/workflow'
-import type { ExecutionStatus } from '@/types/execution'
+import type { ExecutionStatus, ExecutionNode } from '@/types/execution'
 
 /**
  * 获取工作流列表
@@ -109,6 +109,13 @@ export async function getExecution(executionId: string): Promise<ApiResponse<Exe
  * 获取执行日志
  * GET /api/v1/executions/:id/logs
  */
+export async function getExecutionNodes(
+  executionId: string
+): Promise<ApiResponse<ExecutionNode[]>> {
+  const response = await apiClient.get(`/api/v1/executions/${executionId}/nodes`)
+  return response.data
+}
+
 /**
  * 更新流水线参数
  * PUT /api/v1/workflows/:id/config

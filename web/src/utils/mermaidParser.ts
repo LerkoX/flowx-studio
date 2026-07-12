@@ -38,6 +38,8 @@ export async function parseWorkflowGraph(yamlConfig: string): Promise<ParsedGrap
 function parseStateDiagram(graph: string): ParsedGraph {
   const nodesSet = new Set<string>()
   const edges: ParsedEdge[] = []
+  let startNode: string | null = null
+  let endNode: string | null = null
 
   const lines = graph
     .split('\n')
@@ -53,23 +55,49 @@ function parseStateDiagram(graph: string): ParsedGraph {
       const target = cleanState(rawTargetAndRest.split(':')[0])
       if (!source || !target) continue
 
+      if (source === '*' && target !== '*') {
+        startNode = target
+        continue
+      }
+      if (target === '*' && source !== '*') {
+        endNode = source
+        continue
+      }
+      if (source === '*' || target === '*') {
+        continue
+      }
+
       nodesSet.add(source)
       nodesSet.add(target)
       edges.push({ source, target })
     } else if (line.startsWith('state ')) {
       const declared = line.replace('state ', '').split('{')[0].trim()
-      if (declared) {
-        nodesSet.add(cleanState(declared))
+      const id = cleanState(declared)
+      if (id && id !== '*') {
+        nodesSet.add(id)
       }
     } else {
       const simple = line.match(/^\[?([A-Za-z0-9_][A-Za-z0-9_\s]*)\]?$/)
       if (simple) {
-        nodesSet.add(cleanState(simple[1]))
+        const id = cleanState(simple[1])
+        if (id && id !== '*') {
+          nodesSet.add(id)
+        }
       }
     }
   }
 
-  const nodes = Array.from(nodesSet).map((id) => ({ id, label: id }))
+  const nodes: ParsedNode[] = Array.from(nodesSet).map((id) => ({ id, label: id }))
+
+  if (startNode && nodesSet.has(startNode)) {
+    nodes.push({ id: '__start__', label: 'Start' })
+    edges.unshift({ source: '__start__', target: startNode })
+  }
+  if (endNode && nodesSet.has(endNode)) {
+    nodes.push({ id: '__end__', label: 'End' })
+    edges.push({ source: endNode, target: '__end__' })
+  }
+
   return { nodes, edges }
 }
 

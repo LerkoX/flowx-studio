@@ -16,9 +16,10 @@ var webDist embed.FS
 
 // Server HTTP 服务器
 type Server struct {
-	router *gin.Engine
-	port   int
-	host   string
+	router     *gin.Engine
+	httpServer *http.Server
+	port       int
+	host       string
 }
 
 // New 创建服务器
@@ -76,6 +77,9 @@ func (s *Server) RegisterStatic() {
 			// 文件不存在，返回 index.html（SPA fallback）
 			c.Request.URL.Path = "/index.html"
 		}
+		c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", "0")
 		fileServer.ServeHTTP(c.Writer, c.Request)
 	})
 }
@@ -83,14 +87,19 @@ func (s *Server) RegisterStatic() {
 // Start 启动服务器
 func (s *Server) Start() error {
 	addr := fmt.Sprintf("%s:%d", s.host, s.port)
-	return s.router.Run(addr)
+	s.httpServer = &http.Server{
+		Addr:    addr,
+		Handler: s.router,
+	}
+	return s.httpServer.ListenAndServe()
 }
 
 // Shutdown 优雅关闭
 func (s *Server) Shutdown(ctx context.Context) error {
-	// gin 没有内置 Shutdown，这里返回 nil
-	// 实际生产环境可以用 http.Server
-	return nil
+	if s.httpServer == nil {
+		return nil
+	}
+	return s.httpServer.Shutdown(ctx)
 }
 
 func corsMiddleware() gin.HandlerFunc {

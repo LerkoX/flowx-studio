@@ -13,14 +13,18 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import GlowNode from '@/components/GlowNode'
+import TerminalNode from '@/components/TerminalNode'
 import GradientEdge from '@/components/GradientEdge'
 import { autoLayout } from './AutoLayout'
 import { useWorkflowStore } from '@/stores/workflowStore'
+import { useExecutionStore } from '@/stores/executionStore'
 import { useIsMobile } from '@/hooks/useMediaQuery'
 import { parseWorkflowGraph } from '@/utils/mermaidParser'
 import { useEventStream } from '@/services/eventService'
+import type { ExecutionLog, ExecutionStatus } from '@/types/execution'
+import { ArrowUpDown, ArrowLeftRight } from 'lucide-react'
 
-const nodeTypes = { glowNode: GlowNode }
+const nodeTypes = { glowNode: GlowNode, terminalNode: TerminalNode }
 const edgeTypes = { gradientEdge: GradientEdge }
 
 const statusMap: Record<string, string> = {
@@ -32,6 +36,7 @@ const statusMap: Record<string, string> = {
 function WorkflowCanvasInner() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+  const [direction, setDirection] = useState<'TB' | 'LR'>('TB')
   const [, setSelectedNode] = useState<string | null>(null)
   const {
     currentWorkflow,
@@ -53,7 +58,7 @@ function WorkflowCanvasInner() {
       .then(({ nodes: parsedNodes, edges: parsedEdges }) => {
         const rawNodes: Node[] = parsedNodes.map((n) => ({
           id: n.id,
-          type: 'glowNode',
+          type: n.id === '__start__' || n.id === '__end__' ? 'terminalNode' : 'glowNode',
           position: { x: 0, y: 0 },
           data: {
             id: n.id,
@@ -62,6 +67,7 @@ function WorkflowCanvasInner() {
             accentColor: '#6366f1',
             inputs: nodeRuntimeData[n.id]?.inputs,
             outputs: nodeRuntimeData[n.id]?.outputs,
+            direction,
           },
         }))
 
@@ -69,13 +75,15 @@ function WorkflowCanvasInner() {
           id: `e${idx}`,
           source: e.source,
           target: e.target,
+          sourceHandle: 'source',
+          targetHandle: 'target',
           type: 'gradientEdge',
           data: {
             animated: nodeStatuses[e.source] === 'running',
           },
         }))
 
-        const { nodes: layoutedNodes, edges: layoutedEdges } = autoLayout(rawNodes, rawEdges, { direction: 'TB' })
+        const { nodes: layoutedNodes, edges: layoutedEdges } = autoLayout(rawNodes, rawEdges, { direction })
         setNodes(layoutedNodes)
         setEdges(layoutedEdges)
       })
@@ -84,7 +92,7 @@ function WorkflowCanvasInner() {
         setNodes([])
         setEdges([])
       })
-  }, [currentWorkflow, setNodes, setEdges])
+  }, [currentWorkflow, direction, setNodes, setEdges])
 
   // 实时同步执行状态
   useEffect(() => {
@@ -143,10 +151,32 @@ function WorkflowCanvasInner() {
     )
   }, [nodeRuntimeData, setNodes])
 
+  const executionStore = useExecutionStore()
+
   // 订阅 SSE 事件
   useEventStream('/api/v1/events', (type, data) => {
     if (type === 'execution.started') {
       setNodeStatuses({})
+      const payload = data as { execution_id?: number }
+      if (payload.execution_id) {
+        const id = String(payload.execution_id)
+        executionStore.startExecution(id)
+        executionStore.selectExecution(id)
+      }
+      return
+    }
+
+    if (type === 'execution_start') {
+      const payload = data as {
+        execution_id?: number
+        params?: Record<string, unknown>
+      }
+      if (payload.execution_id) {
+        executionStore.updateExecutionMetadata(String(payload.execution_id), {
+          status: 'running',
+          params: payload.params || {},
+        })
+      }
       return
     }
 
@@ -164,8 +194,60 @@ function WorkflowCanvasInner() {
       return
     }
 
+    if (type === 'execution.log') {
+      const payload = data as {
+        execution_id?: number
+        node_id?: string
+        node_name?: string
+        step_name?: string
+        level?: string
+        message?: string
+        output?: string
+        timestamp?: string
+      }
+      if (payload.execution_id) {
+        executionStore.appendRealtimeLog({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          executionId: payload.execution_id,
+          nodeId: payload.node_id,
+          nodeName: payload.node_name || payload.node_id || 'system',
+          stepName: payload.step_name,
+          level: (payload.level?.toUpperCase() as ExecutionLog['level']) || 'INFO',
+          message: payload.message || '',
+          output: payload.output,
+          timestamp: payload.timestamp ? new Date(payload.timestamp) : new Date(),
+        })
+      }
+      return
+    }
+
+    if (type === 'execution_complete') {
+      const payload = data as {
+        execution_id?: number
+        status?: string
+        params?: Record<string, unknown>
+        metadata?: Record<string, unknown>
+      }
+      if (payload.execution_id) {
+        executionStore.updateExecutionMetadata(String(payload.execution_id), {
+          status: (payload.status || 'success').toLowerCase(),
+          params: payload.params || {},
+          metadata: payload.metadata || {},
+        })
+      }
+      return
+    }
+
     if (type === 'execution.completed') {
-      // 执行结束后整体状态由 node_complete 覆盖
+      const payload = data as { execution_id?: number; status?: string }
+      if (payload.execution_id) {
+        executionStore.stopExecution()
+        executionStore.updateExecutionStatus(
+          String(payload.execution_id),
+          (payload.status as ExecutionStatus['status']) || 'success'
+        )
+        executionStore.selectExecution(String(payload.execution_id))
+      }
     }
   })
 
@@ -236,8 +318,21 @@ function WorkflowCanvasInner() {
 
         {/* 状态面板 */}
         <Panel position="top-right" className={`${isMobile ? 'm-2' : 'm-4'}`}>
-          <div className={`glass-panel px-3 py-1.5 text-white/60 ${isMobile ? 'text-[10px]' : 'text-xs'}`}>
-            {currentWorkflow?.name || '未选择工作流'}
+          <div className="flex items-center gap-2">
+            <div className={`glass-panel px-3 py-1.5 text-white/60 ${isMobile ? 'text-[10px]' : 'text-xs'}`}>
+              {currentWorkflow?.name || '未选择工作流'}
+            </div>
+            <button
+              onClick={() => setDirection((d) => (d === 'TB' ? 'LR' : 'TB'))}
+              className="glass-panel p-1.5 rounded-lg text-white/60 hover:text-white/80 hover:bg-white/10 transition-colors"
+              title={direction === 'TB' ? '切换为横向布局' : '切换为竖向布局'}
+            >
+              {direction === 'TB' ? (
+                <ArrowLeftRight className={isMobile ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
+              ) : (
+                <ArrowUpDown className={isMobile ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
+              )}
+            </button>
           </div>
         </Panel>
       </ReactFlow>

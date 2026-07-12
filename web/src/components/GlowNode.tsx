@@ -14,6 +14,7 @@ interface GlowNodeData {
   accentColor?: string
   inputs?: string[]
   outputs?: Record<string, string>
+  direction?: 'TB' | 'LR'
 }
 
 const statusConfig = {
@@ -34,6 +35,10 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
   const hasInputs = nodeData.inputs && nodeData.inputs.length > 0
   const hasOutputs = nodeData.outputs && Object.keys(nodeData.outputs).length > 0
   const hasDetails = hasInputs || hasOutputs
+
+  const isHorizontal = nodeData.direction === 'LR'
+  const targetPosition = isHorizontal ? Position.Left : Position.Top
+  const sourcePosition = isHorizontal ? Position.Right : Position.Bottom
 
   return (
     <motion.div
@@ -79,7 +84,8 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
         {/* 输入连接点 */}
         <Handle
           type="target"
-          position={Position.Top}
+          position={targetPosition}
+          id="target"
           className="w-3 h-3 !bg-white/20 !border-white/30"
         />
 
@@ -126,7 +132,8 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
         {/* 输出连接点 */}
         <Handle
           type="source"
-          position={Position.Bottom}
+          position={sourcePosition}
+          id="source"
           className="w-3 h-3 !bg-white/20 !border-white/30"
         />
 

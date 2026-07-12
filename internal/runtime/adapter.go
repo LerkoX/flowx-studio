@@ -21,14 +21,14 @@ type Adapter struct {
 
 // ExecutionEvent 执行事件
 type ExecutionEvent struct {
-	Type       string                 `json:"type"`
-	ExecutionID int64                 `json:"execution_id"`
-	NodeID     string                 `json:"node_id,omitempty"`
-	NodeName   string                 `json:"node_name,omitempty"`
-	Status     string                 `json:"status,omitempty"`
-	DurationMs int                    `json:"duration_ms,omitempty"`
-	Timestamp  time.Time              `json:"timestamp"`
-	Data       map[string]interface{} `json:"data,omitempty"`
+	Type        string                 `json:"type"`
+	ExecutionID int64                  `json:"execution_id"`
+	NodeID      string                 `json:"node_id,omitempty"`
+	NodeName    string                 `json:"node_name,omitempty"`
+	Status      string                 `json:"status,omitempty"`
+	DurationMs  int                    `json:"duration_ms,omitempty"`
+	Timestamp   time.Time              `json:"timestamp"`
+	Data        map[string]interface{} `json:"data,omitempty"`
 }
 
 // NewAdapter 创建运行时适配器
@@ -48,6 +48,11 @@ func NewAdapter() *Adapter {
 	return adapter
 }
 
+// OnLog 注册日志回调
+func (a *Adapter) OnLog(handler func(entry logger.Entry)) {
+	a.logPusher.OnLog(handler)
+}
+
 // ExecuteWorkflow 执行工作流
 func (a *Adapter) ExecuteWorkflow(ctx context.Context, executionID int64, configYAML string) error {
 	id := fmt.Sprintf("exec-%d", executionID)
@@ -59,9 +64,14 @@ func (a *Adapter) ExecuteWorkflow(ctx context.Context, executionID int64, config
 	}
 
 	// 异步执行
-	_, err := a.runtime.RunAsync(ctx, id, configYAML, listener)
+	pipeline, err := a.runtime.RunAsync(ctx, id, configYAML, listener)
 	if err != nil {
 		return fmt.Errorf("failed to start workflow: %w", err)
+	}
+
+	// 将 pipeline 内部 ID 映射到 execution ID，便于日志推送器定位
+	if pipeline != nil {
+		a.logPusher.RegisterPipeline(pipeline.Id(), executionID)
 	}
 
 	return nil
@@ -108,6 +118,17 @@ type studioListener struct {
 	executionID int64
 }
 
+func metadataToMap(m dag.Metadata) map[string]interface{} {
+	if m == nil {
+		return nil
+	}
+	result := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		result[k] = v.Value
+	}
+	return result
+}
+
 // Handle 处理事件
 func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 	switch event {
@@ -117,6 +138,9 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 			ExecutionID: l.executionID,
 			Status:      "running",
 			Timestamp:   time.Now(),
+			Data: map[string]interface{}{
+				"params": metadataToMap(p.GetParam()),
+			},
 		})
 	case dag.PipelineFinish:
 		l.adapter.PushEvent(ExecutionEvent{
@@ -124,6 +148,10 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 			ExecutionID: l.executionID,
 			Status:      p.Status(),
 			Timestamp:   time.Now(),
+			Data: map[string]interface{}{
+				"params":   metadataToMap(p.GetParam()),
+				"metadata": metadataToMap(p.Metadata()),
+			},
 		})
 	case dag.PipelineNodeStart:
 		node := p.CurrentNode()
@@ -179,23 +207,40 @@ func (l *studioListener) Events() []dag.Event {
 
 // LogPusher 实现 logger.Pusher 接口
 type LogPusher struct {
-	mu      sync.RWMutex
-	handlers []func(entry logger.Entry)
+	mu          sync.RWMutex
+	handlers    []func(entry logger.Entry)
+	pipelineMap map[string]int64
 }
 
 // NewLogPusher 创建日志推送器
 func NewLogPusher() *LogPusher {
 	return &LogPusher{
-		handlers: make([]func(entry logger.Entry), 0),
+		handlers:    make([]func(logger.Entry), 0),
+		pipelineMap: make(map[string]int64),
 	}
+}
+
+// RegisterPipeline 注册 pipeline ID 到 execution ID 的映射
+func (p *LogPusher) RegisterPipeline(pipelineID string, execID int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.pipelineMap[pipelineID] = execID
 }
 
 // Push 推送单条日志
 func (p *LogPusher) Push(ctx context.Context, entry logger.Entry) error {
 	p.mu.RLock()
+	pipelineMap := make(map[string]int64, len(p.pipelineMap))
+	for k, v := range p.pipelineMap {
+		pipelineMap[k] = v
+	}
 	handlers := make([]func(logger.Entry), len(p.handlers))
 	copy(handlers, p.handlers)
 	p.mu.RUnlock()
+
+	if execID, ok := pipelineMap[entry.Pipeline]; ok {
+		entry.Pipeline = fmt.Sprintf("exec-%d", execID)
+	}
 
 	for _, h := range handlers {
 		h(entry)
@@ -223,4 +268,11 @@ func (p *LogPusher) OnLog(handler func(entry logger.Entry)) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.handlers = append(p.handlers, handler)
+}
+
+// UnregisterPipeline 解除 pipeline ID 映射（可选）
+func (p *LogPusher) UnregisterPipeline(pipelineID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.pipelineMap, pipelineID)
 }

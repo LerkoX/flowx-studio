@@ -7,12 +7,33 @@ import LogViewer from '@/components/LogViewer'
 import { useAppStore } from '@/stores/appStore'
 import { useIsMobile } from '@/hooks/useMediaQuery'
 
-type TabType = 'params' | 'yaml' | 'logs'
+type TabType = 'params' | 'yaml' | 'metadata' | 'history' | 'logs'
 
 export default function WorkflowCanvasPage() {
   const [rightPanelTab, setRightPanelTab] = useState<TabType>('params')
   const { paramsPanelCollapsed, toggleParamsPanel, mobileParamsOpen, setMobileParamsOpen } = useAppStore()
   const isMobile = useIsMobile()
+
+  const tabs: { key: TabType; label: string }[] = [
+    { key: 'params', label: '参数' },
+    { key: 'yaml', label: 'YAML' },
+    { key: 'metadata', label: '元数据' },
+    { key: 'history', label: '历史' },
+    { key: 'logs', label: '日志' },
+  ]
+
+  const renderTabContent = () => {
+    switch (rightPanelTab) {
+      case 'logs':
+        return <LogViewer />
+      case 'yaml':
+      case 'metadata':
+      case 'history':
+      case 'params':
+      default:
+        return <WorkflowConfigPanel view={rightPanelTab} />
+    }
+  }
 
   // 移动端：底部抽屉式面板
   if (isMobile) {
@@ -21,6 +42,32 @@ export default function WorkflowCanvasPage() {
         {/* 中央画布区域 */}
         <div className="flex-1 relative">
           <WorkflowCanvas />
+        </div>
+
+        {/* 移动端底部标签栏 */}
+        <div className="fixed inset-x-0 bottom-0 z-50 h-12
+                        bg-[#0f172a]/95 backdrop-blur-2xl border-t border-white/10
+                        flex items-center justify-around px-2 pb-safe">
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => {
+                if (rightPanelTab === tab.key && mobileParamsOpen) {
+                  setMobileParamsOpen(false)
+                } else {
+                  setRightPanelTab(tab.key)
+                  setMobileParamsOpen(true)
+                }
+              }}
+              className={`flex-1 py-2 text-xs font-medium transition-colors ${
+                rightPanelTab === tab.key && mobileParamsOpen
+                  ? 'text-indigo-300'
+                  : 'text-white/50'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
         {/* 移动端参数面板抽屉 */}
@@ -48,21 +95,14 @@ export default function WorkflowCanvasPage() {
               >
                 {/* 标签切换 */}
                 <div className="flex border-b border-white/10 items-center">
-                  <TabButton
-                    active={rightPanelTab === 'params'}
-                    onClick={() => setRightPanelTab('params')}
-                    label="参数"
-                  />
-                  <TabButton
-                    active={rightPanelTab === 'yaml'}
-                    onClick={() => setRightPanelTab('yaml')}
-                    label="YAML"
-                  />
-                  <TabButton
-                    active={rightPanelTab === 'logs'}
-                    onClick={() => setRightPanelTab('logs')}
-                    label="日志"
-                  />
+                  {tabs.map((tab) => (
+                    <TabButton
+                      key={tab.key}
+                      active={rightPanelTab === tab.key}
+                      onClick={() => setRightPanelTab(tab.key)}
+                      label={tab.label}
+                    />
+                  ))}
                   <button
                     onClick={() => setMobileParamsOpen(false)}
                     className="px-4 flex items-center justify-center
@@ -74,41 +114,17 @@ export default function WorkflowCanvasPage() {
                 </div>
 
                 {/* 面板内容 */}
-                <div className="flex-1 overflow-hidden">
+                <div className="flex-1 overflow-hidden pb-14">
                   <AnimatePresence mode="wait">
-                    {rightPanelTab === 'params' && (
-                      <motion.div
-                        key="params"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="h-full overflow-auto p-4"
-                      >
-                        <WorkflowConfigPanel view="params" />
-                      </motion.div>
-                    )}
-                    {rightPanelTab === 'yaml' && (
-                      <motion.div
-                        key="yaml"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="h-full overflow-auto p-4"
-                      >
-                        <WorkflowConfigPanel view="yaml" />
-                      </motion.div>
-                    )}
-                    {rightPanelTab === 'logs' && (
-                      <motion.div
-                        key="logs"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="h-full"
-                      >
-                        <LogViewer />
-                      </motion.div>
-                    )}
+                    <motion.div
+                      key={rightPanelTab}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className={`h-full ${rightPanelTab === 'logs' ? 'pb-14' : 'overflow-auto p-4 pb-14'}`}
+                    >
+                      {renderTabContent()}
+                    </motion.div>
                   </AnimatePresence>
                 </div>
               </motion.div>
@@ -140,21 +156,14 @@ export default function WorkflowCanvasPage() {
           >
             {/* 标签切换 */}
             <div className="flex border-b border-white/10">
-              <TabButton
-                active={rightPanelTab === 'params'}
-                onClick={() => setRightPanelTab('params')}
-                label="参数"
-              />
-              <TabButton
-                active={rightPanelTab === 'yaml'}
-                onClick={() => setRightPanelTab('yaml')}
-                label="YAML"
-              />
-              <TabButton
-                active={rightPanelTab === 'logs'}
-                onClick={() => setRightPanelTab('logs')}
-                label="日志"
-              />
+              {tabs.map((tab) => (
+                <TabButton
+                  key={tab.key}
+                  active={rightPanelTab === tab.key}
+                  onClick={() => setRightPanelTab(tab.key)}
+                  label={tab.label}
+                />
+              ))}
               {/* 收起按钮 */}
               <button
                 onClick={toggleParamsPanel}
@@ -170,39 +179,15 @@ export default function WorkflowCanvasPage() {
             {/* 面板内容 */}
             <div className="flex-1 overflow-hidden">
               <AnimatePresence mode="wait">
-                {rightPanelTab === 'params' && (
-                  <motion.div
-                    key="params"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="h-full overflow-auto p-4"
-                  >
-                    <WorkflowConfigPanel view="params" />
-                  </motion.div>
-                )}
-                {rightPanelTab === 'yaml' && (
-                  <motion.div
-                    key="yaml"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="h-full overflow-auto p-4"
-                  >
-                    <WorkflowConfigPanel view="yaml" />
-                  </motion.div>
-                )}
-                {rightPanelTab === 'logs' && (
-                  <motion.div
-                    key="logs"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="h-full"
-                  >
-                    <LogViewer />
-                  </motion.div>
-                )}
+                <motion.div
+                  key={rightPanelTab}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className={`h-full ${rightPanelTab === 'logs' ? '' : 'overflow-auto p-4'}`}
+                >
+                  {renderTabContent()}
+                </motion.div>
               </AnimatePresence>
             </div>
           </motion.div>

@@ -92,44 +92,45 @@ type WorkflowNode struct {
 
 // Execution 执行记录
 type Execution struct {
-	ID           int64     `json:"id" db:"id"`
-	WorkflowID   int64     `json:"workflowId" db:"workflow_id"`
-	Status       string    `json:"status" db:"status"` // pending | running | success | failed | cancelled
-	Trigger      string    `json:"trigger" db:"trigger"` // manual | schedule | api
+	ID           int64      `json:"id" db:"id"`
+	WorkflowID   int64      `json:"workflowId" db:"workflow_id"`
+	Status       string     `json:"status" db:"status"` // pending | running | success | failed | cancelled
+	Trigger      string     `json:"trigger" db:"trigger"` // manual | schedule | api
 	StartedAt    *time.Time `json:"startedAt,omitempty" db:"started_at"`
 	CompletedAt  *time.Time `json:"completedAt,omitempty" db:"completed_at"`
-	DurationMs   int       `json:"durationMs,omitempty" db:"duration_ms"`
-	Result       string    `json:"result,omitempty" db:"result"`
-	ErrorMessage string    `json:"errorMessage,omitempty" db:"error_message"`
-	ErrorNodeID  string    `json:"errorNodeId,omitempty" db:"error_node_id"`
-	CreatedAt    time.Time `json:"createdAt" db:"created_at"`
+	DurationMs   int        `json:"durationMs,omitempty" db:"duration_ms"`
+	Result       *string    `json:"result,omitempty" db:"result"`
+	ErrorMessage *string    `json:"errorMessage,omitempty" db:"error_message"`
+	ErrorNodeID  *string    `json:"errorNodeId,omitempty" db:"error_node_id"`
+	MetadataJSON *string    `json:"metadata,omitempty" db:"metadata_json"`
+	CreatedAt    time.Time  `json:"createdAt" db:"created_at"`
 }
 
 // ExecutionNode 执行节点状态
 type ExecutionNode struct {
-	ID           int64      `json:"id" db:"id"`
-	ExecutionID  int64      `json:"executionId" db:"execution_id"`
-	NodeID       string     `json:"nodeId" db:"node_id"`
-	NodeName     string     `json:"nodeName,omitempty" db:"node_name"`
-	Status       string     `json:"status" db:"status"` // pending | running | success | failed | skipped
-	StartedAt    *time.Time `json:"startedAt,omitempty" db:"started_at"`
-	CompletedAt  *time.Time `json:"completedAt,omitempty" db:"completed_at"`
-	DurationMs   int        `json:"durationMs,omitempty" db:"duration_ms"`
-	Output       string     `json:"output,omitempty" db:"output"`
-	Error        string     `json:"error,omitempty" db:"error"`
+	ID          int64      `json:"id" db:"id"`
+	ExecutionID int64      `json:"executionId" db:"execution_id"`
+	NodeID      string     `json:"nodeId" db:"node_id"`
+	NodeName    string     `json:"nodeName,omitempty" db:"node_name"`
+	Status      string     `json:"status" db:"status"` // pending | running | success | failed | skipped
+	StartedAt   *time.Time `json:"startedAt,omitempty" db:"started_at"`
+	CompletedAt *time.Time `json:"completedAt,omitempty" db:"completed_at"`
+	DurationMs  int        `json:"durationMs,omitempty" db:"duration_ms"`
+	Output      *string    `json:"output,omitempty" db:"output"`
+	Error       *string    `json:"error,omitempty" db:"error"`
 }
 
 // ExecutionLog 执行日志
 type ExecutionLog struct {
-	ID          int64     `json:"id" db:"id"`
-	ExecutionID int64     `json:"executionId" db:"execution_id"`
-	NodeID      string    `json:"nodeId,omitempty" db:"node_id"`
-	NodeName    string    `json:"nodeName,omitempty" db:"node_name"`
-	StepName    string    `json:"stepName,omitempty" db:"step_name"`
-	Level       string    `json:"level" db:"level"` // debug | info | warn | error | fatal
-	Message     string    `json:"message" db:"message"`
-	Output      string    `json:"output,omitempty" db:"output"`
-	Timestamp   time.Time `json:"timestamp" db:"timestamp"`
+	ID          int64      `json:"id" db:"id"`
+	ExecutionID int64      `json:"executionId" db:"execution_id"`
+	NodeID      *string    `json:"nodeId,omitempty" db:"node_id"`
+	NodeName    *string    `json:"nodeName,omitempty" db:"node_name"`
+	StepName    *string    `json:"stepName,omitempty" db:"step_name"`
+	Level       string     `json:"level" db:"level"` // debug | info | warn | error | fatal
+	Message     string     `json:"message" db:"message"`
+	Output      *string    `json:"output,omitempty" db:"output"`
+	Timestamp   time.Time  `json:"timestamp" db:"timestamp"`
 }
 
 // SystemConfig 系统配置

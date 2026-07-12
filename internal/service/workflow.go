@@ -3,8 +3,11 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/LerkoX/flowx-studio/internal/db"
@@ -12,6 +15,7 @@ import (
 	"github.com/LerkoX/flowx-studio/internal/model"
 	"github.com/LerkoX/flowx-studio/internal/runtime"
 	"github.com/LerkoX/flowx-studio/internal/validator"
+	"github.com/LerkoX/flowx/logger"
 )
 
 // WorkflowService 工作流服务
@@ -20,16 +24,21 @@ type WorkflowService struct {
 	runtime   *runtime.Adapter
 	eventBus  *event.Bus
 	validator *validator.WorkflowValidator
+	metaMu    sync.Mutex
+	metaCache map[int64]map[string]interface{}
 }
 
 // NewWorkflowService 创建工作流服务
 func NewWorkflowService(database *db.DB, rt *runtime.Adapter, bus *event.Bus) *WorkflowService {
-	return &WorkflowService{
+	svc := &WorkflowService{
 		db:        database,
 		runtime:   rt,
 		eventBus:  bus,
 		validator: validator.NewWorkflowValidator(),
+		metaCache: make(map[int64]map[string]interface{}),
 	}
+	rt.OnLog(svc.handleLogEntry)
+	return svc
 }
 
 // List 获取工作流列表
@@ -181,6 +190,8 @@ func (s *WorkflowService) Run(id int64, params map[string]interface{}, dryRun bo
 
 	execID, _ := result.LastInsertId()
 
+	s.setExecutionMetadata(execID, "running", "manual", nil, nil, "")
+
 	go s.runWorkflow(execID, wf)
 
 	return execID, fmt.Sprintf("/api/v1/executions/%d/stream", execID), nil
@@ -188,9 +199,10 @@ func (s *WorkflowService) Run(id int64, params map[string]interface{}, dryRun bo
 
 func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 	ctx := context.Background()
+	startTime := time.Now()
 
 	s.db.Exec("UPDATE executions SET status = ?, started_at = ? WHERE id = ?",
-		"running", time.Now(), execID)
+		"running", startTime, execID)
 
 	s.eventBus.Publish(event.Event{
 		Type: "execution.started",
@@ -205,6 +217,7 @@ func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 	if err != nil {
 		s.db.Exec("UPDATE executions SET status = ?, completed_at = ?, error_message = ? WHERE id = ?",
 			"failed", time.Now(), err.Error(), execID)
+		s.setExecutionMetadata(execID, "failed", "manual", nil, nil, err.Error())
 		s.eventBus.Publish(event.Event{
 			Type: "execution.completed",
 			Data: map[string]interface{}{
@@ -236,7 +249,7 @@ func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 	}
 
 	s.db.Exec("UPDATE executions SET status = ?, completed_at = ?, duration_ms = ? WHERE id = ?",
-		finalStatus, time.Now(), 2000, execID)
+		finalStatus, time.Now(), int(time.Since(startTime).Milliseconds()), execID)
 
 	s.eventBus.Publish(event.Event{
 		Type: "execution.completed",
@@ -335,7 +348,7 @@ func (s *WorkflowService) GetExecutionLogs(id int64, nodeID, level string, limit
 		return nil, fmt.Errorf("failed to count logs: %w", err)
 	}
 
-	query := "SELECT * FROM execution_logs " + whereClause + " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+	query := "SELECT * FROM execution_logs " + whereClause + " ORDER BY timestamp ASC LIMIT ? OFFSET ?"
 	args = append(args, limit, offset)
 
 	var logs []model.ExecutionLog
@@ -362,6 +375,163 @@ func (s *WorkflowService) UnsubscribeEvents(ch chan event.Event) {
 	s.eventBus.Unsubscribe(ch)
 }
 
+// GetExecutionNodes 获取执行节点状态
+func (s *WorkflowService) GetExecutionNodes(executionID int64) ([]model.ExecutionNode, error) {
+	var nodes []model.ExecutionNode
+	if err := s.db.Select(&nodes, "SELECT * FROM execution_nodes WHERE execution_id = ? ORDER BY id", executionID); err != nil {
+		return nil, fmt.Errorf("failed to get execution nodes: %w", err)
+	}
+	return nodes, nil
+}
+
+// handleLogEntry 持久化运行时日志
+func (s *WorkflowService) handleLogEntry(entry logger.Entry) {
+	execIDStr := strings.TrimPrefix(entry.Pipeline, "exec-")
+	execID, err := strconv.ParseInt(execIDStr, 10, 64)
+	if err != nil || execID <= 0 {
+		return
+	}
+
+	ts := entry.Timestamp
+	if ts.IsZero() {
+		ts = time.Now()
+	}
+
+	_, _ = s.db.Exec(`
+		INSERT INTO execution_logs (execution_id, node_id, node_name, step_name, level, message, output, timestamp)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, execID, entry.Node, entry.Node, entry.Step, strings.ToLower(string(entry.Level)), entry.Message, entry.Output, ts)
+
+	s.eventBus.Publish(event.Event{
+		Type: "execution.log",
+		Data: map[string]interface{}{
+			"execution_id": execID,
+			"node_id":      entry.Node,
+			"node_name":    entry.Node,
+			"step_name":    entry.Step,
+			"level":        strings.ToLower(string(entry.Level)),
+			"message":      entry.Message,
+			"output":       entry.Output,
+			"timestamp":    entry.Timestamp,
+		},
+	})
+}
+
+// persistRuntimeEvent 持久化运行时事件并转发到事件总线
+func (s *WorkflowService) persistRuntimeEvent(evt runtime.ExecutionEvent) {
+	data := map[string]interface{}{
+		"type":         evt.Type,
+		"execution_id": evt.ExecutionID,
+	}
+	if evt.NodeID != "" {
+		data["node_id"] = evt.NodeID
+	}
+	if evt.NodeName != "" {
+		data["node_name"] = evt.NodeName
+	}
+	if evt.Status != "" {
+		data["status"] = evt.Status
+	}
+	if evt.DurationMs > 0 {
+		data["duration_ms"] = evt.DurationMs
+	}
+	for k, v := range evt.Data {
+		data[k] = v
+	}
+
+	switch evt.Type {
+	case "execution_start":
+		_, _ = s.db.Exec("UPDATE executions SET status = ?, started_at = ? WHERE id = ?",
+			"running", time.Now(), evt.ExecutionID)
+		if params, ok := evt.Data["params"].(map[string]interface{}); ok {
+			s.setExecutionMetadata(evt.ExecutionID, "running", "", params, nil, "")
+		}
+	case "node_start":
+		nodeName := evt.NodeName
+		if nodeName == "" {
+			nodeName = evt.NodeID
+		}
+		_, _ = s.db.Exec(`
+			INSERT INTO execution_nodes (execution_id, node_id, node_name, status, started_at)
+			VALUES (?, ?, ?, ?, ?)
+			ON CONFLICT(execution_id, node_id) DO UPDATE SET
+				status = excluded.status,
+				started_at = excluded.started_at,
+				completed_at = NULL,
+				duration_ms = NULL
+		`, evt.ExecutionID, evt.NodeID, nodeName, "running", time.Now())
+	case "node_complete":
+		status := evt.Status
+		if status == "" {
+			status = "success"
+		}
+		var startedAt time.Time
+		if err := s.db.Get(&startedAt,
+			"SELECT started_at FROM execution_nodes WHERE execution_id = ? AND node_id = ?",
+			evt.ExecutionID, evt.NodeID); err == nil {
+			duration := int(time.Since(startedAt).Milliseconds())
+			_, _ = s.db.Exec(`
+				UPDATE execution_nodes
+				SET status = ?, completed_at = ?, duration_ms = ?
+				WHERE execution_id = ? AND node_id = ?
+			`, status, time.Now(), duration, evt.ExecutionID, evt.NodeID)
+		}
+	case "execution_complete":
+		status := evt.Status
+		if status == "" {
+			status = "success"
+		}
+		var startedAt *time.Time
+		if err := s.db.Get(&startedAt, "SELECT started_at FROM executions WHERE id = ?", evt.ExecutionID); err == nil && startedAt != nil {
+			duration := int(time.Since(*startedAt).Milliseconds())
+			_, _ = s.db.Exec("UPDATE executions SET status = ?, completed_at = ?, duration_ms = ? WHERE id = ?",
+				status, time.Now(), duration, evt.ExecutionID)
+		} else {
+			_, _ = s.db.Exec("UPDATE executions SET status = ?, completed_at = ? WHERE id = ?",
+				status, time.Now(), evt.ExecutionID)
+		}
+		params, _ := evt.Data["params"].(map[string]interface{})
+		metadata, _ := evt.Data["metadata"].(map[string]interface{})
+		s.setExecutionMetadata(evt.ExecutionID, strings.ToLower(status), "", params, metadata, "")
+		delete(s.metaCache, evt.ExecutionID)
+	}
+
+	s.eventBus.Publish(event.Event{
+		Type: evt.Type,
+		Data: data,
+	})
+}
+
+// setExecutionMetadata 保存运行时元数据快照
+func (s *WorkflowService) setExecutionMetadata(execID int64, status, trigger string, params, runtimeMetadata map[string]interface{}, errStr string) {
+	s.metaMu.Lock()
+	defer s.metaMu.Unlock()
+
+	cache, ok := s.metaCache[execID]
+	if !ok {
+		cache = make(map[string]interface{})
+		s.metaCache[execID] = cache
+	}
+	if status != "" {
+		cache["status"] = status
+	}
+	if trigger != "" {
+		cache["trigger"] = trigger
+	}
+	if errStr != "" {
+		cache["error"] = errStr
+	}
+	if params != nil {
+		cache["params"] = params
+	}
+	if runtimeMetadata != nil {
+		cache["metadata"] = runtimeMetadata
+	}
+
+	metadataJSON, _ := json.Marshal(cache)
+	_, _ = s.db.Exec("UPDATE executions SET metadata_json = ? WHERE id = ?", string(metadataJSON), execID)
+}
+
 // StartEventBridge 将 FlowX Runtime 事件转发到事件总线
 func (s *WorkflowService) StartEventBridge(ctx context.Context) {
 	go func() {
@@ -373,29 +543,7 @@ func (s *WorkflowService) StartEventBridge(ctx context.Context) {
 				if !ok {
 					return
 				}
-				data := map[string]interface{}{
-					"type":         evt.Type,
-					"execution_id": evt.ExecutionID,
-				}
-				if evt.NodeID != "" {
-					data["node_id"] = evt.NodeID
-				}
-				if evt.NodeName != "" {
-					data["node_name"] = evt.NodeName
-				}
-				if evt.Status != "" {
-					data["status"] = evt.Status
-				}
-				if evt.DurationMs > 0 {
-					data["duration_ms"] = evt.DurationMs
-				}
-				for k, v := range evt.Data {
-					data[k] = v
-				}
-				s.eventBus.Publish(event.Event{
-					Type: evt.Type,
-					Data: data,
-				})
+				s.persistRuntimeEvent(evt)
 			}
 		}
 	}()

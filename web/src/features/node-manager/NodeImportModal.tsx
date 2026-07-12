@@ -71,10 +71,10 @@ export default function NodeImportModal({ isOpen, onClose, onAdd, isAdding }: No
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
           >
             <div className="w-full max-w-lg bg-[#0f172a]/95 backdrop-blur-2xl 
-                            border border-white/10 rounded-2xl overflow-hidden"
+                            border border-white/10 rounded-2xl overflow-hidden pointer-events-auto"
             >
               {/* 头部 */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
