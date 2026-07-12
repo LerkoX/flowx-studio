@@ -17,6 +17,9 @@ vendor/
 *.swo
 *~
 
+# Codegraph index
+.codegraph/
+
 # OS
 .DS_Store
 Thumbs.db
