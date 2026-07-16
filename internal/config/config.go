@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -30,6 +31,7 @@ type DataConfig struct {
 // Load 加载配置
 func Load() (*Config, error) {
 	viper.SetEnvPrefix("FLOWX_STUDIO")
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()
 
 	// 替换环境变量中的 ~

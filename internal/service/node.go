@@ -279,8 +279,8 @@ func scanNode(scanner interface {
 		&node.ID, &node.Name, &node.DisplayName, &node.Description, &node.Version,
 		&node.Author, &node.Icon, &node.NodeType, &node.Language, &node.Code,
 		&node.Entry, &reqsJSON, &node.Image, &paramsJSON, &outputsJSON,
-		&dockerJSON, &mockJSON, &filesJSON, &pkgJSON, &node.SourceType, &node.SourceURL,
-		&node.SourcePath, &tagsJSON, &node.CreatedAt, &node.UpdatedAt,
+		&dockerJSON, &mockJSON, &node.SourceType, &node.SourceURL, &node.SourcePath,
+		&tagsJSON, &node.CreatedAt, &node.UpdatedAt, &filesJSON, &pkgJSON,
 	}
 
 	if err := scanner.Scan(dests...); err != nil {
