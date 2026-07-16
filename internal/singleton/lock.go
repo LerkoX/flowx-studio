@@ -12,15 +12,17 @@ import (
 
 // Lock 进程级单例锁，通过 PID 文件实现
 type Lock struct {
-	pidFile string
+	pidFile     string
+	commandName string
 }
 
 // New 创建单例锁
-func New(pidFile string) *Lock {
-	return &Lock{pidFile: pidFile}
+// commandName 用于匹配已有进程命令行中的子命令，避免误杀其他子命令进程
+func New(pidFile, commandName string) *Lock {
+	return &Lock{pidFile: pidFile, commandName: commandName}
 }
 
-// Acquire 获取锁。如果已有实例在运行，会优雅终止它。
+// Acquire 获取锁。如果已有同子命令实例在运行，会优雅终止它。
 func (l *Lock) Acquire() error {
 	if err := os.MkdirAll(filepath.Dir(l.pidFile), 0755); err != nil {
 		return fmt.Errorf("failed to create pid dir: %w", err)
@@ -61,7 +63,13 @@ func (l *Lock) isRunning(pid int) bool {
 		return false
 	}
 	cmd := strings.ReplaceAll(string(cmdline), "\x00", " ")
-	return strings.Contains(cmd, "flowx-studio")
+	if !strings.Contains(cmd, "flowx-studio") {
+		return false
+	}
+	if l.commandName != "" && !strings.Contains(cmd, l.commandName) {
+		return false
+	}
+	return true
 }
 
 func (l *Lock) kill(pid int) error {

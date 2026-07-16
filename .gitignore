@@ -3,7 +3,7 @@ node_modules
 .playwright-mcp
 
 # Build artifacts
-flowx-studio
+/flowx-studio
 *.exe
 internal/server/web/dist
 

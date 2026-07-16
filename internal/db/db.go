@@ -41,6 +41,22 @@ func New(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
 	}
 
+	// 文件型数据库启用 WAL 和 busy timeout，以支持多进程并发访问
+	if !strings.Contains(dbPath, ":memory:") {
+		if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
+			return nil, fmt.Errorf("failed to set busy timeout: %w", err)
+		}
+		var journalMode string
+		if err := db.Get(&journalMode, "PRAGMA journal_mode"); err != nil {
+			return nil, fmt.Errorf("failed to query journal_mode: %w", err)
+		}
+		if !strings.EqualFold(journalMode, "wal") {
+			if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+				return nil, fmt.Errorf("failed to enable WAL mode: %w", err)
+			}
+		}
+	}
+
 	// 执行迁移
 	if err := runMigrations(db); err != nil {
 		return nil, fmt.Errorf("failed to run migrations: %w", err)

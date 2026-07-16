@@ -45,7 +45,7 @@
 | 10 | 安全设计 | 🟡 部分实现 | 加密 + 黑名单已完成，完整沙箱待实现 |
 | 11 | 核心库依赖 | ✅ 已完成 | FlowX 引擎接口调研完成，replace 引用已配置 |
 | 12 | 节点包规范 | 🟡 部分实现 | `flowx.json` 导入、Mock 多文件、运行时展开已实现；工作流节点镜像执行待 FlowX 核心增强 |
-| 13 | MCP 服务端工具 | 🟡 部分实现 | 已提供 workflow / node 工具；`import_node` 成为节点包导入唯一入口 |
+| 13 | MCP 服务端工具 | 🟡 部分实现 | 新增 `flowx-studio mcp` 子命令；`server` 仅保留 HTTP；SQLite WAL 支持多会话并发 |
 
 ---
 
@@ -194,6 +194,9 @@
 - [x] `stdio` JSON-RPC 2.0 MCP 服务 (`internal/mcpserver`)
 - [x] 工具列表：`create_pipeline`、`update_pipeline`、`delete_pipeline`、`list_pipelines`、`run_pipeline`、`import_node`、`delete_node`、`list_nodes`
 - [x] `import_node` 支持从 `git` / `folder` 读取 `flowx.json` 并导入节点包
+- [x] 新增 `flowx-studio mcp` 子命令，仅启动 stdio MCP 服务，不持有 PID 单例锁，可多会话并发
+- [x] `flowx-studio server` 仅启动 HTTP 服务，保留 PID 单例锁且只杀 `server` 进程
+- [x] SQLite 启用 WAL + busy timeout，支持多个 `mcp` 进程同时访问同一数据库
 - [ ] MCP 工具调用认证与限流
 
 ---
