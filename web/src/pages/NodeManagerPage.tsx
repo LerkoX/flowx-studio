@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Search, Plus, Tag, Code, Container, Filter, X } from 'lucide-react'
 import { useNodeStore } from '@/stores/nodeStore'
+import { importNode } from '@/services/nodeService'
 import NodeCard from '@/features/node-manager/NodeCard'
 import NodeImportModal from '@/features/node-manager/NodeImportModal'
 import NodeDetailModal from '@/features/node-manager/NodeDetailModal'
@@ -37,57 +38,26 @@ export default function NodeManagerPage() {
   const allTags = getAllTags()
   const allLanguages = getAllLanguages()
 
-  const handleAddNode = async (data: { type: 'git' | 'image' | 'folder'; url: string }) => {
+  const handleAddNode = async (data: { type: 'git' | 'folder'; url: string }) => {
     setIsAdding(true)
     setAddError(null)
 
     try {
-      // TODO: 调用后端 API 添加节点
-      // 模拟添加
-      await new Promise((resolve) => setTimeout(resolve, 1500))
+      const response = await importNode({
+        source_type: data.type,
+        source_url: data.type === 'git' ? data.url : undefined,
+        source_path: data.type === 'folder' ? data.url : undefined,
+      })
 
-      const deriveName = () => {
-        if (data.type === 'folder') {
-          return data.url.split('/').pop() || 'new-folder-node'
-        }
-        if (data.type === 'git') {
-          return data.url.split('/').pop()?.replace('.git', '') || 'new-node'
-        }
-        return data.url.split(':').pop() || 'new-image'
+      if (response.code === 200 && response.data) {
+        const newNode = { ...response.data, id: String(response.data.id) }
+        addNode(newNode as NodeDefinition)
+        setShowImportModal(false)
+      } else {
+        setAddError(response.message || '导入失败')
       }
-
-      const deriveDisplayName = () => {
-        if (data.type === 'folder') return '文件夹节点'
-        if (data.type === 'git') return '新节点'
-        return data.url.split('/').pop() || '新镜像'
-      }
-
-      const deriveDescription = () => {
-        if (data.type === 'folder') return `从文件夹 ${data.url} 导入`
-        if (data.type === 'git') return `从 ${data.url} 导入`
-        return `镜像: ${data.url}`
-      }
-
-      const newNode: NodeDefinition = {
-        id: `node-${Date.now()}`,
-        name: deriveName(),
-        displayName: deriveDisplayName(),
-        description: deriveDescription(),
-        nodeType: data.type === 'image' ? 'image' : 'code',
-        language: data.type === 'git' || data.type === 'folder' ? 'unknown' : undefined,
-        image: data.type === 'image' ? data.url : undefined,
-        sourceURL: data.type === 'git' || data.type === 'image' ? data.url : undefined,
-        sourcePath: data.type === 'folder' ? data.url : undefined,
-        sourceType: data.type,
-        parameters: [],
-        tags: [],
-        createdAt: new Date(),
-      }
-
-      addNode(newNode)
-      setShowImportModal(false)
     } catch (err) {
-      setAddError(err instanceof Error ? err.message : '添加失败')
+      setAddError(err instanceof Error ? err.message : '导入失败')
     } finally {
       setIsAdding(false)
     }

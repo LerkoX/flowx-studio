@@ -24,17 +24,19 @@ type WorkflowService struct {
 	runtime   *runtime.Adapter
 	eventBus  *event.Bus
 	validator *validator.WorkflowValidator
+	nodeSvc   *NodeService
 	metaMu    sync.Mutex
 	metaCache map[int64]map[string]interface{}
 }
 
 // NewWorkflowService 创建工作流服务
-func NewWorkflowService(database *db.DB, rt *runtime.Adapter, bus *event.Bus) *WorkflowService {
+func NewWorkflowService(database *db.DB, rt *runtime.Adapter, bus *event.Bus, nodeSvc *NodeService) *WorkflowService {
 	svc := &WorkflowService{
 		db:        database,
 		runtime:   rt,
 		eventBus:  bus,
 		validator: validator.NewWorkflowValidator(),
+		nodeSvc:   nodeSvc,
 		metaCache: make(map[int64]map[string]interface{}),
 	}
 	rt.OnLog(svc.handleLogEntry)
@@ -201,6 +203,29 @@ func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 	ctx := context.Background()
 	startTime := time.Now()
 
+	yamlConfig := wf.YAMLConfig
+	if s.nodeSvc != nil {
+		expanded, err := runtime.ExpandWorkflowConfig(yamlConfig, func(name string) (*model.Node, error) {
+			return s.nodeSvc.GetByName(name)
+		})
+		if err != nil {
+			s.db.Exec("UPDATE executions SET status = ?, completed_at = ?, error_message = ? WHERE id = ?",
+				"failed", time.Now(), err.Error(), execID)
+			s.setExecutionMetadata(execID, "failed", "manual", nil, nil, err.Error())
+			s.eventBus.Publish(event.Event{
+				Type: "execution.completed",
+				Data: map[string]interface{}{
+					"execution_id": execID,
+					"workflow_id":  wf.ID,
+					"status":       "failed",
+					"error":        err.Error(),
+				},
+			})
+			return
+		}
+		yamlConfig = expanded
+	}
+
 	s.db.Exec("UPDATE executions SET status = ?, started_at = ? WHERE id = ?",
 		"running", startTime, execID)
 
@@ -208,12 +233,12 @@ func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 		Type: "execution.started",
 		Data: map[string]interface{}{
 			"execution_id": execID,
-			"workflow_id":    wf.ID,
-			"status":         "running",
+			"workflow_id":  wf.ID,
+			"status":       "running",
 		},
 	})
 
-	err := s.runtime.ExecuteWorkflow(ctx, execID, wf.YAMLConfig)
+	err := s.runtime.ExecuteWorkflow(ctx, execID, yamlConfig)
 	if err != nil {
 		s.db.Exec("UPDATE executions SET status = ?, completed_at = ?, error_message = ? WHERE id = ?",
 			"failed", time.Now(), err.Error(), execID)

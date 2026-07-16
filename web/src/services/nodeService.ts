@@ -60,6 +60,19 @@ export async function deleteNode(nodeId: string): Promise<ApiResponse<{ message:
 }
 
 /**
+ * 导入节点
+ * POST /api/v1/nodes/import
+ */
+export async function importNode(data: {
+  source_type: 'git' | 'folder'
+  source_url?: string
+  source_path?: string
+}): Promise<ApiResponse<NodeDefinition>> {
+  const response = await apiClient.post('/api/v1/nodes/import', data)
+  return response.data
+}
+
+/**
  * Mock 测试节点
  * POST /api/v1/nodes/:id/mock
  */

@@ -94,6 +94,19 @@ func (s *NodeService) List(language, tag, search, nodeType string, page, pageSiz
 	}, nil
 }
 
+// GetByName 根据名称获取节点
+func (s *NodeService) GetByName(name string) (*model.Node, error) {
+	row := s.db.QueryRowx("SELECT * FROM nodes WHERE name = ?", name)
+	var node model.Node
+	if err := scanNode(row, &node); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("node not found")
+		}
+		return nil, fmt.Errorf("failed to get node: %w", err)
+	}
+	return &node, nil
+}
+
 // Get 获取节点详情
 func (s *NodeService) Get(id int64) (*model.Node, error) {
 	row := s.db.QueryRowx("SELECT * FROM nodes WHERE id = ?", id)
@@ -122,15 +135,17 @@ func (s *NodeService) Create(req *model.Node) (*model.Node, error) {
 	dockerJSON, _ := json.Marshal(req.DockerConfig)
 	mockJSON, _ := json.Marshal(req.MockConfig)
 	tagsJSON, _ := json.Marshal(req.Tags)
+	filesJSON, _ := json.Marshal(req.Files)
+	pkgJSON, _ := json.Marshal(req.PackageConfig)
 
 	result, err := s.db.Exec(`
 		INSERT INTO nodes (name, display_name, description, version, author, icon, node_type,
 			language, code, entry, requirements, image, parameters, outputs, docker_config, mock_config,
-			source_type, source_url, source_path, tags)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			files, package_config, source_type, source_url, source_path, tags)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, req.Name, req.DisplayName, req.Description, req.Version, req.Author, req.Icon, req.NodeType,
 		req.Language, req.Code, req.Entry, string(reqsJSON), req.Image, string(paramsJSON), string(outputsJSON),
-		string(dockerJSON), string(mockJSON), req.SourceType, req.SourceURL, req.SourcePath, string(tagsJSON))
+		string(dockerJSON), string(mockJSON), string(filesJSON), string(pkgJSON), req.SourceType, req.SourceURL, req.SourcePath, string(tagsJSON))
 
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
@@ -158,18 +173,20 @@ func (s *NodeService) Update(id int64, req *model.Node) error {
 	dockerJSON, _ := json.Marshal(req.DockerConfig)
 	mockJSON, _ := json.Marshal(req.MockConfig)
 	tagsJSON, _ := json.Marshal(req.Tags)
+	filesJSON, _ := json.Marshal(req.Files)
+	pkgJSON, _ := json.Marshal(req.PackageConfig)
 
 	_, err := s.db.Exec(`
 		UPDATE nodes SET
 			name = ?, display_name = ?, description = ?, version = ?, author = ?, icon = ?, node_type = ?,
 			language = ?, code = ?, entry = ?, requirements = ?, image = ?,
 			parameters = ?, outputs = ?, docker_config = ?, mock_config = ?,
-			source_type = ?, source_url = ?, source_path = ?, tags = ?, updated_at = CURRENT_TIMESTAMP
+			files = ?, package_config = ?, source_type = ?, source_url = ?, source_path = ?, tags = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
 	`, req.Name, req.DisplayName, req.Description, req.Version, req.Author, req.Icon, req.NodeType,
 		req.Language, req.Code, req.Entry, string(reqsJSON), req.Image,
 		string(paramsJSON), string(outputsJSON), string(dockerJSON), string(mockJSON),
-		req.SourceType, req.SourceURL, req.SourcePath, string(tagsJSON), id)
+		string(filesJSON), string(pkgJSON), req.SourceType, req.SourceURL, req.SourcePath, string(tagsJSON), id)
 
 	if err != nil {
 		return fmt.Errorf("failed to update node: %w", err)
@@ -209,7 +226,13 @@ func (s *NodeService) MockTest(id int64, parameters map[string]string, timeout i
 	if node.NodeType != "code" {
 		return nil, fmt.Errorf("mock test only supports code nodes")
 	}
-	if strings.TrimSpace(node.Code) == "" {
+
+	code := node.Code
+	if node.MockConfig != nil && node.MockConfig.Enabled && node.MockConfig.Code != "" {
+		code = node.MockConfig.Code
+	}
+
+	if strings.TrimSpace(code) == "" {
 		return nil, fmt.Errorf("node code is empty")
 	}
 
@@ -237,23 +260,26 @@ func (s *NodeService) MockTest(id int64, parameters map[string]string, timeout i
 	s.executor.Timeout = d
 
 	result := s.executor.Execute(sandbox.ExecuteOptions{
-		Code:     node.Code,
+		Code:     code,
 		Language: node.Language,
 		Entry:    node.Entry,
 		EnvVars:  envVars,
+		Files:    node.Files,
 	})
 
 	return result, nil
 }
 
-func scanNode(scanner interface{ Scan(dest ...interface{}) error }, node *model.Node) error {
-	var paramsJSON, outputsJSON, reqsJSON, dockerJSON, mockJSON, tagsJSON string
+func scanNode(scanner interface {
+	Scan(dest ...interface{}) error
+}, node *model.Node) error {
+	var paramsJSON, outputsJSON, reqsJSON, dockerJSON, mockJSON, tagsJSON, filesJSON, pkgJSON string
 
 	dests := []interface{}{
 		&node.ID, &node.Name, &node.DisplayName, &node.Description, &node.Version,
 		&node.Author, &node.Icon, &node.NodeType, &node.Language, &node.Code,
 		&node.Entry, &reqsJSON, &node.Image, &paramsJSON, &outputsJSON,
-		&dockerJSON, &mockJSON, &node.SourceType, &node.SourceURL,
+		&dockerJSON, &mockJSON, &filesJSON, &pkgJSON, &node.SourceType, &node.SourceURL,
 		&node.SourcePath, &tagsJSON, &node.CreatedAt, &node.UpdatedAt,
 	}
 
@@ -267,6 +293,8 @@ func scanNode(scanner interface{ Scan(dest ...interface{}) error }, node *model.
 	json.Unmarshal([]byte(dockerJSON), &node.DockerConfig)
 	json.Unmarshal([]byte(mockJSON), &node.MockConfig)
 	json.Unmarshal([]byte(tagsJSON), &node.Tags)
+	json.Unmarshal([]byte(filesJSON), &node.Files)
+	json.Unmarshal([]byte(pkgJSON), &node.PackageConfig)
 
 	return nil
 }

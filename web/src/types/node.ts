@@ -52,6 +52,9 @@ export interface NodeDefinition {
   sourceURL?: string
   sourcePath?: string
   
+  // 节点包文件
+  files?: Record<string, string>
+
   createdAt?: Date
   updatedAt?: Date
 }

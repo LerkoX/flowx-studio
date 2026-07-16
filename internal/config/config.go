@@ -23,8 +23,8 @@ type ServerConfig struct {
 
 // DataConfig 数据配置
 type DataConfig struct {
-	Dir     string `mapstructure:"dir"`
-	DBPath  string `mapstructure:"db_path"`
+	Dir    string `mapstructure:"dir"`
+	DBPath string `mapstructure:"db_path"`
 }
 
 // Load 加载配置

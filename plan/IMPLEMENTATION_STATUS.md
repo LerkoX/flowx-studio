@@ -44,6 +44,8 @@
 | 9 | 运行时与部署 | ✅ 已完成 | 单二进制 + go:embed + Cobra CLI 已完成 |
 | 10 | 安全设计 | 🟡 部分实现 | 加密 + 黑名单已完成，完整沙箱待实现 |
 | 11 | 核心库依赖 | ✅ 已完成 | FlowX 引擎接口调研完成，replace 引用已配置 |
+| 12 | 节点包规范 | 🟡 部分实现 | `flowx.json` 导入、Mock 多文件、运行时展开已实现；工作流节点镜像执行待 FlowX 核心增强 |
+| 13 | MCP 服务端工具 | 🟡 部分实现 | 已提供 workflow / node 工具；`import_node` 成为节点包导入唯一入口 |
 
 ---
 
@@ -188,11 +190,28 @@
 - [ ] 日志导出 (`POST /api/v1/executions/:id/logs/export`)
 - [ ] 工作流 Mock 执行 (`POST /api/v1/workflows/:id/mock`)
 
+#### 5. 内部 MCP 服务端工具
+- [x] `stdio` JSON-RPC 2.0 MCP 服务 (`internal/mcpserver`)
+- [x] 工具列表：`create_pipeline`、`update_pipeline`、`delete_pipeline`、`list_pipelines`、`run_pipeline`、`import_node`、`delete_node`、`list_nodes`
+- [x] `import_node` 支持从 `git` / `folder` 读取 `flowx.json` 并导入节点包
+- [ ] MCP 工具调用认证与限流
+
 ---
 
 ### ❌ 未实现（V2 或后续迭代）
 
-#### 1. FAP (FlowX Action Protocol)
+#### 1. 节点包规范（flowx.json）
+- [x] `model.Node.Files` 字段与数据库迁移
+- [x] `model.Node.PackageConfig` 字段与数据库迁移
+- [x] `POST /api/v1/nodes/import` 接口
+- [x] git / folder 节点包导入服务
+- [x] `flowx.json` 解析、校验与字段映射
+- [x] 节点包 → `flowx/core.NodeConfig` 运行时展开
+- [x] 工作流 YAML 预处理（`nodeRef` 展开）
+- [x] 前端 `NodeImportModal` 对接真实导入接口
+- [ ] 工作流节点镜像执行（依赖 FlowX 核心 Docker 执行器支持 `image` 配置）
+
+#### 2. FAP (FlowX Action Protocol)
 - [ ] `[[ACTION:create_node]]` 标签解析
 - [ ] `[[ACTION:update_workflow]]` 标签解析
 - [ ] `[[ACTION:ask_input]]` 交互式表单
@@ -200,19 +219,19 @@
 - [ ] 操作确认/取消/编辑机制
 - [ ] 多轮对话状态机
 
-#### 2. 高级 AI 功能
+#### 3. 高级 AI 功能
 - [ ] 节点代码语法验证
 - [ ] AI 自动诊断执行错误
 - [ ] AI 自动修复工作流
 - [ ] 意图识别分类器
 
-#### 3. 前端增强
+#### 4. 前端增强
 - [ ] React Query 服务端状态管理
 - [ ] Monaco Editor 代码编辑
 - [ ] 日志虚拟滚动
 - [ ] 执行日志导出 (JSON/TXT/Markdown)
 
-#### 4. 部署与运维
+#### 5. 部署与运维
 - [ ] 自动备份机制
 - [ ] 健康检查详细指标
 - [ ] Prometheus 指标暴露

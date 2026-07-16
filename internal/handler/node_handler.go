@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/LerkoX/flowx-studio/internal/model"
 	"github.com/LerkoX/flowx-studio/internal/service"
@@ -11,12 +12,16 @@ import (
 
 // NodeHandler 节点处理器
 type NodeHandler struct {
-	service *service.NodeService
+	service       *service.NodeService
+	importService *service.NodeImportService
 }
 
 // NewNodeHandler 创建节点处理器
 func NewNodeHandler(svc *service.NodeService) *NodeHandler {
-	return &NodeHandler{service: svc}
+	return &NodeHandler{
+		service:       svc,
+		importService: service.NewNodeImportService(svc),
+	}
 }
 
 // RegisterRoutes 注册路由
@@ -25,6 +30,7 @@ func (h *NodeHandler) RegisterRoutes(r *gin.RouterGroup) {
 	{
 		nodes.GET("", h.List)
 		nodes.POST("", h.Create)
+		nodes.POST("/import", h.Import)
 		nodes.GET("/:id", h.Get)
 		nodes.PUT("/:id", h.Update)
 		nodes.DELETE("/:id", h.Delete)
@@ -130,6 +136,46 @@ func (h *NodeHandler) Delete(c *gin.Context) {
 	}
 
 	Success(c, gin.H{"message": "node deleted"})
+}
+
+// ImportRequest 节点导入请求
+type ImportRequest struct {
+	SourceType string `json:"source_type"`
+	SourceURL  string `json:"source_url"`
+	SourcePath string `json:"source_path"`
+}
+
+// Import 导入节点（git / folder）
+func (h *NodeHandler) Import(c *gin.Context) {
+	var req ImportRequest
+	if !BindJSON(c, &req) {
+		return
+	}
+
+	sourceType := strings.ToLower(strings.TrimSpace(req.SourceType))
+	var node *model.Node
+	var err error
+
+	switch sourceType {
+	case "git":
+		node, err = h.importService.ImportFromGit(req.SourceURL)
+	case "folder":
+		node, err = h.importService.ImportFromFolder(req.SourcePath)
+	default:
+		Error(c, http.StatusBadRequest, "source_type must be git or folder")
+		return
+	}
+
+	if err != nil {
+		if strings.Contains(err.Error(), "node name already exists") {
+			Error(c, http.StatusConflict, err.Error())
+			return
+		}
+		Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	Success(c, node)
 }
 
 // MockTestRequest Mock 测试请求

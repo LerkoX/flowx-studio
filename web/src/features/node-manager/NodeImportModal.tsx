@@ -1,16 +1,16 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, GitBranch, Container, Folder, Plus, Loader2 } from 'lucide-react'
+import { X, GitBranch, Folder, Plus, Loader2 } from 'lucide-react'
 
 interface NodeImportModalProps {
   isOpen: boolean
   onClose: () => void
-  onAdd: (data: { type: 'git' | 'image' | 'folder'; url: string }) => void
+  onAdd: (data: { type: 'git' | 'folder'; url: string }) => void
   isAdding: boolean
 }
 
 export default function NodeImportModal({ isOpen, onClose, onAdd, isAdding }: NodeImportModalProps) {
-  const [activeTab, setActiveTab] = useState<'git' | 'image' | 'folder'>('git')
+  const [activeTab, setActiveTab] = useState<'git' | 'folder'>('git')
   const [url, setUrl] = useState('')
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -33,13 +33,6 @@ export default function NodeImportModal({ isOpen, onClose, onAdd, isAdding }: No
       placeholder: 'https://github.com/username/repo',
       helper: '支持公开 Git 仓库，系统将自动克隆并解析 flowx.json',
       inputLabel: 'Git 仓库地址',
-    },
-    image: {
-      label: 'Docker 镜像',
-      icon: Container,
-      placeholder: 'username/image:tag',
-      helper: '系统将拉取镜像并解析镜像中的节点信息',
-      inputLabel: 'Docker 镜像地址',
     },
     folder: {
       label: '本地文件夹',

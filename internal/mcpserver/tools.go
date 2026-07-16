@@ -124,49 +124,25 @@ func toolsList() []tool {
 			},
 		},
 		{
-			Name:        "create_node",
-			Description: "Create a node by importing from git, image or folder. Manual code creation is not allowed.",
+			Name:        "import_node",
+			Description: "Import a node package from a git repository or local folder by reading flowx.json. This is the only way to add a node via MCP.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"name": map[string]interface{}{
-						"type": "string",
-					},
-					"display_name": map[string]interface{}{"type": "string"},
-					"description": map[string]interface{}{"type": "string"},
-					"node_type": map[string]interface{}{
-						"type":        "string",
-						"description": "code | image",
-					},
 					"source_type": map[string]interface{}{
 						"type":        "string",
-						"description": "git | image | folder",
+						"description": "git | folder",
 					},
 					"source_url": map[string]interface{}{
 						"type":        "string",
-						"description": "Git URL or image name",
+						"description": "Git URL (required when source_type is git)",
 					},
 					"source_path": map[string]interface{}{
 						"type":        "string",
-						"description": "Local folder path",
-					},
-					"image": map[string]interface{}{
-						"type":        "string",
-						"description": "Docker image (for image nodes)",
-					},
-					"language": map[string]interface{}{"type": "string"},
-					"parameters": map[string]interface{}{
-						"type": "array",
-					},
-					"outputs": map[string]interface{}{
-						"type": "array",
-					},
-					"tags": map[string]interface{}{
-						"type": "array",
-						"items": map[string]interface{}{"type": "string"},
+						"description": "Local folder path (required when source_type is folder)",
 					},
 				},
-				"required": []string{"name", "node_type", "source_type"},
+				"required": []string{"source_type"},
 			},
 		},
 		{
@@ -189,9 +165,9 @@ func toolsList() []tool {
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"language": map[string]interface{}{"type": "string"},
-					"tag": map[string]interface{}{"type": "string"},
-					"search": map[string]interface{}{"type": "string"},
+					"language":  map[string]interface{}{"type": "string"},
+					"tag":       map[string]interface{}{"type": "string"},
+					"search":    map[string]interface{}{"type": "string"},
 					"node_type": map[string]interface{}{"type": "string"},
 					"page": map[string]interface{}{
 						"type":    "integer",
@@ -305,63 +281,53 @@ func (s *Server) runPipeline(raw json.RawMessage) (string, bool) {
 	return fmt.Sprintf("Started execution id=%d streamUrl=%s", execID, streamURL), false
 }
 
-func (s *Server) createNode(raw json.RawMessage) (string, bool) {
+func (s *Server) importNode(raw json.RawMessage) (string, bool) {
 	var req struct {
-		Name        string            `json:"name"`
-		DisplayName string            `json:"display_name"`
-		Description string            `json:"description"`
-		NodeType    string            `json:"node_type"`
-		SourceType  string            `json:"source_type"`
-		SourceURL   string            `json:"source_url"`
-		SourcePath  string            `json:"source_path"`
-		Image       string            `json:"image"`
-		Language    string            `json:"language"`
-		Parameters  []model.NodeParameter `json:"parameters"`
-		Outputs     []model.NodeOutput    `json:"outputs"`
-		Tags        []string          `json:"tags"`
+		SourceType string `json:"source_type"`
+		SourceURL  string `json:"source_url"`
+		SourcePath string `json:"source_path"`
 	}
 	if err := parseParams(raw, &req); err != nil {
 		return err.Error(), true
 	}
 
-	sourceType := strings.ToLower(req.SourceType)
-	if sourceType != "git" && sourceType != "image" && sourceType != "folder" {
-		return "source_type must be one of git, image, folder (manual code creation is not allowed)", true
+	sourceType := strings.ToLower(strings.TrimSpace(req.SourceType))
+	if sourceType != "git" && sourceType != "folder" {
+		return "source_type must be git or folder", true
 	}
 
-	if sourceType == "image" && strings.TrimSpace(req.Image) == "" {
-		return "image is required for image nodes", true
-	}
-	if (sourceType == "git" || sourceType == "folder") && strings.TrimSpace(req.SourceURL) == "" && strings.TrimSpace(req.SourcePath) == "" {
-		return "source_url or source_path is required for git/folder nodes", true
+	var node *model.Node
+	var err error
+
+	switch sourceType {
+	case "git":
+		if strings.TrimSpace(req.SourceURL) == "" {
+			return "source_url is required for git imports", true
+		}
+		node, err = s.nodeImportSvc.ImportFromGit(req.SourceURL)
+	case "folder":
+		if strings.TrimSpace(req.SourcePath) == "" {
+			return "source_path is required for folder imports", true
+		}
+		node, err = s.nodeImportSvc.ImportFromFolder(req.SourcePath)
 	}
 
-	node := &model.Node{
-		Name:        req.Name,
-		DisplayName: req.DisplayName,
-		Description: req.Description,
-		NodeType:    req.NodeType,
-		SourceType:  sourceType,
-		SourceURL:   req.SourceURL,
-		SourcePath:  req.SourcePath,
-		Image:       req.Image,
-		Language:    req.Language,
-		Parameters:  req.Parameters,
-		Outputs:     req.Outputs,
-		Tags:        req.Tags,
-	}
-	if node.NodeType == "" {
-		node.NodeType = "code"
-	}
-	if node.Parameters == nil {
-		node.Parameters = []model.NodeParameter{}
-	}
-
-	created, err := s.nodeSvc.Create(node)
 	if err != nil {
-		return fmt.Sprintf("Failed to create node: %v", err), true
+		return fmt.Sprintf("Failed to import node: %v", err), true
 	}
-	return fmt.Sprintf("Created node id=%d name=%s", created.ID, created.Name), false
+
+	summary := map[string]interface{}{
+		"id":           node.ID,
+		"name":         node.Name,
+		"display_name": node.DisplayName,
+		"version":      node.Version,
+		"language":     node.Language,
+		"node_type":    node.NodeType,
+		"image":        node.Image,
+		"parameters":   node.Parameters,
+		"outputs":      node.Outputs,
+	}
+	return mustJSONString(summary), false
 }
 
 func (s *Server) deleteNode(raw json.RawMessage) (string, bool) {

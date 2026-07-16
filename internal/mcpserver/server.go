@@ -21,9 +21,9 @@ type JSONRPCRequest struct {
 
 // JSONRPCResponse JSON-RPC 2.0 响应
 type JSONRPCResponse struct {
-	JSONRPC string      `json:"jsonrpc"`
-	ID      interface{} `json:"id,omitempty"`
-	Result  interface{} `json:"result,omitempty"`
+	JSONRPC string        `json:"jsonrpc"`
+	ID      interface{}   `json:"id,omitempty"`
+	Result  interface{}   `json:"result,omitempty"`
 	Error   *JSONRPCError `json:"error,omitempty"`
 }
 
@@ -35,19 +35,21 @@ type JSONRPCError struct {
 
 // Server 是基于 stdio 的 MCP 服务
 type Server struct {
-	workflowSvc *service.WorkflowService
-	nodeSvc     *service.NodeService
-	in          io.Reader
-	out         io.Writer
+	workflowSvc   *service.WorkflowService
+	nodeSvc       *service.NodeService
+	nodeImportSvc *service.NodeImportService
+	in            io.Reader
+	out           io.Writer
 }
 
 // New 创建 MCP 服务
-func New(workflowSvc *service.WorkflowService, nodeSvc *service.NodeService) *Server {
+func New(workflowSvc *service.WorkflowService, nodeSvc *service.NodeService, nodeImportSvc *service.NodeImportService) *Server {
 	return &Server{
-		workflowSvc: workflowSvc,
-		nodeSvc:     nodeSvc,
-		in:          io.Reader(nil),
-		out:         io.Writer(nil),
+		workflowSvc:   workflowSvc,
+		nodeSvc:       nodeSvc,
+		nodeImportSvc: nodeImportSvc,
+		in:            io.Reader(nil),
+		out:           io.Writer(nil),
 	}
 }
 
@@ -185,8 +187,8 @@ func (s *Server) dispatchTool(ctx context.Context, name string, rawParams json.R
 		return s.listPipelines(rawParams)
 	case "run_pipeline":
 		return s.runPipeline(rawParams)
-	case "create_node":
-		return s.createNode(rawParams)
+	case "import_node":
+		return s.importNode(rawParams)
 	case "delete_node":
 		return s.deleteNode(rawParams)
 	case "list_nodes":

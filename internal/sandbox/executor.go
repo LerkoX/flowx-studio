@@ -14,7 +14,7 @@ import (
 
 // Result 执行结果
 type Result struct {
-	Status     string                 `json:"status"`      // success | failed | timeout
+	Status     string                 `json:"status"` // success | failed | timeout
 	DurationMs int64                  `json:"duration_ms"`
 	Output     map[string]interface{} `json:"output,omitempty"`
 	Stdout     string                 `json:"stdout,omitempty"`
@@ -55,6 +55,8 @@ type ExecuteOptions struct {
 	EnvVars map[string]string
 	// 额外环境变量
 	ExtraEnv map[string]string
+	// 额外文件（文件名 -> 内容）
+	Files map[string]string
 }
 
 // Execute 执行节点代码
@@ -90,6 +92,24 @@ func (e *Executor) Execute(opts ExecuteOptions) *Result {
 		result.Logs = result.Error
 		result.DurationMs = time.Since(start).Milliseconds()
 		return result
+	}
+
+	// 3.1 写入额外文件
+	for filename, content := range opts.Files {
+		filePath := filepath.Join(workDir, filename)
+		dir := filepath.Dir(filePath)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			result.Error = fmt.Sprintf("failed to create dir for file %s: %v", filename, err)
+			result.Logs = result.Error
+			result.DurationMs = time.Since(start).Milliseconds()
+			return result
+		}
+		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+			result.Error = fmt.Sprintf("failed to write file %s: %v", filename, err)
+			result.Logs = result.Error
+			result.DurationMs = time.Since(start).Milliseconds()
+			return result
+		}
 	}
 
 	// 4. 构建执行命令
@@ -201,7 +221,7 @@ func (e *Executor) validate(opts ExecuteOptions) error {
 	}
 
 	// 检查语言是否支持
-	supportedLangs := []string{"python", "go", "bash", "sh", "javascript", "js", "typescript", "ts", "ruby", "php"}
+	supportedLangs := []string{"python", "go", "bash", "sh", "javascript", "js", "node", "typescript", "ts", "ruby", "php"}
 	found := false
 	for _, lang := range supportedLangs {
 		if strings.ToLower(opts.Language) == lang {
@@ -233,7 +253,7 @@ func (e *Executor) writeCodeFile(workDir string, opts ExecuteOptions) (string, e
 		filename = "main.go"
 	case "bash", "sh":
 		filename = "main.sh"
-	case "javascript", "js":
+	case "javascript", "js", "node":
 		filename = "main.js"
 	case "typescript", "ts":
 		filename = "main.ts"
@@ -294,7 +314,7 @@ func (e *Executor) buildCommand(language, codeFile, entry string) ([]string, err
 		}
 		return nil, fmt.Errorf("shell interpreter not found")
 
-	case "javascript", "js":
+	case "javascript", "js", "node":
 		if _, err := exec.LookPath("node"); err != nil {
 			return nil, fmt.Errorf("node.js not found")
 		}
@@ -413,7 +433,7 @@ func jsonUnmarshal(data []byte, v *map[string]interface{}) error {
 
 // IsLanguageSupported 检查语言是否支持
 func IsLanguageSupported(language string) bool {
-	supported := []string{"python", "go", "bash", "sh", "javascript", "js", "typescript", "ts", "ruby", "php"}
+	supported := []string{"python", "go", "bash", "sh", "javascript", "js", "node", "typescript", "ts", "ruby", "php"}
 	for _, lang := range supported {
 		if strings.ToLower(language) == lang {
 			return true
@@ -424,5 +444,5 @@ func IsLanguageSupported(language string) bool {
 
 // GetSupportedLanguages 获取支持的语言列表
 func GetSupportedLanguages() []string {
-	return []string{"python", "go", "bash", "sh", "javascript", "typescript", "ruby", "php"}
+	return []string{"python", "go", "bash", "sh", "javascript", "js", "node", "typescript", "ts", "ruby", "php"}
 }
