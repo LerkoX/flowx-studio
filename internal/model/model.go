@@ -159,7 +159,7 @@ type ExecutionNode struct {
 	Status      string     `json:"status" db:"status"` // pending | running | success | failed | skipped
 	StartedAt   *time.Time `json:"startedAt,omitempty" db:"started_at"`
 	CompletedAt *time.Time `json:"completedAt,omitempty" db:"completed_at"`
-	DurationMs  int        `json:"durationMs,omitempty" db:"duration_ms"`
+	DurationMs  *int       `json:"durationMs,omitempty" db:"duration_ms"`
 	Output      *string    `json:"output,omitempty" db:"output"`
 	Error       *string    `json:"error,omitempty" db:"error"`
 }

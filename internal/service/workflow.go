@@ -240,25 +240,29 @@ func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 
 	err := s.runtime.ExecuteWorkflow(ctx, execID, yamlConfig)
 	if err != nil {
+		errMsg := err.Error()
+		s.logExecutionError(execID, "", "failed to start workflow: "+errMsg)
 		s.db.Exec("UPDATE executions SET status = ?, completed_at = ?, error_message = ? WHERE id = ?",
-			"failed", time.Now(), err.Error(), execID)
-		s.setExecutionMetadata(execID, "failed", "manual", nil, nil, err.Error())
+			"failed", time.Now(), errMsg, execID)
+		s.setExecutionMetadata(execID, "failed", "manual", nil, nil, errMsg)
 		s.eventBus.Publish(event.Event{
 			Type: "execution.completed",
 			Data: map[string]interface{}{
 				"execution_id": execID,
 				"workflow_id":  wf.ID,
 				"status":       "failed",
-				"error":        err.Error(),
+				"error":        errMsg,
 			},
 		})
 		return
 	}
 
 	// 轮询等待完成
+	var pipelineErr error
 	for {
 		status, err := s.runtime.GetPipelineStatus(execID)
 		if err != nil {
+			pipelineErr = err
 			break
 		}
 		if status == "SUCCESS" || status == "FAILED" || status == "CANCELLED" {
@@ -270,11 +274,34 @@ func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 	status, _ := s.runtime.GetPipelineStatus(execID)
 	finalStatus := strings.ToLower(status)
 	if finalStatus == "" {
-		finalStatus = "success"
+		if pipelineErr != nil {
+			finalStatus = "failed"
+		} else {
+			finalStatus = "success"
+		}
 	}
 
-	s.db.Exec("UPDATE executions SET status = ?, completed_at = ?, duration_ms = ? WHERE id = ?",
-		finalStatus, time.Now(), int(time.Since(startTime).Milliseconds()), execID)
+	completedAt := time.Now()
+	durationMs := int(time.Since(startTime).Milliseconds())
+	var errorMsg string
+	if pipelineErr != nil {
+		// 如果 pipeline 已被清理，根据执行节点状态兜底判断
+		nodeStatus, nodeErrMsg := s.resolveFinalStatusFromNodes(execID)
+		if nodeStatus != "" {
+			finalStatus = nodeStatus
+			if nodeErrMsg != "" {
+				errorMsg = nodeErrMsg
+			}
+		} else {
+			errorMsg = pipelineErr.Error()
+		}
+		s.logExecutionError(execID, "", "pipeline execution failed: "+errorMsg)
+	}
+
+	s.db.Exec("UPDATE executions SET status = ?, completed_at = ?, duration_ms = ?, error_message = ? WHERE id = ?",
+		finalStatus, completedAt, durationMs, errorMsg, execID)
+
+	s.setExecutionMetadata(execID, finalStatus, "manual", nil, nil, errorMsg)
 
 	s.eventBus.Publish(event.Event{
 		Type: "execution.completed",
@@ -282,8 +309,48 @@ func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 			"execution_id": execID,
 			"workflow_id":  wf.ID,
 			"status":       finalStatus,
+			"error":        errorMsg,
 		},
 	})
+}
+
+// logExecutionError 写入兜底错误日志，确保启动失败时前端仍能看到日志
+func (s *WorkflowService) logExecutionError(execID int64, nodeName, message string) {
+	_, _ = s.db.Exec(`
+		INSERT INTO execution_logs (execution_id, node_id, node_name, step_name, level, message, output, timestamp)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, execID, nodeName, nodeName, "", "error", message, "", time.Now())
+
+	s.eventBus.Publish(event.Event{
+		Type: "execution.log",
+		Data: map[string]interface{}{
+			"execution_id": execID,
+			"node_id":      nodeName,
+			"node_name":    nodeName,
+			"step_name":    "",
+			"level":        "error",
+			"message":      message,
+			"output":       "",
+			"timestamp":    time.Now(),
+		},
+	})
+}
+
+// resolveFinalStatusFromNodes 当 pipeline 已被清理时，根据执行节点状态兜底判断最终结果
+func (s *WorkflowService) resolveFinalStatusFromNodes(execID int64) (string, string) {
+	var nodes []model.ExecutionNode
+	if err := s.db.Select(&nodes, "SELECT status FROM execution_nodes WHERE execution_id = ?", execID); err != nil {
+		return "failed", err.Error()
+	}
+	if len(nodes) == 0 {
+		return "failed", "no execution nodes found"
+	}
+	for _, n := range nodes {
+		if n.Status == "failed" {
+			return "failed", ""
+		}
+	}
+	return "success", ""
 }
 
 // ListExecutions 获取执行历史

@@ -41,6 +41,14 @@ func ExpandNodeToConfig(node *model.Node) (*core.NodeConfig, error) {
 		fmt.Fprintf(&runScript, "export %s=\"%s\"\n", key, template)
 	}
 
+	// 写入入口文件
+	fmt.Fprintf(&runScript, "cat > %s << 'FLOWX_FILE_EOF'\n", pkg.Entry)
+	runScript.WriteString(node.Code)
+	if !strings.HasSuffix(node.Code, "\n") {
+		runScript.WriteString("\n")
+	}
+	runScript.WriteString("FLOWX_FILE_EOF\n")
+
 	// 写入额外文件
 	for filename, content := range node.Files {
 		fmt.Fprintf(&runScript, "cat > %s << 'FLOWX_FILE_EOF'\n", filename)
