@@ -53,6 +53,8 @@
 <li><a href="08-runtime.html">8. 运行时与部署设计</a></li>
 <li><a href="09-security.html">9. 安全与错误处理设计</a></li>
 <li><a href="10-core-deps.html">10. FlowX 核心库依赖评估</a></li>
+<li><a href="11-node-package.html">11. 节点包规范</a></li>
+<li><a href="IMPLEMENTATION_STATUS.html">实现状态</a></li>
 </ul>
 </nav>
         <main class="content">
@@ -66,7 +68,7 @@
 <li><strong>JSON 格式</strong>：请求和响应统一使用 JSON</li>
 <li><strong>资源命名</strong>：使用名词复数形式，如 <code>/api/nodes</code>、<code>/api/workflows</code></li>
 <li><strong>版本控制</strong>：URL 中包含版本号 <code>/api/v1/...</code></li>
-<li><strong>错误统一</strong>：遵循 RFC 7807 Problem Details 规范</li>
+<li><strong>错误统一</strong>：错误响应与成功响应使用相同的封装结构</li>
 </ul>
 <h2 id="42-基础响应格式">4.2 基础响应格式</h2>
 
@@ -82,12 +84,7 @@
 
 <pre><code class="language-json">{
   "code": 400,
-  "message": "Invalid request parameters",
-  "error": {
-    "type": "validation_error",
-    "detail": "Field 'name' is required",
-    "field": "name"
-  }
+  "message": "invalid request body: ..."
 }</code></pre>
 
 <h2 id="43-节点管理-api">4.3 节点管理 API</h2>
@@ -126,6 +123,12 @@
 <td>关键词搜索（名称和描述）</td>
 </tr>
 <tr>
+<td>node_type</td>
+<td>string</td>
+<td>否</td>
+<td>按节点类型过滤（code / image）</td>
+</tr>
+<tr>
 <td>page</td>
 <td>integer</td>
 <td>否</td>
@@ -149,7 +152,9 @@
       {
         "id": 1,
         "name": "image_downloader",
+        "displayName": "图片下载器",
         "description": "从指定 URL 下载图片",
+        "nodeType": "code",
         "language": "python",
         "parameters": [
           {
@@ -160,39 +165,43 @@
           }
         ],
         "tags": ["image", "download"],
-        "created_at": "2025-01-15T10:30:00Z"
+        "createdAt": "2025-01-15T10:30:00Z",
+        "updatedAt": "2025-01-15T10:30:00Z"
       }
     ],
     "total": 15,
     "page": 1,
-    "page_size": 20
+    "pageSize": 20
   }
 }</code></pre>
 
-<h3 id="432-ai-生成节点">4.3.2 AI 生成节点</h3>
+<h3 id="432-创建节点">4.3.2 创建节点</h3>
 
-<pre><code class="language-http">POST /api/v1/ai/generate-node</code></pre>
+<pre><code class="language-http">POST /api/v1/nodes</code></pre>
 
-<p><strong>请求体</strong>：</p>
+<p><strong>请求体</strong>：绑定 <code>model.Node</code> 结构，<code>name</code> 必填；名称重复返回 409。</p>
+
 <pre><code class="language-json">{
-  "description": "我需要一个节点，可以从 URL 下载图片并保存到本地",
+  "name": "image_downloader",
+  "displayName": "图片下载器",
+  "description": "从指定 URL 下载图片",
+  "nodeType": "code",
   "language": "python",
-  "preferred_name": "image_downloader",
-  "context": {
-    "existing_nodes": ["url_validator"],
-    "workflow_intent": "图片处理流水线"
-  }
+  "entry": "main.py",
+  "code": "import requests...",
+  "requirements": ["requests", "pillow"],
+  "parameters": [
+    {
+      "name": "url",
+      "type": "string",
+      "description": "图片 URL",
+      "required": true
+    }
+  ],
+  "tags": ["image", "download"]
 }</code></pre>
 
-<p><strong>响应示例</strong>（流式 SSE）：</p>
-<pre><code>event: generating
-data: {"stage": "analyzing", "message": "正在分析需求..."}
-
-event: generating
-data: {"stage": "coding", "message": "正在生成节点代码..."}
-
-event: complete
-data: {"node_id": 16, "name": "image_downloader", "status": "created"}</code></pre>
+<p><strong>响应示例</strong>：返回创建后的完整节点对象（结构同 4.3.3）。</p>
 
 <h3 id="433-获取节点详情">4.3.3 获取节点详情</h3>
 
@@ -205,17 +214,20 @@ data: {"node_id": 16, "name": "image_downloader", "status": "created"}</code></p
   "data": {
     "id": 1,
     "name": "image_downloader",
+    "displayName": "图片下载器",
     "description": "从指定 URL 下载图片",
+    "version": "1.0.0",
+    "nodeType": "code",
     "language": "python",
+    "entry": "main.py",
     "code": "import requests...",
-    "mock_code": "# 返回模拟图片数据...",
+    "requirements": ["requests", "pillow"],
     "parameters": [
       {
         "name": "url",
         "type": "string",
         "description": "图片下载地址",
-        "required": true,
-        "default": null
+        "required": true
       },
       {
         "name": "timeout",
@@ -225,37 +237,129 @@ data: {"node_id": 16, "name": "image_downloader", "status": "created"}</code></p
         "default": 30
       }
     ],
-    "dockerfile": null,
-    "requirements": "requests\npillow",
+    "outputs": [
+      {
+        "name": "file_path",
+        "type": "string",
+        "description": "下载后的本地文件路径"
+      }
+    ],
+    "docker": {
+      "image": "python:3.11-slim",
+      "workdir": "/app"
+    },
+    "mock": {
+      "enabled": true,
+      "entry": "mock.py",
+      "code": "# 返回模拟图片数据..."
+    },
+    "sourceType": "git",
+    "sourceURL": "https://github.com/example/flowx-nodes",
+    "sourcePath": "nodes/image_downloader",
     "tags": ["image", "download"],
-    "created_at": "2025-01-15T10:30:00Z",
-    "updated_at": "2025-01-15T10:30:00Z"
+    "createdAt": "2025-01-15T10:30:00Z",
+    "updatedAt": "2025-01-15T10:30:00Z"
   }
 }</code></pre>
 
-<h3 id="434-删除节点">4.3.4 删除节点</h3>
+<p><strong>说明</strong>：</p>
+<ul>
+<li><code>nodeType</code> 为 <code>code</code>（代码节点）或 <code>image</code>（镜像节点）；镜像节点使用 <code>image</code> 字段而非 <code>language</code>/<code>code</code>。</li>
+<li><code>requirements</code> 为字符串数组。</li>
+<li><code>mock</code> 与 <code>docker</code> 为可选对象，未配置时不出现在响应中（<code>omitempty</code>）。</li>
+</ul>
+<h3 id="434-更新节点">4.3.4 更新节点</h3>
+
+<pre><code class="language-http">PUT /api/v1/nodes/:id</code></pre>
+
+<p><strong>请求体</strong>：同创建节点（<code>model.Node</code> 结构，全量更新）。</p>
+
+<p><strong>响应示例</strong>：</p>
+<pre><code class="language-json">{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "id": 1
+  }
+}</code></pre>
+
+<h3 id="435-删除节点">4.3.5 删除节点</h3>
 
 <pre><code class="language-http">DELETE /api/v1/nodes/:id</code></pre>
 
 <p><strong>响应</strong>：</p>
 <pre><code class="language-json">{
   "code": 200,
-  "message": "Node deleted successfully"
+  "message": "success",
+  "data": {
+    "message": "node deleted"
+  }
 }</code></pre>
 
-<h3 id="435-mock-测试节点">4.3.5 Mock 测试节点</h3>
+<h3 id="436-导入节点">4.3.6 导入节点</h3>
+
+<pre><code class="language-http">POST /api/v1/nodes/import</code></pre>
+
+<p>从 Git 仓库或本地文件夹导入节点包（读取其中的 <code>flowx.json</code>）。</p>
+
+<p><strong>请求体</strong>：</p>
+<pre><code class="language-json">{
+  "source_type": "git",
+  "source_url": "https://github.com/example/flowx-nodes",
+  "source_path": ""
+}</code></pre>
+
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>类型</th>
+<th>必填</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>source_type</td>
+<td>string</td>
+<td>是</td>
+<td><code>git</code> 或 <code>folder</code></td>
+</tr>
+<tr>
+<td>source_url</td>
+<td>string</td>
+<td>git 时必填</td>
+<td>Git 仓库地址</td>
+</tr>
+<tr>
+<td>source_path</td>
+<td>string</td>
+<td>folder 时必填</td>
+<td>本地文件夹路径</td>
+</tr>
+</tbody>
+</table>
+
+<p><strong>响应示例</strong>：返回导入后的完整节点对象（结构同 4.3.3）。</p>
+
+<h3 id="437-mock-测试节点">4.3.7 Mock 测试节点</h3>
 
 <pre><code class="language-http">POST /api/v1/nodes/:id/mock</code></pre>
 
 <p><strong>请求体</strong>：</p>
 <pre><code class="language-json">{
   "parameters": {
-    "url": "https://example.com/image.jpg",
-    "timeout": 30
-  }
+    "url": "https://example.com/image.jpg"
+  },
+  "timeout": 30
 }</code></pre>
 
-<p><strong>响应示例</strong>：</p>
+<p><strong>说明</strong>：</p>
+<ul>
+<li><code>parameters</code> 的值必须全部为字符串（<code>map[string]string</code>）。</li>
+<li><code>timeout</code> 是顶层字段（单位：秒），不属于 <code>parameters</code>。</li>
+</ul>
+<p><strong>响应示例</strong>（<code>sandbox.Result</code> 结构）：</p>
 <pre><code class="language-json">{
   "code": 200,
   "message": "success",
@@ -267,6 +371,7 @@ data: {"node_id": 16, "name": "image_downloader", "status": "created"}</code></p
       "size_bytes": 2048,
       "format": "JPEG"
     },
+    "stdout": "...",
     "logs": "Mock: 模拟下载图片成功\nMock: 文件大小 2048 bytes"
   }
 }</code></pre>
@@ -315,31 +420,21 @@ data: {"node_id": 16, "name": "image_downloader", "status": "created"}</code></p
 </tbody>
 </table>
 
-<h3 id="442-ai-生成工作流">4.4.2 AI 生成工作流</h3>
+<h3 id="442-创建工作流">4.4.2 创建工作流</h3>
 
-<pre><code class="language-http">POST /api/v1/ai/generate-workflow</code></pre>
+<pre><code class="language-http">POST /api/v1/workflows</code></pre>
 
-<p><strong>请求体</strong>：</p>
+<p><strong>请求体</strong>：绑定 <code>model.Workflow</code> 结构，<code>name</code> 与 <code>yamlConfig</code> 必填。</p>
+
 <pre><code class="language-json">{
-  "description": "帮我做一个工作流：每天自动从 Unsplash 下载一张风景图片，压缩到 800x600，然后上传到 S3",
-  "context": {
-    "preferred_nodes": ["image_downloader"],
-    "executor_preference": "docker"
-  }
+  "name": "daily_image_pipeline",
+  "description": "每日风景图片下载和处理流水线",
+  "intent": "每天自动从 Unsplash 下载一张风景图片，压缩到 800x600，然后上传到 S3",
+  "yamlConfig": "name: daily_image_pipeline\nversion: \"1.0\"\n...",
+  "status": "draft"
 }</code></pre>
 
-<p><strong>响应</strong>（流式 SSE）：</p>
-<pre><code>event: analyzing
-data: {"message": "正在分析需求，识别需要 4 个节点..."}
-
-event: generating_nodes
-data: {"message": "正在生成新节点：unsplash_downloader..."}
-
-event: generating_workflow
-data: {"message": "正在编排工作流..."}
-
-event: complete
-data: {"workflow_id": 8, "name": "daily_image_pipeline", "node_count": 4}</code></pre>
+<p><strong>响应示例</strong>：返回创建后的工作流对象（结构同 4.4.3）。</p>
 
 <h3 id="443-获取工作流详情">4.4.3 获取工作流详情</h3>
 
@@ -354,56 +449,33 @@ data: {"workflow_id": 8, "name": "daily_image_pipeline", "node_count": 4}</code>
     "name": "daily_image_pipeline",
     "description": "每日风景图片下载和处理流水线",
     "intent": "每天自动从 Unsplash 下载一张风景图片，压缩到 800x600，然后上传到 S3",
+    "yamlConfig": "name: daily_image_pipeline\nversion: \"1.0\"\n...",
     "status": "active",
-    "yaml_config": "name: daily_image_pipeline\nversion: \"1.0\"\n...",
-    "nodes": [
-      {
-        "id": 1,
-        "name": "unsplash_downloader",
-        "description": "从 Unsplash API 下载图片"
-      },
-      {
-        "id": 5,
-        "name": "image_compressor",
-        "description": "压缩图片到指定尺寸"
-      }
-    ],
-    "created_at": "2025-01-20T08:00:00Z",
-    "updated_at": "2025-01-20T08:00:00Z"
+    "createdAt": "2025-01-20T08:00:00Z",
+    "updatedAt": "2025-01-20T08:00:00Z"
   }
 }</code></pre>
+
+<p><strong>说明</strong>：该接口只返回工作流单行记录，不包含节点列表；节点编排信息在 <code>yamlConfig</code> 中。</p>
 
 <h3 id="444-执行工作流">4.4.4 执行工作流</h3>
 
 <pre><code class="language-http">POST /api/v1/workflows/:id/run</code></pre>
 
-<p><strong>请求体</strong>：</p>
-<pre><code class="language-json">{
-  "parameters": {
-    "category": "nature",
-    "target_size": "800x600"
-  },
-  "dry_run": false
-}</code></pre>
+<p><strong>请求体</strong>：无需请求体。服务端不读取请求体，<code>parameters</code>、<code>dry_run</code> 等参数均不支持。</p>
 
 <p><strong>响应示例</strong>：</p>
 <pre><code class="language-json">{
   "code": 200,
-  "message": "Workflow execution started",
+  "message": "success",
   "data": {
-    "execution_id": 42,
+    "executionId": 42,
     "status": "running",
-    "stream_url": "/api/v1/executions/42/stream"
+    "streamUrl": "/api/v1/executions/42/stream"
   }
 }</code></pre>
 
-<h3 id="445-mock-执行工作流">4.4.5 Mock 执行工作流</h3>
-
-<pre><code class="language-http">POST /api/v1/workflows/:id/mock</code></pre>
-
-<p><strong>说明</strong>：使用各节点的 Mock 代码执行工作流，不触发真实副作用。</p>
-
-<h3 id="446-删除工作流">4.4.6 删除工作流</h3>
+<h3 id="445-删除工作流">4.4.5 删除工作流</h3>
 
 <pre><code class="language-http">DELETE /api/v1/workflows/:id</code></pre>
 
@@ -461,58 +533,73 @@ data: {"workflow_id": 8, "name": "daily_image_pipeline", "node_count": 4}</code>
   "message": "success",
   "data": {
     "id": 42,
-    "workflow_id": 8,
-    "workflow_name": "daily_image_pipeline",
+    "workflowId": 8,
     "status": "success",
     "trigger": "manual",
-    "started_at": "2025-01-20T10:00:00Z",
-    "completed_at": "2025-01-20T10:02:15Z",
-    "duration_ms": 135000,
-    "nodes": [
-      {
-        "node_id": "unsplash_downloader",
-        "status": "success",
-        "started_at": "2025-01-20T10:00:00Z",
-        "completed_at": "2025-01-20T10:00:30Z",
-        "duration_ms": 30000
-      },
-      {
-        "node_id": "image_compressor",
-        "status": "success",
-        "started_at": "2025-01-20T10:00:30Z",
-        "completed_at": "2025-01-20T10:01:00Z",
-        "duration_ms": 30000
-      }
-    ],
-    "result": {
-      "summary": "所有节点执行成功",
-      "s3_url": "https://bucket.s3.amazonaws.com/nature_20250120.jpg"
-    }
+    "startedAt": "2025-01-20T10:00:00Z",
+    "completedAt": "2025-01-20T10:02:15Z",
+    "durationMs": 135000,
+    "result": "{\"summary\": \"所有节点执行成功\"}",
+    "errorMessage": null,
+    "errorNodeId": null,
+    "metadata": "{\"trigger\": \"manual\"}",
+    "createdAt": "2025-01-20T09:59:58Z"
   }
 }</code></pre>
 
-<h3 id="453-实时日志流-sse">4.5.3 实时日志流 (SSE)</h3>
+<p><strong>说明</strong>：</p>
+<ul>
+<li><code>result</code> 与 <code>metadata</code> 均为 JSON 字符串（而非对象），<code>errorMessage</code>、<code>errorNodeId</code> 仅在失败时出现。</li>
+<li>各节点的执行状态请查询 <code>GET /api/v1/executions/:id/nodes</code>。</li>
+</ul>
+<h3 id="453-获取执行节点状态">4.5.3 获取执行节点状态</h3>
+
+<pre><code class="language-http">GET /api/v1/executions/:id/nodes</code></pre>
+
+<p><strong>响应示例</strong>：</p>
+
+<pre><code class="language-json">{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "id": 1,
+      "executionId": 42,
+      "nodeId": "Build",
+      "nodeName": "Build",
+      "status": "success",
+      "startedAt": "2025-01-20T10:00:00Z",
+      "completedAt": "2025-01-20T10:00:30Z",
+      "durationMs": 30000,
+      "output": "...",
+      "error": null
+    }
+  ]
+}</code></pre>
+
+<h3 id="454-实时日志流-sse">4.5.4 实时日志流 (SSE)</h3>
 
 <pre><code class="language-http">GET /api/v1/executions/:id/stream</code></pre>
 
 <p><strong>SSE 事件类型</strong>：</p>
 
-<pre><code>event: execution_start
+<p>服务端存在两套并存的事件命名风格（均可能出现在该流中）：</p>
+
+<ul>
+<li>点分风格（执行服务自身发出）：<code>execution.started</code>、<code>execution.completed</code>、<code>execution.log</code></li>
+<li>下划线风格（由 FlowX 工作流事件桥接而来）：<code>execution_start</code>、<code>node_start</code>、<code>node_complete</code>、<code>execution_complete</code></li>
+<li>连接空闲时每 30 秒发送一次 <code>ping</code> 心跳；收到 <code>execution.completed</code> 后服务端主动关闭连接。</li>
+</ul>
+<pre><code>event: execution.started
 data: {"execution_id": 42, "timestamp": "2025-01-20T10:00:00Z"}
 
-event: node_start
-data: {"node_id": "unsplash_downloader", "node_name": "下载图片", "timestamp": "2025-01-20T10:00:00Z"}
+event: execution.log
+data: {"execution_id": 42, "node_id": "unsplash_downloader", "level": "info", "message": "开始下载图片...", "timestamp": "2025-01-20T10:00:01Z"}
 
-event: node_log
-data: {"node_id": "unsplash_downloader", "level": "info", "message": "开始下载图片...", "timestamp": "2025-01-20T10:00:01Z"}
-
-event: node_complete
-data: {"node_id": "unsplash_downloader", "status": "success", "duration_ms": 30000, "timestamp": "2025-01-20T10:00:30Z"}
-
-event: execution_complete
+event: execution.completed
 data: {"execution_id": 42, "status": "success", "duration_ms": 135000, "timestamp": "2025-01-20T10:02:15Z"}</code></pre>
 
-<h3 id="454-查询执行日志">4.5.4 查询执行日志</h3>
+<h3 id="455-查询执行日志">4.5.5 查询执行日志</h3>
 
 <pre><code class="language-http">GET /api/v1/executions/:id/logs</code></pre>
 
@@ -537,19 +624,13 @@ data: {"execution_id": 42, "status": "success", "duration_ms": 135000, "timestam
 <td>level</td>
 <td>string</td>
 <td>否</td>
-<td>日志级别过滤（支持多级别：info,error）</td>
-</tr>
-<tr>
-<td>search</td>
-<td>string</td>
-<td>否</td>
-<td>关键词搜索（message 字段）</td>
+<td>按级别精确过滤（debug / info / warn / error / fatal）</td>
 </tr>
 <tr>
 <td>limit</td>
 <td>integer</td>
 <td>否</td>
-<td>返回数量，默认 100，最大 1000</td>
+<td>返回数量，默认 100</td>
 </tr>
 <tr>
 <td>offset</td>
@@ -568,10 +649,10 @@ data: {"execution_id": 42, "status": "success", "duration_ms": 135000, "timestam
     "items": [
       {
         "id": 1024,
-        "execution_id": 42,
-        "node_id": "unsplash_downloader",
-        "node_name": "下载图片",
-        "step_name": "download_image",
+        "executionId": 42,
+        "nodeId": "unsplash_downloader",
+        "nodeName": "下载图片",
+        "stepName": "download_image",
         "level": "info",
         "message": "开始下载图片: https://unsplash.com/photo.jpg",
         "output": "HTTP/1.1 200 OK\nContent-Length: 2048...",
@@ -579,9 +660,9 @@ data: {"execution_id": 42, "status": "success", "duration_ms": 135000, "timestam
       },
       {
         "id": 1025,
-        "execution_id": 42,
-        "node_id": "unsplash_downloader",
-        "node_name": "下载图片",
+        "executionId": 42,
+        "nodeId": "unsplash_downloader",
+        "nodeName": "下载图片",
         "level": "info",
         "message": "图片下载完成，大小: 2048 bytes",
         "timestamp": "2025-01-20T10:00:02Z"
@@ -593,141 +674,131 @@ data: {"execution_id": 42, "status": "success", "duration_ms": 135000, "timestam
   }
 }</code></pre>
 
-<h3 id="455-导出执行日志">4.5.5 导出执行日志</h3>
+<h2 id="46-全局事件流-api">4.6 全局事件流 API</h2>
 
-<pre><code class="language-http">POST /api/v1/executions/:id/logs/export</code></pre>
+<h3 id="461-订阅全局事件">4.6.1 订阅全局事件</h3>
 
-<p><strong>请求体</strong>：</p>
-<pre><code class="language-json">{
-  "format": "json",       // json | txt | markdown
-  "node_ids": ["download", "compress"],  // 可选：指定节点
-  "level": "info"         // 可选：最低日志级别
-}</code></pre>
+<pre><code class="language-http">GET /api/v1/events</code></pre>
 
-<p><strong>响应</strong>：</p>
-<ul>
-<li>Content-Type: <code>application/json</code> 或 <code>text/plain</code></li>
-<li>返回日志文件下载</li>
-</ul>
-<h2 id="46-ai-对话-api">4.6 AI 对话 API</h2>
-
-<h3 id="461-通用-ai-对话">4.6.1 通用 AI 对话</h3>
-
-<pre><code class="language-http">POST /api/v1/ai/chat</code></pre>
-
-<p><strong>请求体</strong>：</p>
-<pre><code class="language-json">{
-  "session_id": "sess_123456",
-  "message": "我想做一个自动备份数据库的工作流",
-  "context": {
-    "current_page": "workflow_builder",
-    "selected_workflow_id": null
-  }
-}</code></pre>
-
-<p><strong>响应</strong>（流式 SSE）：</p>
-<pre><code>event: message
-data: {"role": "assistant", "content": "好的，我来帮你创建一个数据库备份工作流。"}
-
-event: message
-data: {"role": "assistant", "content": "首先，我需要了解几个信息："}
-
-event: message
-data: {"role": "assistant", "content": "1. 你使用什么数据库？（MySQL/PostgreSQL/MongoDB 等）"}
-
-event: action
-data: {"type": "ask_parameter", "parameters": ["db_type", "backup_frequency"]}</code></pre>
-
-<h3 id="462-获取对话历史">4.6.2 获取对话历史</h3>
-
-<pre><code class="language-http">GET /api/v1/ai/chat/:session_id/history</code></pre>
+<p><strong>说明</strong>：全局 SSE 事件流，推送事件总线上的所有事件（事件名为 <code>evt.Type</code>，数据为完整事件对象），客户端断开连接时自动取消订阅。</p>
 
 <h2 id="47-配置管理-api">4.7 配置管理 API</h2>
 
-<h3 id="471-获取-ai-配置列表">4.7.1 获取 AI 配置列表</h3>
+<h3 id="471-获取系统配置">4.7.1 获取系统配置</h3>
 
-<pre><code class="language-http">GET /api/v1/config/ai</code></pre>
+<pre><code class="language-http">GET /api/v1/config/system</code></pre>
 
-<h3 id="472-添加-ai-配置">4.7.2 添加 AI 配置</h3>
+<p><strong>响应示例</strong>：以键值对形式返回全部系统配置。</p>
 
-<pre><code class="language-http">POST /api/v1/config/ai</code></pre>
-
-<p><strong>请求体</strong>：</p>
 <pre><code class="language-json">{
-  "provider": "openai",
-  "name": "OpenAI GPT-4",
-  "model": "gpt-4",
-  "api_key": "sk-xxxxxxxx",
-  "base_url": null,
-  "temperature": 0.7,
-  "max_tokens": 4096,
-  "is_active": true
+  "code": 200,
+  "message": "success",
+  "data": {
+    "some_key": "some_value"
+  }
 }</code></pre>
 
-<h3 id="473-测试-ai-配置">4.7.3 测试 AI 配置</h3>
+<h3 id="472-更新系统配置">4.7.2 更新系统配置</h3>
 
-<pre><code class="language-http">POST /api/v1/config/ai/:id/test</code></pre>
+<pre><code class="language-http">PUT /api/v1/config/system</code></pre>
+
+<p><strong>请求体</strong>：键值对对象，逐个 upsert。</p>
+
+<pre><code class="language-json">{
+  "some_key": "some_value"
+}</code></pre>
 
 <p><strong>响应示例</strong>：</p>
 <pre><code class="language-json">{
   "code": 200,
   "message": "success",
   "data": {
-    "success": true,
-    "latency_ms": 850,
-    "model": "gpt-4",
-    "response": "Hello! I'm working properly."
+    "message": "system config updated"
   }
 }</code></pre>
 
-<h3 id="474-获取系统配置">4.7.4 获取系统配置</h3>
+<h2 id="48-mcp-工具">4.8 MCP 工具</h2>
 
-<pre><code class="language-http">GET /api/v1/config/system</code></pre>
+<p>除 HTTP API 外，FlowX Studio 还内置 MCP（Model Context Protocol）服务，通过 stdio 传输，使用 <code>flowx-studio mcp</code> 命令启动。MCP 服务提供以下 8 个工具：</p>
 
-<h3 id="475-更新系统配置">4.7.5 更新系统配置</h3>
+<table>
+<thead>
+<tr>
+<th>工具</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>create_pipeline</td>
+<td>创建流水线/工作流（YAML 配置，非法 YAML 会返回校验错误）</td>
+</tr>
+<tr>
+<td>update_pipeline</td>
+<td>更新已有流水线/工作流</td>
+</tr>
+<tr>
+<td>delete_pipeline</td>
+<td>删除流水线/工作流</td>
+</tr>
+<tr>
+<td>list_pipelines</td>
+<td>列出流水线/工作流</td>
+</tr>
+<tr>
+<td>run_pipeline</td>
+<td>运行流水线/工作流</td>
+</tr>
+<tr>
+<td>import_node</td>
+<td>从 Git 仓库或本地文件夹导入节点（读取 flowx.json）</td>
+</tr>
+<tr>
+<td>delete_node</td>
+<td>删除节点</td>
+</tr>
+<tr>
+<td>list_nodes</td>
+<td>列出节点</td>
+</tr>
+</tbody>
+</table>
 
-<pre><code class="language-http">PUT /api/v1/config/system</code></pre>
-
-<h2 id="48-api-路由汇总">4.8 API 路由汇总</h2>
+<h2 id="49-api-路由汇总">4.9 API 路由汇总</h2>
 
 <pre><code>/api/v1
 ├── /nodes
 │   ├── GET    /          获取节点列表
-│   ├── POST   /          AI 生成节点（流式）
+│   ├── POST   /          创建节点
+│   ├── POST   /import    导入节点（git / folder）
 │   ├── GET    /:id       获取节点详情
+│   ├── PUT    /:id       更新节点
 │   ├── DELETE /:id       删除节点
 │   └── POST   /:id/mock  Mock 测试节点
 │
 ├── /workflows
 │   ├── GET    /          获取工作流列表
-│   ├── POST   /          AI 生成工作流（流式）
+│   ├── POST   /          创建工作流
 │   ├── GET    /:id       获取工作流详情
 │   ├── PUT    /:id       更新工作流
 │   ├── DELETE /:id       删除工作流
-│   ├── POST   /:id/run   执行工作流
-│   └── POST   /:id/mock  Mock 执行工作流
+│   └── POST   /:id/run   执行工作流
 │
 ├── /executions
 │   ├── GET    /          获取执行历史
 │   ├── GET    /:id       获取执行详情
+│   ├── GET    /:id/nodes 获取执行节点状态
 │   ├── GET    /:id/stream 实时日志流 (SSE)
-│   ├── GET    /:id/logs  查询执行日志
-│   └── POST   /:id/logs/export 导出执行日志
+│   └── GET    /:id/logs  查询执行日志
 │
-├── /ai
-│   ├── POST   /chat      AI 对话（流式）
-│   └── GET    /chat/:session_id/history 对话历史
+├── /events
+│   └── GET    /          全局事件流 (SSE)
 │
 └── /config
-    ├── GET    /ai        获取 AI 配置列表
-    ├── POST   /ai        添加 AI 配置
-    ├── PUT    /ai/:id    更新 AI 配置
-    ├── DELETE /ai/:id    删除 AI 配置
-    ├── POST   /ai/:id/test 测试 AI 配置
     ├── GET    /system    获取系统配置
     └── PUT    /system    更新系统配置</code></pre>
 
-<h2 id="49-错误码定义">4.9 错误码定义</h2>
+<h2 id="410-错误码定义">4.10 错误码定义</h2>
 
 <table>
 <thead>
@@ -749,11 +820,6 @@ data: {"type": "ask_parameter", "parameters": ["db_type", "backup_frequency"]}</
 <td>请求参数错误</td>
 </tr>
 <tr>
-<td>401</td>
-<td>unauthorized</td>
-<td>API 密钥无效或过期</td>
-</tr>
-<tr>
 <td>404</td>
 <td>not_found</td>
 <td>资源不存在</td>
@@ -764,29 +830,9 @@ data: {"type": "ask_parameter", "parameters": ["db_type", "backup_frequency"]}</
 <td>资源冲突（如名称已存在）</td>
 </tr>
 <tr>
-<td>422</td>
-<td>unprocessable</td>
-<td>请求格式正确但无法处理（如 AI 生成失败）</td>
-</tr>
-<tr>
-<td>429</td>
-<td>rate_limited</td>
-<td>请求频率限制</td>
-</tr>
-<tr>
 <td>500</td>
 <td>internal_error</td>
 <td>服务器内部错误</td>
-</tr>
-<tr>
-<td>502</td>
-<td>bad_gateway</td>
-<td>AI 服务不可用</td>
-</tr>
-<tr>
-<td>504</td>
-<td>timeout</td>
-<td>请求超时</td>
 </tr>
 </tbody>
 </table>

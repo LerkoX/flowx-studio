@@ -1,0 +1,638 @@
+# 4. API 设计
+
+## 4.1 设计原则
+
+- **RESTful 风格**：使用标准 HTTP 方法和状态码
+- **JSON 格式**：请求和响应统一使用 JSON
+- **资源命名**：使用名词复数形式，如 `/api/nodes`、`/api/workflows`
+- **版本控制**：URL 中包含版本号 `/api/v1/...`
+- **错误统一**：错误响应与成功响应使用相同的封装结构
+
+## 4.2 基础响应格式
+
+### 成功响应
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": { }
+}
+```
+
+### 错误响应
+
+```json
+{
+  "code": 400,
+  "message": "invalid request body: ..."
+}
+```
+
+## 4.3 节点管理 API
+
+### 4.3.1 获取节点列表
+
+```http
+GET /api/v1/nodes
+```
+
+**查询参数**：
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| language | string | 否 | 按语言过滤 |
+| tag | string | 否 | 按标签过滤 |
+| search | string | 否 | 关键词搜索（名称和描述） |
+| node_type | string | 否 | 按节点类型过滤（code / image） |
+| page | integer | 否 | 页码，默认 1 |
+| page_size | integer | 否 | 每页数量，默认 20 |
+
+**响应示例**：
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "items": [
+      {
+        "id": 1,
+        "name": "image_downloader",
+        "displayName": "图片下载器",
+        "description": "从指定 URL 下载图片",
+        "nodeType": "code",
+        "language": "python",
+        "parameters": [
+          {
+            "name": "url",
+            "type": "string",
+            "description": "图片 URL",
+            "required": true
+          }
+        ],
+        "tags": ["image", "download"],
+        "createdAt": "2025-01-15T10:30:00Z",
+        "updatedAt": "2025-01-15T10:30:00Z"
+      }
+    ],
+    "total": 15,
+    "page": 1,
+    "pageSize": 20
+  }
+}
+```
+
+### 4.3.2 创建节点
+
+```http
+POST /api/v1/nodes
+```
+
+**请求体**：绑定 `model.Node` 结构，`name` 必填；名称重复返回 409。
+
+```json
+{
+  "name": "image_downloader",
+  "displayName": "图片下载器",
+  "description": "从指定 URL 下载图片",
+  "nodeType": "code",
+  "language": "python",
+  "entry": "main.py",
+  "code": "import requests...",
+  "requirements": ["requests", "pillow"],
+  "parameters": [
+    {
+      "name": "url",
+      "type": "string",
+      "description": "图片 URL",
+      "required": true
+    }
+  ],
+  "tags": ["image", "download"]
+}
+```
+
+**响应示例**：返回创建后的完整节点对象（结构同 4.3.3）。
+
+### 4.3.3 获取节点详情
+
+```http
+GET /api/v1/nodes/:id
+```
+
+**响应示例**：
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "id": 1,
+    "name": "image_downloader",
+    "displayName": "图片下载器",
+    "description": "从指定 URL 下载图片",
+    "version": "1.0.0",
+    "nodeType": "code",
+    "language": "python",
+    "entry": "main.py",
+    "code": "import requests...",
+    "requirements": ["requests", "pillow"],
+    "parameters": [
+      {
+        "name": "url",
+        "type": "string",
+        "description": "图片下载地址",
+        "required": true
+      },
+      {
+        "name": "timeout",
+        "type": "integer",
+        "description": "超时时间（秒）",
+        "required": false,
+        "default": 30
+      }
+    ],
+    "outputs": [
+      {
+        "name": "file_path",
+        "type": "string",
+        "description": "下载后的本地文件路径"
+      }
+    ],
+    "docker": {
+      "image": "python:3.11-slim",
+      "workdir": "/app"
+    },
+    "mock": {
+      "enabled": true,
+      "entry": "mock.py",
+      "code": "# 返回模拟图片数据..."
+    },
+    "sourceType": "git",
+    "sourceURL": "https://github.com/example/flowx-nodes",
+    "sourcePath": "nodes/image_downloader",
+    "tags": ["image", "download"],
+    "createdAt": "2025-01-15T10:30:00Z",
+    "updatedAt": "2025-01-15T10:30:00Z"
+  }
+}
+```
+
+**说明**：
+- `nodeType` 为 `code`（代码节点）或 `image`（镜像节点）；镜像节点使用 `image` 字段而非 `language`/`code`。
+- `requirements` 为字符串数组。
+- `mock` 与 `docker` 为可选对象，未配置时不出现在响应中（`omitempty`）。
+
+### 4.3.4 更新节点
+
+```http
+PUT /api/v1/nodes/:id
+```
+
+**请求体**：同创建节点（`model.Node` 结构，全量更新）。
+
+**响应示例**：
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "id": 1
+  }
+}
+```
+
+### 4.3.5 删除节点
+
+```http
+DELETE /api/v1/nodes/:id
+```
+
+**响应**：
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "message": "node deleted"
+  }
+}
+```
+
+### 4.3.6 导入节点
+
+```http
+POST /api/v1/nodes/import
+```
+
+从 Git 仓库或本地文件夹导入节点包（读取其中的 `flowx.json`）。
+
+**请求体**：
+```json
+{
+  "source_type": "git",
+  "source_url": "https://github.com/example/flowx-nodes",
+  "source_path": ""
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| source_type | string | 是 | `git` 或 `folder` |
+| source_url | string | git 时必填 | Git 仓库地址 |
+| source_path | string | folder 时必填 | 本地文件夹路径 |
+
+**响应示例**：返回导入后的完整节点对象（结构同 4.3.3）。
+
+### 4.3.7 Mock 测试节点
+
+```http
+POST /api/v1/nodes/:id/mock
+```
+
+**请求体**：
+```json
+{
+  "parameters": {
+    "url": "https://example.com/image.jpg"
+  },
+  "timeout": 30
+}
+```
+
+**说明**：
+- `parameters` 的值必须全部为字符串（`map[string]string`）。
+- `timeout` 是顶层字段（单位：秒），不属于 `parameters`。
+
+**响应示例**（`sandbox.Result` 结构）：
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "status": "success",
+    "duration_ms": 1250,
+    "output": {
+      "file_path": "/tmp/mock_image_123.jpg",
+      "size_bytes": 2048,
+      "format": "JPEG"
+    },
+    "stdout": "...",
+    "logs": "Mock: 模拟下载图片成功\nMock: 文件大小 2048 bytes"
+  }
+}
+```
+
+## 4.4 工作流管理 API
+
+### 4.4.1 获取工作流列表
+
+```http
+GET /api/v1/workflows
+```
+
+**查询参数**：
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| status | string | 否 | 状态过滤 |
+| search | string | 否 | 关键词搜索 |
+| page | integer | 否 | 页码 |
+| page_size | integer | 否 | 每页数量 |
+
+### 4.4.2 创建工作流
+
+```http
+POST /api/v1/workflows
+```
+
+**请求体**：绑定 `model.Workflow` 结构，`name` 与 `yamlConfig` 必填。
+
+```json
+{
+  "name": "daily_image_pipeline",
+  "description": "每日风景图片下载和处理流水线",
+  "intent": "每天自动从 Unsplash 下载一张风景图片，压缩到 800x600，然后上传到 S3",
+  "yamlConfig": "name: daily_image_pipeline\nversion: \"1.0\"\n...",
+  "status": "draft"
+}
+```
+
+**响应示例**：返回创建后的工作流对象（结构同 4.4.3）。
+
+### 4.4.3 获取工作流详情
+
+```http
+GET /api/v1/workflows/:id
+```
+
+**响应示例**：
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "id": 8,
+    "name": "daily_image_pipeline",
+    "description": "每日风景图片下载和处理流水线",
+    "intent": "每天自动从 Unsplash 下载一张风景图片，压缩到 800x600，然后上传到 S3",
+    "yamlConfig": "name: daily_image_pipeline\nversion: \"1.0\"\n...",
+    "status": "active",
+    "createdAt": "2025-01-20T08:00:00Z",
+    "updatedAt": "2025-01-20T08:00:00Z"
+  }
+}
+```
+
+**说明**：该接口只返回工作流单行记录，不包含节点列表；节点编排信息在 `yamlConfig` 中。
+
+### 4.4.4 执行工作流
+
+```http
+POST /api/v1/workflows/:id/run
+```
+
+**请求体**：无需请求体。服务端不读取请求体，`parameters`、`dry_run` 等参数均不支持。
+
+**响应示例**：
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "executionId": 42,
+    "status": "running",
+    "streamUrl": "/api/v1/executions/42/stream"
+  }
+}
+```
+
+### 4.4.5 删除工作流
+
+```http
+DELETE /api/v1/workflows/:id
+```
+
+## 4.5 执行监控 API
+
+### 4.5.1 获取执行历史
+
+```http
+GET /api/v1/executions
+```
+
+**查询参数**：
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| workflow_id | integer | 否 | 按工作流过滤 |
+| status | string | 否 | 按状态过滤 |
+| page | integer | 否 | 页码 |
+| page_size | integer | 否 | 每页数量 |
+
+### 4.5.2 获取执行详情
+
+```http
+GET /api/v1/executions/:id
+```
+
+**响应示例**：
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "id": 42,
+    "workflowId": 8,
+    "status": "success",
+    "trigger": "manual",
+    "startedAt": "2025-01-20T10:00:00Z",
+    "completedAt": "2025-01-20T10:02:15Z",
+    "durationMs": 135000,
+    "result": "{\"summary\": \"所有节点执行成功\"}",
+    "errorMessage": null,
+    "errorNodeId": null,
+    "metadata": "{\"trigger\": \"manual\"}",
+    "createdAt": "2025-01-20T09:59:58Z"
+  }
+}
+```
+
+**说明**：
+- `result` 与 `metadata` 均为 JSON 字符串（而非对象），`errorMessage`、`errorNodeId` 仅在失败时出现。
+- 各节点的执行状态请查询 `GET /api/v1/executions/:id/nodes`。
+
+### 4.5.3 获取执行节点状态
+
+```http
+GET /api/v1/executions/:id/nodes
+```
+
+**响应示例**：
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "id": 1,
+      "executionId": 42,
+      "nodeId": "Build",
+      "nodeName": "Build",
+      "status": "success",
+      "startedAt": "2025-01-20T10:00:00Z",
+      "completedAt": "2025-01-20T10:00:30Z",
+      "durationMs": 30000,
+      "output": "...",
+      "error": null
+    }
+  ]
+}
+```
+
+### 4.5.4 实时日志流 (SSE)
+
+```http
+GET /api/v1/executions/:id/stream
+```
+
+**SSE 事件类型**：
+
+服务端存在两套并存的事件命名风格（均可能出现在该流中）：
+
+- 点分风格（执行服务自身发出）：`execution.started`、`execution.completed`、`execution.log`
+- 下划线风格（由 FlowX 工作流事件桥接而来）：`execution_start`、`node_start`、`node_complete`、`execution_complete`
+- 连接空闲时每 30 秒发送一次 `ping` 心跳；收到 `execution.completed` 后服务端主动关闭连接。
+
+```
+event: execution.started
+data: {"execution_id": 42, "timestamp": "2025-01-20T10:00:00Z"}
+
+event: execution.log
+data: {"execution_id": 42, "node_id": "unsplash_downloader", "level": "info", "message": "开始下载图片...", "timestamp": "2025-01-20T10:00:01Z"}
+
+event: execution.completed
+data: {"execution_id": 42, "status": "success", "duration_ms": 135000, "timestamp": "2025-01-20T10:02:15Z"}
+```
+
+### 4.5.5 查询执行日志
+
+```http
+GET /api/v1/executions/:id/logs
+```
+
+**查询参数**：
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| node_id | string | 否 | 按节点过滤 |
+| level | string | 否 | 按级别精确过滤（debug / info / warn / error / fatal） |
+| limit | integer | 否 | 返回数量，默认 100 |
+| offset | integer | 否 | 分页偏移 |
+
+**响应示例**：
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "items": [
+      {
+        "id": 1024,
+        "executionId": 42,
+        "nodeId": "unsplash_downloader",
+        "nodeName": "下载图片",
+        "stepName": "download_image",
+        "level": "info",
+        "message": "开始下载图片: https://unsplash.com/photo.jpg",
+        "output": "HTTP/1.1 200 OK\nContent-Length: 2048...",
+        "timestamp": "2025-01-20T10:00:01Z"
+      },
+      {
+        "id": 1025,
+        "executionId": 42,
+        "nodeId": "unsplash_downloader",
+        "nodeName": "下载图片",
+        "level": "info",
+        "message": "图片下载完成，大小: 2048 bytes",
+        "timestamp": "2025-01-20T10:00:02Z"
+      }
+    ],
+    "total": 156,
+    "limit": 100,
+    "offset": 0
+  }
+}
+```
+
+## 4.6 全局事件流 API
+
+### 4.6.1 订阅全局事件
+
+```http
+GET /api/v1/events
+```
+
+**说明**：全局 SSE 事件流，推送事件总线上的所有事件（事件名为 `evt.Type`，数据为完整事件对象），客户端断开连接时自动取消订阅。
+
+## 4.7 配置管理 API
+
+### 4.7.1 获取系统配置
+
+```http
+GET /api/v1/config/system
+```
+
+**响应示例**：以键值对形式返回全部系统配置。
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "some_key": "some_value"
+  }
+}
+```
+
+### 4.7.2 更新系统配置
+
+```http
+PUT /api/v1/config/system
+```
+
+**请求体**：键值对对象，逐个 upsert。
+
+```json
+{
+  "some_key": "some_value"
+}
+```
+
+**响应示例**：
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "message": "system config updated"
+  }
+}
+```
+
+## 4.8 MCP 工具
+
+除 HTTP API 外，FlowX Studio 还内置 MCP（Model Context Protocol）服务，通过 stdio 传输，使用 `flowx-studio mcp` 命令启动。MCP 服务提供以下 8 个工具：
+
+| 工具 | 说明 |
+|------|------|
+| create_pipeline | 创建流水线/工作流（YAML 配置，非法 YAML 会返回校验错误） |
+| update_pipeline | 更新已有流水线/工作流 |
+| delete_pipeline | 删除流水线/工作流 |
+| list_pipelines | 列出流水线/工作流 |
+| run_pipeline | 运行流水线/工作流 |
+| import_node | 从 Git 仓库或本地文件夹导入节点（读取 flowx.json） |
+| delete_node | 删除节点 |
+| list_nodes | 列出节点 |
+
+## 4.9 API 路由汇总
+
+```
+/api/v1
+├── /nodes
+│   ├── GET    /          获取节点列表
+│   ├── POST   /          创建节点
+│   ├── POST   /import    导入节点（git / folder）
+│   ├── GET    /:id       获取节点详情
+│   ├── PUT    /:id       更新节点
+│   ├── DELETE /:id       删除节点
+│   └── POST   /:id/mock  Mock 测试节点
+│
+├── /workflows
+│   ├── GET    /          获取工作流列表
+│   ├── POST   /          创建工作流
+│   ├── GET    /:id       获取工作流详情
+│   ├── PUT    /:id       更新工作流
+│   ├── DELETE /:id       删除工作流
+│   └── POST   /:id/run   执行工作流
+│
+├── /executions
+│   ├── GET    /          获取执行历史
+│   ├── GET    /:id       获取执行详情
+│   ├── GET    /:id/nodes 获取执行节点状态
+│   ├── GET    /:id/stream 实时日志流 (SSE)
+│   └── GET    /:id/logs  查询执行日志
+│
+├── /events
+│   └── GET    /          全局事件流 (SSE)
+│
+└── /config
+    ├── GET    /system    获取系统配置
+    └── PUT    /system    更新系统配置
+```
+
+## 4.10 错误码定义
+
+| HTTP 状态码 | 错误类型 | 说明 |
+|------------|---------|------|
+| 200 | success | 请求成功 |
+| 400 | bad_request | 请求参数错误 |
+| 404 | not_found | 资源不存在 |
+| 409 | conflict | 资源冲突（如名称已存在） |
+| 500 | internal_error | 服务器内部错误 |

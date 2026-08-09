@@ -40,38 +40,42 @@
 
 ### 8.1.3 go:embed 嵌入前端资源
 
+实际实现为 `(*Server).RegisterStatic()`，基于 gin 的 `NoRoute` 处理 SPA 回退（`internal/server/server.go:55-85`）：
+
 ```go
 package server
-
-import (
-    "embed"
-    "io/fs"
-    "net/http"
-)
 
 //go:embed all:web/dist
 var webDist embed.FS
 
-func NewStaticHandler() http.Handler {
-    // 从嵌入的文件系统创建 http.FS
+// RegisterStatic 注册静态资源
+func (s *Server) RegisterStatic() {
     distFS, err := fs.Sub(webDist, "web/dist")
     if err != nil {
-        panic(err)
+        panic(fmt.Sprintf("failed to create sub fs: %v", err))
     }
-    
+
     fileServer := http.FileServer(http.FS(distFS))
-    
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        // SPA 路由处理：所有非 API 请求返回 index.html
-        if !strings.HasPrefix(r.URL.Path, "/api/") {
-            // 检查文件是否存在
-            _, err := distFS.Open(strings.TrimPrefix(r.URL.Path, "/"))
-            if err != nil {
-                // 文件不存在，返回 index.html（SPA 路由）
-                r.URL.Path = "/"
-            }
+
+    s.router.NoRoute(func(c *gin.Context) {
+        path := c.Request.URL.Path
+        // API 请求不处理
+        if strings.HasPrefix(path, "/api/") {
+            c.JSON(404, gin.H{"code": 404, "message": "not found"})
+            return
         }
-        fileServer.ServeHTTP(w, r)
+        // 尝试打开文件
+        cleanPath := strings.TrimPrefix(path, "/")
+        if cleanPath == "" {
+            cleanPath = "index.html"
+        }
+        _, err := distFS.Open(cleanPath)
+        if err != nil {
+            // 文件不存在，返回 index.html（SPA fallback）
+            c.Request.URL.Path = "/index.html"
+        }
+        c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+        fileServer.ServeHTTP(c.Writer, c.Request)
     })
 }
 ```
@@ -84,12 +88,19 @@ cd web
 npm install
 npm run build
 
-# 2. 构建后端（嵌入前端）
+# 2. 复制前端产物到 embed 目录
+#    （embed 路径是 internal/server/web/dist，见 internal/server/server.go:14）
 cd ..
+rm -rf internal/server/web/dist
+cp -r web/dist internal/server/web/dist
+
+# 3. 构建后端（嵌入前端）
 go build -o flowx-studio cmd/flowx-studio/main.go
 
 # 最终产物：单个 flowx-studio 二进制文件
 ```
+
+也可以直接使用 `make build` 或 `./boot.sh build` 一键完成上述全部步骤（见 Makefile 的 `copy-web` 目标）。
 
 ## 8.2 命令行接口（Cobra）
 
@@ -104,20 +115,28 @@ go build -o flowx-studio cmd/flowx-studio/main.go
 
 ### 8.2.2 命令设计
 
+实际提供两个子命令（见 `cmd/flowx-studio/main.go:37-61`）：
+
 ```bash
-# 启动 Web UI（默认命令）
-flowx-studio
+# 启动 HTTP 服务（Web UI + API）
 flowx-studio server
 
-# 查看版本
-flowx-studio version
+# 启动 stdio MCP 服务
+flowx-studio mcp
+
+# 裸运行：仅打印帮助信息，不启动 server
+flowx-studio
 
 # 查看帮助
 flowx-studio --help
 flowx-studio server --help
+flowx-studio mcp --help
 ```
 
-**注意**：运行 YAML 工作流的 CLI 功能保留在 FlowX 核心库中（`flowx run workflow.yaml`），不在 flowx-studio 中提供。
+**注意**：
+- 裸运行 `flowx-studio` 不带子命令时只打印帮助，不会启动 server。
+- 目前没有 `version` 命令（规划中，未实现）。
+- 运行 YAML 工作流的 CLI 功能保留在 FlowX 核心库中（`flowx run workflow.yaml`），不在 flowx-studio 中提供。
 
 ### 8.2.3 启动参数
 
@@ -125,106 +144,68 @@ flowx-studio server --help
 flowx-studio server [flags]
 
 Flags:
-  -p, --port int        HTTP 服务端口 (默认 8080)
-  -H, --host string     监听地址 (默认 "0.0.0.0")
-      --no-open         不自动打开浏览器
-      --data-dir string 数据目录 (默认 "~/.flowx-studio")
-      --debug           启用调试模式
+      --port int      HTTP 服务端口 (默认 8080)
+      --host string   监听地址 (默认 "0.0.0.0")
 ```
 
+**说明**（见 `cmd/flowx-studio/main.go:47-48`）：
+- 仅有 `--port`、`--host` 两个 flag，没有 `-p`/`-H` 短选项。
+- 没有 `--no-open`、`--debug` flag（规划中，未实现）。
+- 没有 `--data-dir` flag。数据目录只能通过环境变量 `FLOWX_STUDIO_DATA_DIR` 或配置文件设置。
+  ⚠️ 已知问题：`boot.sh` 启动时会向二进制传递 `--data-dir` 参数，但二进制不支持该 flag，会报 `unknown flag` 错误；boot.sh 与二进制存在此不一致。
+
 ### 8.2.4 Cobra 实现示例
+
+实际实现（简化自 `cmd/flowx-studio/main.go`）。注意：没有 `versionCmd`、`--config` flag，也没有 `viper.BindPFlag`；flag 仅在显式传参时手动覆盖配置（main.go:96-101），配置加载统一由 `config.Load()` 完成。
 
 ```go
 package main
 
 import (
-    "fmt"
-    "os"
-
     "github.com/spf13/cobra"
-    "github.com/spf13/viper"
 )
-
-var (
-    cfgFile string
-    rootCmd = &cobra.Command{
-        Use:   "flowx-studio",
-        Short: "AI 驱动的可视化工作流平台",
-        Long: `FlowX Studio 是一个基于 FlowX 核心引擎的 AI 驱动可视化工作流平台。
-用户通过自然语言描述需求，AI 自动完成节点生成、工作流编排和执行监控。`,
-        Run: func(cmd *cobra.Command, args []string) {
-            // 默认启动 server
-            runServer()
-        },
-    }
-
-    serverCmd = &cobra.Command{
-        Use:   "server",
-        Short: "启动 Web UI 服务",
-        Long:  "启动 FlowX Studio 的 HTTP 服务器，提供 Web UI 和 API 服务",
-        Run: func(cmd *cobra.Command, args []string) {
-            runServer()
-        },
-    }
-
-    versionCmd = &cobra.Command{
-        Use:   "version",
-        Short: "查看版本信息",
-        Run: func(cmd *cobra.Command, args []string) {
-            fmt.Printf("FlowX Studio %s (build %s)\n", version, commit)
-            fmt.Printf("FlowX Engine %s\n", flowxVersion)
-        },
-    }
-)
-
-func init() {
-    cobra.OnInitialize(initConfig)
-
-    // 全局 flags
-    rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "配置文件路径")
-    rootCmd.PersistentFlags().Bool("debug", false, "启用调试模式")
-    viper.BindPFlag("debug", rootCmd.PersistentFlags().Lookup("debug"))
-
-    // server 子命令 flags
-    serverCmd.Flags().IntP("port", "p", 8080, "HTTP 服务端口")
-    serverCmd.Flags().StringP("host", "H", "0.0.0.0", "监听地址")
-    serverCmd.Flags().Bool("no-open", false, "不自动打开浏览器")
-    serverCmd.Flags().String("data-dir", "~/.flowx-studio", "数据目录")
-
-    // 绑定到 viper
-    viper.BindPFlag("server.port", serverCmd.Flags().Lookup("port"))
-    viper.BindPFlag("server.host", serverCmd.Flags().Lookup("host"))
-    viper.BindPFlag("server.no_open", serverCmd.Flags().Lookup("no-open"))
-    viper.BindPFlag("data.dir", serverCmd.Flags().Lookup("data-dir"))
-
-    // 注册子命令
-    rootCmd.AddCommand(serverCmd)
-    rootCmd.AddCommand(versionCmd)
-}
-
-func initConfig() {
-    if cfgFile != "" {
-        viper.SetConfigFile(cfgFile)
-    } else {
-        home, _ := os.UserHomeDir()
-        viper.AddConfigPath(home + "/.flowx-studio")
-        viper.SetConfigName("config")
-        viper.SetConfigType("yaml")
-    }
-
-    viper.SetEnvPrefix("FLOWX_STUDIO")
-    viper.AutomaticEnv()
-
-    if err := viper.ReadInConfig(); err == nil {
-        fmt.Println("使用配置文件:", viper.ConfigFileUsed())
-    }
-}
 
 func main() {
-    if err := rootCmd.Execute(); err != nil {
-        fmt.Fprintln(os.Stderr, err)
-        os.Exit(1)
+    rootCmd := &cobra.Command{
+        Use:   "flowx-studio",
+        Short: "FlowX Studio - FlowX runtime viewer with MCP support",
     }
+
+    serverCmd := &cobra.Command{
+        Use:   "server",
+        Short: "Start the HTTP server",
+        RunE:  runServer,
+    }
+    serverCmd.Flags().Int("port", 8080, "HTTP server port")
+    serverCmd.Flags().String("host", "0.0.0.0", "HTTP server host")
+    rootCmd.AddCommand(serverCmd)
+
+    mcpCmd := &cobra.Command{
+        Use:   "mcp",
+        Short: "Start the stdio MCP server",
+        RunE:  runMCP,
+    }
+    rootCmd.AddCommand(mcpCmd)
+
+    if err := rootCmd.Execute(); err != nil {
+        log.Fatal(err)
+    }
+}
+
+func runServer(cmd *cobra.Command, args []string) error {
+    cfg, err := config.Load()
+    if err != nil {
+        return fmt.Errorf("failed to load config: %w", err)
+    }
+
+    // flag 仅在显式传入时覆盖配置
+    if cmd.Flags().Changed("port") {
+        cfg.Server.Port, _ = cmd.Flags().GetInt("port")
+    }
+    if cmd.Flags().Changed("host") {
+        cfg.Server.Host, _ = cmd.Flags().GetString("host")
+    }
+    // ... 创建数据目录、获取单例锁、启动 HTTP server
 }
 ```
 
@@ -233,51 +214,35 @@ func main() {
 Cobra + Viper 的配置优先级（高到低）：
 
 1. **命令行参数**：`--port 9090`
-2. **环境变量**：`FLOWX_STUDIO_PORT=9090`
+2. **环境变量**：`FLOWX_STUDIO_SERVER_PORT=9090`
 3. **配置文件**：`~/.flowx-studio/config.yaml`
 4. **默认值**：`8080`
 
 ```yaml
 # ~/.flowx-studio/config.yaml 示例
+# 注意：Config 结构仅有 server 和 data 两段（internal/config/config.go:12-15）
 server:
   port: 8080
   host: "0.0.0.0"
-  auto_open_browser: true
+  no_open: false
+  auto_open_browser: true   # 配置项已定义但未接线（规划中，未实现）
 
 data:
   dir: "~/.flowx-studio"
   db_path: "~/.flowx-studio/studio.db"
-
-ai:
-  default_provider: "openai"
-  providers:
-    - name: "OpenAI"
-      provider: "openai"
-      model: "gpt-4"
-      api_key: "${OPENAI_API_KEY}"
-      temperature: 0.7
-
-execution:
-  default_executor: "local"
-  max_concurrent: 5
-  timeout: "1h"
-
-mock:
-  timeout: "30s"
-  use_docker: true
 ```
 
-### 8.2.3 环境变量
+### 8.2.6 环境变量
+
+viper 使用前缀 `FLOWX_STUDIO`，且键中的 `.` 映射为 `_`（`internal/config/config.go:33-35`），实际生效的环境变量为：
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
-| `FLOWX_STUDIO_PORT` | HTTP 服务端口 | 8080 |
-| `FLOWX_STUDIO_HOST` | 监听地址 | 0.0.0.0 |
+| `FLOWX_STUDIO_SERVER_PORT` | HTTP 服务端口 | 8080 |
+| `FLOWX_STUDIO_SERVER_HOST` | 监听地址 | 0.0.0.0 |
+| `FLOWX_STUDIO_SERVER_NO_OPEN` | 不自动打开浏览器 | false |
+| `FLOWX_STUDIO_DATA_DB_PATH` | 数据库文件路径 | ~/.flowx-studio/studio.db |
 | `FLOWX_STUDIO_DATA_DIR` | 数据目录 | ~/.flowx-studio |
-| `FLOWX_STUDIO_DB_PATH` | 数据库文件路径 | ~/.flowx-studio/studio.db |
-| `FLOWX_STUDIO_NO_OPEN` | 不自动打开浏览器 | false |
-| `FLOWX_STUDIO_DEBUG` | 调试模式 | false |
-| `FLOWX_STUDIO_ENCRYPTION_KEY` | API Key 加密密钥 | 自动生成 |
 
 ## 8.3 进程管理
 
@@ -306,87 +271,75 @@ flowchart TD
 
 ### 8.3.2 优雅关闭
 
+实际实现使用 `signal.NotifyContext` 监听 `SIGINT`/`SIGTERM`，关闭超时为 **5 秒**（`cmd/flowx-studio/main.go:120-154`）：
+
 ```go
-func main() {
-    // 创建服务器
-    server := NewServer(config)
-    
-    // 启动服务器（在 goroutine 中）
-    go server.Start()
-    
-    // 监听系统信号
-    sigCh := make(chan os.Signal, 1)
-    signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-    
-    // 等待信号
-    <-sigCh
-    
-    // 优雅关闭
-    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func runServer(cmd *cobra.Command, args []string) error {
+    // ... 初始化配置、单例锁、服务
+
+    ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+    defer stop()
+
+    go func() {
+        if err := srv.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+            log.Printf("HTTP server error: %v", err)
+        }
+        stop()
+    }()
+
+    <-ctx.Done()
+
+    // 优雅关闭（5 秒超时）
+    shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
     defer cancel()
-    
-    if err := server.Shutdown(ctx); err != nil {
-        log.Printf("Server shutdown error: %v", err)
+
+    if err := srv.Shutdown(shutdownCtx); err != nil {
+        log.Printf("HTTP server shutdown error: %v", err)
     }
-    
-    // 关闭数据库连接
-    db.Close()
-    
-    log.Println("Server stopped")
+    return nil
 }
 ```
 
 ### 8.3.3 单实例机制
 
-防止同时运行多个实例导致端口冲突：
+通过 PID 文件实现进程级单例锁（`internal/singleton/lock.go:26-38`）。与"检测到已有实例就报错退出"不同，实际行为是**杀死旧进程并接管**：
 
 ```go
-func ensureSingleInstance(dataDir string) (func(), error) {
-    pidFile := filepath.Join(dataDir, "flowx-studio.pid")
-    
-    // 检查是否已有实例在运行
-    if data, err := os.ReadFile(pidFile); err == nil {
-        pid := string(data)
-        if isProcessRunning(pid) {
-            return nil, fmt.Errorf("FlowX Studio is already running (PID: %s)", pid)
-        }
-    }
-    
-    // 写入当前 PID
-    if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0644); err != nil {
-        return nil, err
-    }
-    
-    // 返回清理函数
-    return func() {
-        os.Remove(pidFile)
-    }, nil
+lock := singleton.New(filepath.Join(cfg.Data.Dir, "flowx-studio.pid"), "server")
+if err := lock.Acquire(); err != nil {
+    return fmt.Errorf("failed to acquire singleton lock: %w", err)
 }
+defer lock.Release()
 ```
+
+`Acquire()` 的行为：
+
+1. 读取 PID 文件，通过 `/proc/<pid>/cmdline` 判断对应进程是否仍是 `flowx-studio server`（按子命令名匹配，避免误杀 `mcp` 等其他子命令进程）。
+2. 若已有同子命令实例在运行：先发送 `SIGTERM` 请求其优雅退出，最多等待 5 秒；若仍未退出则发送 `SIGKILL` 强制杀死。
+3. 写入当前进程 PID，完成接管。
+
+`Release()` 在退出时删除 PID 文件。
 
 ## 8.4 数据目录结构
 
 ```
 ~/.flowx-studio/
 ├── studio.db              # SQLite 数据库
-├── studio.db.backup       # 自动备份
-├── studio.pid             # 进程 ID 文件
-├── logs/
-│   ├── studio.log         # 应用日志
-│   └── executions/        # 执行日志（可选，大量时分离）
-├── temp/
-│   └── mock-*/            # Mock 测试临时文件
-├── nodes/
-│   └── {node_name}/       # 节点代码缓存
-│       ├── main.py
-│       ├── requirements.txt
-│       └── Dockerfile
+├── flowx-studio.pid       # 进程 ID 文件（单例锁，cmd/flowx-studio/main.go:108）
 └── config.yaml            # 可选：外部配置文件
 ```
 
-## 8.5 自动浏览器打开
+**说明**：
+- 没有自动备份逻辑（无 `studio.db.backup`）。
+- 没有 `logs/` 目录，日志仅输出到控制台。
+- 没有 `nodes/` 节点代码缓存目录。
+- Mock 测试的临时目录创建在系统临时目录下（`$TMPDIR/flowx_mock_*`，见 `internal/sandbox/executor.go:42,79`），执行完成后立即清理，不在数据目录中。
 
-### 8.5.1 实现机制
+## 8.5 自动浏览器打开（规划中，未实现）
+
+> ⚠️ 本节描述的功能均未实现：全仓库没有打开浏览器的代码，配置项 `auto_open_browser` / `no_open` 已定义但未接线。以下为**目标设计**。
+
+### 8.5.1 实现机制（规划中，未实现）
 
 ```go
 func openBrowser(url string) error {
@@ -409,16 +362,18 @@ func openBrowser(url string) error {
 }
 ```
 
-### 8.5.2 启动时机
+### 8.5.2 启动时机（规划中，未实现）
 
 - 服务器成功启动后（端口监听就绪）
 - 延迟 500ms 确保服务完全初始化
 - 仅在桌面环境自动打开（检测 `DISPLAY` 环境变量等）
-- 可通过 `--no-open` 或 `FLOWX_NO_OPEN=true` 禁用
+- 可通过 `FLOWX_STUDIO_SERVER_NO_OPEN=true` 禁用（配置键 `server.no_open` 已定义但未接线）
 
-## 8.6 日志系统
+## 8.6 日志系统（规划中，未实现）
 
-### 8.6.1 日志分级
+> ⚠️ 本节描述的分级、文件输出与日志轮转均未实现。当前实现仅使用标准库 `log.Printf` 输出到控制台。以下为**目标设计**。
+
+### 8.6.1 日志分级（规划中，未实现）
 
 | 级别 | 用途 | 输出位置 |
 |------|------|---------|
@@ -428,7 +383,7 @@ func openBrowser(url string) error {
 | ERROR | 错误信息 | 控制台 + 文件 |
 | FATAL | 致命错误 | 控制台 + 文件，程序退出 |
 
-### 8.6.2 日志格式
+### 8.6.2 日志格式（规划中，未实现）
 
 ```
 2025-01-20T10:00:00.123+0800 [INFO] [server] HTTP server started on :8080
@@ -438,7 +393,7 @@ func openBrowser(url string) error {
 2025-01-20T10:05:32.345+0800 [INFO] [node] Node 'download' completed in 30.333s
 ```
 
-### 8.6.3 日志轮转
+### 8.6.3 日志轮转（规划中，未实现）
 
 - 日志文件最大 10MB
 - 保留最近 5 个日志文件
@@ -451,16 +406,21 @@ func openBrowser(url string) error {
 flowx-studio 通过 Go Module 引入 FlowX 核心库：
 
 ```go
-// go.mod
+// go.mod（当前实际内容节选）
 module github.com/LerkoX/flowx-studio
 
-go 1.25
+go 1.25.0
+
+// 开发期使用本地路径 replace，指向本地 flowx 仓库
+replace github.com/LerkoX/flowx => ../flowx
 
 require (
-    github.com/LerkoX/flowx v1.2.0
+    github.com/LerkoX/flowx v0.0.0-20260527104758-c693505dcf32 // 伪版本占位
     // ... 其他依赖
 )
 ```
+
+**当前状态**：开发期通过 `replace => ../flowx` 指向本地 FlowX 仓库，`require` 中的版本为伪版本占位，不代表真实发布的 tag。**发布前需移除 replace 指令并替换为正式版本 tag**。
 
 **版本锁定原则**：
 - flowx-studio 的 `go.mod` 中明确指定 FlowX 的版本 tag（如 `v1.2.0`）
@@ -484,11 +444,11 @@ require (
 | 暂停/恢复 | `Runtime.Pause/Resume` | 满足 |
 | 状态查询 | `Runtime.Get(id)` + `Pipeline.Status()` | 满足 |
 | 节点状态 | `Node.GetRuntimeStatus()` | 满足 |
-| 事件监听 | `dag.Listener` 接口 | 基本满足，但缺少节点上下文 |
+| 事件监听 | `dag.Listener` 接口 | 满足，`Pipeline.CurrentNode()` 已提供节点上下文 |
 | 日志捕获 | `logger.Pusher` 接口 | 满足，`Entry` 包含 Node 字段 |
 | 执行输出 | 通过 `NodeRuntimeStatus.Steps[].Output` | 满足 |
 
-**主要不足**：`dag.Listener.Handle(p Pipeline, event Event)` 缺少节点上下文信息。当收到 `PipelineNodeStart`/`PipelineNodeFinish` 事件时，无法直接知道是哪个节点触发的事件。建议 FlowX 核心库在 `Pipeline` 接口中新增 `CurrentNode() Node` 方法，或在事件触发时临时记录当前节点。
+**说明**：此前评估中提到的"`dag.Listener.Handle(p Pipeline, event Event)` 缺少节点上下文信息"问题已解决——FlowX 已实现 `Pipeline.CurrentNode()` 与 `Pipeline.GetParam()`，并已在 `RuntimeAdapter` 事件桥接中实际使用（`internal/runtime/adapter.go:142,152,157,169,182`）。
 
 详见 [10-core-deps.md](./10-core-deps.md) 完整评估报告。
 
@@ -497,39 +457,11 @@ require (
 配置来源按优先级排序（高优先级覆盖低优先级）：
 
 1. **命令行参数**：`--port 9090`
-2. **环境变量**：`FLOWX_PORT=9090`
-3. **配置文件**：`~/.flowx/config.yaml`
+2. **环境变量**：`FLOWX_STUDIO_SERVER_PORT=9090`
+3. **配置文件**：`~/.flowx-studio/config.yaml`
 4. **默认值**：`8080`
 
-```yaml
-# ~/.flowx-studio/config.yaml 示例
-server:
-  port: 8080
-  host: "0.0.0.0"
-  auto_open_browser: true
-
-data:
-  dir: "~/.flowx-studio"
-  db_path: "~/.flowx-studio/studio.db"
-
-ai:
-  default_provider: "openai"
-  providers:
-    - name: "OpenAI"
-      provider: "openai"
-      model: "gpt-4"
-      api_key: "${OPENAI_API_KEY}"  # 支持环境变量引用
-      temperature: 0.7
-
-execution:
-  default_executor: "local"
-  max_concurrent: 5
-  timeout: "1h"
-
-mock:
-  timeout: "30s"
-  use_docker: true
-```
+配置文件格式与可用环境变量的完整说明见 [8.2.5 配置加载优先级](#825-配置加载优先级) 与 [8.2.6 环境变量](#826-环境变量)，此处不再重复。
 
 ## 8.9 运行时事件与元数据
 
@@ -548,7 +480,7 @@ mock:
 
 为了在前端“元数据”面板展示“执行时的真实信息”，`WorkflowService` 在执行生命周期中收集并持久化：
 
-- **渲染后参数**：通过 `Pipeline.GetParam()` 从 FlowX 引擎获取（需要 FlowX 提供 `GetParam()` 方法）。
+- **渲染后参数**：通过 `Pipeline.GetParam()` 从 FlowX 引擎获取（FlowX 已提供该方法，`internal/runtime/adapter.go:142,152`）。
 - **运行时 metadata**：通过 `Pipeline.Metadata()` 获取节点输出、中间结果等。
 - **状态 / 错误 / 耗时**：从事件和 DB 中汇总。
 

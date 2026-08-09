@@ -17,7 +17,7 @@
 | 3 | [03-database.md](./03-database.md) | SQLite 数据库 Schema 设计 |
 | 4 | [04-api.md](./04-api.md) | REST API 接口设计规范 |
 | 5 | [05-frontend.md](./05-frontend.md) | React 前端架构、组件设计与状态管理 |
-| 6 | [06-ai-service.md](./06-ai-service.md) | AI 服务层设计、多模型支持与 Prompt 工程 |
+| 6 | [06-ai-service.md](./06-ai-service.md) | AI 集成（MCP 服务端）：stdio MCP 服务与工具调用 |
 | 7 | [07-node-system.md](./07-node-system.md) | 节点注册中心、Mock 模式与执行引擎 |
 | 8 | [08-runtime.md](./08-runtime.md) | 运行时架构、单二进制部署、核心库依赖与接口评估 |
 | 9 | [09-security.md](./09-security.md) | 安全设计、错误处理与日志规范 |

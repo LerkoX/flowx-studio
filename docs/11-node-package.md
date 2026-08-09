@@ -4,7 +4,7 @@
 
 ## 11.1 背景与目标
 
-当前节点导入未真正打通：前端 `NodeManagerPage` 只是本地模拟，后端也只保存 `source_type/source_url/source_path`，不会解析来源。
+> **历史背景**：早期节点导入未真正打通——前端 `NodeManagerPage` 只是本地模拟，后端也只保存 `source_type/source_url/source_path`，不会解析来源。目前导入链路已完全实现：后端 `internal/service/node_import.go` 解析 `flowx.json`、`internal/handler/node_handler.go` 提供 `POST /api/v1/nodes/import`，前端 `NodeImportModal` + `nodeService.ts` + `NodeManagerPage` 已对接真实接口。
 
 为了把外部节点真正导入系统，需要一份标准的节点包清单。该清单应定义：
 
@@ -23,7 +23,7 @@
 
 1. **包即目录**：一个节点包是一个目录，包含 `flowx.json` 和若干代码文件
 2. **清单与代码分离**：`flowx.json` 只描述元信息，不内联代码
-3. **可映射到现有模型**：导入后可直接生成 `model.Node`（`internal/model/model.go:34-67`）
+3. **可映射到现有模型**：导入后可直接生成 `model.Node`（`internal/model/model.go:71-111`）
 4. **可展开到 FlowX 核心**：运行时能把节点包展开为 `flowx/core.NodeConfig`（`flowx/core/config.go:113-124`）
 5. **参数注入统一**：优先使用环境变量，兼容命令行模板
 
@@ -110,7 +110,7 @@ image-downloader/
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `name` | string | 是 | 节点唯一标识，使用 snake_case |
+| `name` | string | 是 | 节点唯一标识，字母开头，支持 snake_case 或 kebab-case（正则 `^[a-zA-Z][a-zA-Z0-9_-]*$`） |
 | `displayName` | string | 否 | 展示名称 |
 | `description` | string | 否 | 功能描述 |
 | `version` | string | 否 | 版本号，如 `1.0.0` |
@@ -245,7 +245,8 @@ Content-Type: application/json
 | `entry` 文件内容 | `Code` |
 | `files` 文件内容 | 新增 `Files`（JSON map） |
 | `image` | `Image` / `DockerConfig.Image` |
-| `executor.config` | `DockerConfig` |
+| `executor.config` | `DockerConfig`（仅提取 `workdir` 字段） |
+| `executor`（完整配置） | `PackageConfig.Executor`（原样保存，运行时透传给 FlowX 执行器） |
 | `requirements` | `Requirements` |
 | `parameters` | `Parameters` |
 | `outputs` | `Outputs` |
@@ -255,9 +256,8 @@ Content-Type: application/json
 
 `NodeType` 规则：
 
-- 如果 `entry` 存在，则 `NodeType = "code"`
-- 如果 `entry` 不存在但 `image` 存在，则 `NodeType = "image"`
-- 否则导入失败
+- `entry` 恒必填（`node_import.go` 导入校验强制要求），因此 `NodeType = "code"`
+- image-only 节点（无 `entry` 仅有 `image`）暂不支持导入；`image` 字段仅用于指定 Docker 执行镜像
 
 ### 11.6.2 运行时展开为 flowx/core.NodeConfig
 
@@ -313,7 +313,7 @@ export TIMEOUT="<求值后的 Param.timeout>"
 `env` 的值支持 FlowX 模板表达式，包括：
 
 - `{{ Param.name }}`：工作流参数
-- `{{ Metadata.UpNode.field }}`：上游节点输出（`flowx/dag/eval_context.go:94-115`）
+- `{{ 上游节点ID.输出字段 }}`：上游节点输出。FlowX 会将 metadata 中 `NodeID.key` 格式的键转换为嵌套 map 注入模板上下文（`flowx/dag/eval_context.go:94-115`），因此直接以节点 ID 作为顶层变量访问，例如 `{{ DownloadImage.file_path }}`；**不存在** `{{ Metadata.UpNode.field }}` 语法
 - 常量字符串
 
 ### 规则 2：run 模板
@@ -335,7 +335,7 @@ export FLOWX_PARAM_URL="<值>"
 export FLOWX_PARAM_TIMEOUT="<值>"
 ```
 
-这符合 `NodeService.MockTest` 中按参数生成环境变量的现有逻辑（`internal/service/node.go:220-228`）。
+注意：`NodeService.MockTest`（`internal/service/node.go:243-251`）使用**裸大写参数名**作为环境变量（如 `URL`），而节点包展开器使用 `FLOWX_PARAM_` 前缀（如 `FLOWX_PARAM_URL`），两处命名目前不一致（已知问题）。
 
 ### 规则 4：默认 run 命令
 
@@ -393,24 +393,24 @@ Mock 测试入口 API 仍使用 `POST /api/v1/nodes/:id/mock`。
 
 导入时必须校验：
 
-1. `name` 必填且符合 snake_case
+1. `name` 必填，字母开头，支持 snake_case 或 kebab-case（正则 `^[a-zA-Z][a-zA-Z0-9_-]*$`）
 2. `language` 必填且在支持列表内（`python` / `go` / `bash` / `node` 等）
 3. `entry` 必填且文件存在
 4. `files` 中列出的文件必须存在
 5. `parameters` 中 `name` 唯一，`type` 合法
-6. 如果 `image` 为空且 `executor.type` 为 `docker`，导入失败
+6. ~~如果 `image` 为空且 `executor.type` 为 `docker`，导入失败~~（**未在代码中实现**：`node_import.go` 仅校验 `executor.type` 类型名合法性，不检查 `image` 是否配置）
 7. `mock.entry` 若存在，文件必须存在
 8. 节点名称唯一（数据库唯一约束）
 
-## 11.12 待实现任务
+## 11.12 实现任务（已全部完成 ✅）
 
-- [ ] 新增 `model.Node.Files` 字段并创建数据库迁移
-- [ ] 实现 `internal/service/node_import.go` 导入服务
-- [ ] 实现 `POST /api/v1/nodes/import` 接口
-- [ ] 扩展 `sandbox.Executor` 支持多文件写入
-- [ ] 实现节点包 → `flowx/core.NodeConfig` 展开逻辑
-- [ ] 更新前端 `NodeImportModal` 和 `NodeManagerPage`
-- [ ] 为导入流程编写单元测试和端到端测试
+- [x] 新增 `model.Node.Files` 字段并创建数据库迁移（迁移 005）
+- [x] 实现 `internal/service/node_import.go` 导入服务
+- [x] 实现 `POST /api/v1/nodes/import` 接口（`node_handler.go`）
+- [x] 扩展 `sandbox.Executor` 支持多文件写入（`executor.go`）
+- [x] 实现节点包 → `flowx/core.NodeConfig` 展开逻辑（`internal/runtime/node_expander.go`）
+- [x] 更新前端 `NodeImportModal` 和 `NodeManagerPage`
+- [x] 为导入流程编写单元测试和端到端测试（`node_import_test.go`、`internal/mcpserver/import_node_test.go`）
 
 ## 11.13 参考资料
 
@@ -418,5 +418,5 @@ Mock 测试入口 API 仍使用 `POST /api/v1/nodes/:id/mock`。
 - `flowx/dag/eval_context.go:80-115` — 模板上下文（`Param` 与 `Metadata`）
 - `flowx/executor/local/adapter.go:23-32` — local 执行器配置项
 - `flowx/executor/docker/adapter.go:23-32` — docker 执行器配置项
-- `flowx-studio/internal/model/model.go:34-67` — `Node` 数据模型
-- `flowx-studio/internal/service/node.go:220-228` — `MockTest` 参数环境变量注入
+- `flowx-studio/internal/model/model.go:71-111` — `Node` 数据模型
+- `flowx-studio/internal/service/node.go:243-251` — `MockTest` 参数环境变量注入

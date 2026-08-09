@@ -53,6 +53,8 @@
 <li><a href="08-runtime.html">8. 运行时与部署设计</a></li>
 <li><a href="09-security.html">9. 安全与错误处理设计</a></li>
 <li><a href="10-core-deps.html">10. FlowX 核心库依赖评估</a></li>
+<li><a href="11-node-package.html">11. 节点包规范</a></li>
+<li><a href="IMPLEMENTATION_STATUS.html">实现状态</a></li>
 </ul>
 </nav>
         <main class="content">
@@ -109,8 +111,8 @@ AI 处理:
 <ul>
 <li>单二进制文件运行</li>
 <li>SQLite 本地存储</li>
-<li>支持离线模式（Ollama 本地模型）</li>
-<li>启动即自动打开浏览器</li>
+<li>支持离线模式（Ollama 本地模型）（未实现/规划中：当前代码无任何 AI/Ollama 调用）</li>
+<li>启动即自动打开浏览器（配置项 <code>auto_open_browser</code> 已预留，功能未实现）</li>
 </ul>
 <h3 id="原则-4引擎复用">原则 4：引擎复用</h3>
 <ul>

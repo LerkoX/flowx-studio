@@ -27,21 +27,35 @@ FLOWX_DB_PATH=/custom/path/flowx.db
 CREATE TABLE nodes (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     name            TEXT NOT NULL UNIQUE,           -- 节点唯一标识（蛇形命名）
+    display_name    TEXT,                            -- 显示名称
     description     TEXT,                            -- 节点功能描述
-    language        TEXT NOT NULL,                   -- 编程语言: python | go | bash | node
-    code            TEXT NOT NULL,                   -- 节点实现代码
-    mock_code       TEXT NOT NULL,                   -- Mock 测试代码
-    parameters      TEXT NOT NULL,                   -- JSON: 参数定义列表
-    dockerfile      TEXT,                            -- 可选：自定义 Dockerfile
+    version         TEXT,                            -- 版本号
+    author          TEXT,                            -- 作者
+    icon            TEXT,                            -- 图标
+    node_type       TEXT NOT NULL DEFAULT 'code',    -- 节点类型: code | image
+    language        TEXT,                            -- 编程语言: python | go | bash | node（镜像节点可空）
+    code            TEXT,                            -- 节点实现代码（镜像节点可空）
+    entry           TEXT,                            -- 入口文件
     requirements    TEXT,                            -- 可选：依赖列表（如 requirements.txt）
-    tags            TEXT,                            -- 标签，逗号分隔
+    image           TEXT,                            -- 镜像节点：容器镜像
+    parameters      TEXT NOT NULL DEFAULT '[]',      -- JSON: 参数定义列表
+    outputs         TEXT DEFAULT '[]',               -- JSON: 输出定义列表
+    docker_config   TEXT,                            -- JSON: {image, workdir}
+    mock_config     TEXT,                            -- JSON: NodeMockConfig{enabled, entry, code}
+    source_type     TEXT DEFAULT 'manual',           -- 来源类型: git | manual
+    source_url      TEXT,                            -- 来源 Git 仓库地址
+    source_path     TEXT,                            -- 来源本地路径
+    files           TEXT,                            -- JSON: 节点包文件（迁移 005）
+    package_config  TEXT,                            -- JSON: 完整 flowx.json 包配置（迁移 006）
+    tags            TEXT DEFAULT '[]',               -- 标签，JSON 数组
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 索引
+CREATE INDEX idx_nodes_node_type ON nodes(node_type);
 CREATE INDEX idx_nodes_language ON nodes(language);
-CREATE INDEX idx_nodes_tags ON nodes(tags);
+CREATE INDEX idx_nodes_source_type ON nodes(source_type);
 ```
 
 **parameters JSON 结构示例**：
@@ -76,7 +90,6 @@ CREATE TABLE workflows (
     intent          TEXT,                            -- 用户需求原文
     yaml_config     TEXT NOT NULL,                   -- 完整 FlowX YAML 配置
     status          TEXT DEFAULT 'draft',            -- draft | active | archived
-    node_ids        TEXT,                            -- JSON: 引用的节点 ID 列表
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -85,6 +98,8 @@ CREATE TABLE workflows (
 CREATE INDEX idx_workflows_status ON workflows(status);
 CREATE INDEX idx_workflows_created ON workflows(created_at);
 ```
+
+工作流与节点的关联通过 `workflow_nodes` 表维护（见 3.3.3）。
 
 **yaml_config 示例**：
 ```yaml
@@ -111,7 +126,35 @@ nodes:
           - python {{.node.code}}
 ```
 
-### 3.3.3 执行记录 (executions)
+### 3.3.3 工作流节点关联 (workflow_nodes)
+
+维护工作流与节点之间的多对多关联及节点级配置。
+
+```sql
+CREATE TABLE workflow_nodes (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    workflow_id     INTEGER NOT NULL,                -- 关联的工作流 ID
+    node_id         INTEGER NOT NULL,                -- 关联的节点 ID
+    node_name       TEXT NOT NULL,                   -- 节点在工作流中的名称
+    sort_order      INTEGER DEFAULT 0,               -- 排序序号
+    param_override  TEXT DEFAULT '{}',               -- JSON: 参数覆盖
+    condition       TEXT,                            -- 执行条件
+    is_enabled      BOOLEAN DEFAULT 1,               -- 是否启用
+
+    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE,
+    FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE RESTRICT,
+    UNIQUE(workflow_id, node_name)
+);
+
+-- 索引
+CREATE INDEX idx_wf_nodes_workflow ON workflow_nodes(workflow_id);
+CREATE INDEX idx_wf_nodes_node ON workflow_nodes(node_id);
+CREATE INDEX idx_wf_nodes_order ON workflow_nodes(workflow_id, sort_order);
+```
+
+> 注：该表当前在 Go 代码中暂无读写引用，属预留设计。
+
+### 3.3.4 执行记录 (executions)
 
 存储工作流执行历史和结果。
 
@@ -124,7 +167,6 @@ CREATE TABLE executions (
     started_at      DATETIME,
     completed_at    DATETIME,
     duration_ms     INTEGER,
-    logs            TEXT,                            -- 执行日志（聚合，已弃用/备用）
     result          TEXT,                            -- 执行结果摘要（JSON）
     error_message   TEXT,                            -- 错误信息
     error_node_id   TEXT,                            -- 失败节点 ID
@@ -154,7 +196,7 @@ CREATE INDEX idx_executions_created ON executions(created_at);
 }
 ```
 
-### 3.3.4 执行节点状态 (execution_nodes)
+### 3.3.5 执行节点状态 (execution_nodes)
 
 存储每次执行中各节点的详细状态（用于支持运行时监控）。
 
@@ -168,7 +210,6 @@ CREATE TABLE execution_nodes (
     started_at      DATETIME,
     completed_at    DATETIME,
     duration_ms     INTEGER,
-    logs            TEXT,                            -- 节点执行日志
     output          TEXT,                            -- 节点输出结果
     error           TEXT,                            -- 错误信息
     
@@ -181,7 +222,7 @@ CREATE INDEX idx_exec_nodes_status ON execution_nodes(status);
 CREATE UNIQUE INDEX idx_exec_nodes_unique ON execution_nodes(execution_id, node_id);
 ```
 
-### 3.3.5 执行日志 (execution_logs)
+### 3.3.6 执行日志 (execution_logs)
 
 存储执行过程中的详细日志条目，支持实时推送和历史查询。
 
@@ -214,42 +255,7 @@ CREATE INDEX idx_exec_logs_timestamp ON execution_logs(timestamp);
 - `error`：错误信息（节点执行失败）
 - `fatal`：致命错误（系统级异常）
 
-### 3.3.6 AI 配置 (ai_configs)
-
-存储 AI 提供商的配置信息。
-
-```sql
-CREATE TABLE ai_configs (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    provider        TEXT NOT NULL,                   -- openai | anthropic | ollama
-    name            TEXT NOT NULL,                   -- 配置名称（用户自定义）
-    model           TEXT NOT NULL,                   -- 模型名称
-    api_key         TEXT,                            -- API 密钥（加密存储）
-    base_url        TEXT,                            -- 自定义 API 地址
-    temperature     REAL DEFAULT 0.7,                -- 生成温度
-    max_tokens      INTEGER,                         -- 最大 token 数
-    is_active       BOOLEAN DEFAULT 0,               -- 是否为默认配置
-    is_enabled      BOOLEAN DEFAULT 1,               -- 是否启用
-    capabilities    TEXT,                            -- JSON: 模型能力声明
-    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- 索引
-CREATE UNIQUE INDEX idx_ai_configs_active ON ai_configs(is_active) WHERE is_active = 1;
-```
-
-**capabilities JSON 结构**：
-```json
-{
-  "supports_function_calling": true,
-  "supports_json_mode": true,
-  "supports_vision": false,
-  "max_context_length": 128000
-}
-```
-
-### 3.3.6 系统配置 (system_configs)
+### 3.3.7 系统配置 (system_configs)
 
 存储系统级配置参数。
 
@@ -263,54 +269,45 @@ CREATE TABLE system_configs (
 
 -- 默认配置
 INSERT INTO system_configs (key, value, description) VALUES
-('default_executor', 'local', '默认执行器类型'),
-('mock_timeout_sec', '30', 'Mock 测试超时时间（秒）'),
-('execution_timeout_sec', '3600', '工作流执行超时时间（秒）'),
-('max_workflow_history', '100', '保留的最大执行历史数量'),
-('auto_open_browser', 'true', '启动时是否自动打开浏览器'),
-('server_port', '8080', 'HTTP 服务端口'),
+('theme', 'dark', '主题: dark | light | system'),
+('language', 'zh-CN', '界面语言'),
+('auto_save', 'true', '是否自动保存'),
+('auto_save_interval', '30', '自动保存间隔（秒）'),
+('show_notifications', 'true', '是否显示通知'),
+('confirm_before_delete', 'true', '删除前是否确认'),
+('default_node_timeout', '300', '默认节点超时（秒）'),
+('max_concurrent_executions', '5', '最大并发执行数'),
 ('log_retention_days', '30', '执行日志保留天数'),
-('log_max_buffer_size', '1000', '实时日志内存缓冲区大小'),
-('log_auto_scroll', 'true', '日志查看器默认自动滚动');
-```
-
-### 3.3.7 对话历史 (chat_history)
-
-存储用户与 AI 的对话记录。
-
-```sql
-CREATE TABLE chat_history (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id      TEXT NOT NULL,                   -- 会话标识
-    role            TEXT NOT NULL,                   -- user | assistant | system
-    content         TEXT NOT NULL,                   -- 消息内容
-    context_type    TEXT,                            -- node_generate | workflow_generate | general
-    context_id      INTEGER,                         -- 关联的节点或工作流 ID
-    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- 索引
-CREATE INDEX idx_chat_session ON chat_history(session_id, created_at);
-CREATE INDEX idx_chat_context ON chat_history(context_type, context_id);
+('server_port', '8080', 'HTTP 服务端口');
 ```
 
 ## 3.4 实体关系图
 
 ```mermaid
 erDiagram
-    nodes ||--o{ workflows : "被引用"
+    workflows ||--o{ workflow_nodes : "包含"
+    nodes ||--o{ workflow_nodes : "被引用"
     workflows ||--o{ executions : "1:N"
     executions ||--o{ execution_nodes : "1:N"
     executions ||--o{ execution_logs : "1:N"
-    workflows ||--o{ chat_history : "关联对话"
-    nodes ||--o{ chat_history : "关联对话"
 
     nodes {
         int id PK
         string name UK
+        string display_name
+        string node_type
         string language
         text code
+        text entry
+        string image
         text parameters
+        text outputs
+        text docker_config
+        text mock_config
+        string source_type
+        text files
+        text package_config
+        text tags
     }
 
     workflows {
@@ -318,15 +315,25 @@ erDiagram
         string name
         text yaml_config
         string status
-        text node_ids
+    }
+
+    workflow_nodes {
+        int id PK
+        int workflow_id FK
+        int node_id FK
+        string node_name
+        int sort_order
+        text param_override
+        string condition
+        boolean is_enabled
     }
 
     executions {
         int id PK
         int workflow_id FK
         string status
-        text logs
         text result
+        text metadata_json
     }
 
     execution_nodes {
@@ -334,15 +341,7 @@ erDiagram
         int execution_id FK
         string node_id
         string status
-        text logs
-    }
-
-    ai_configs {
-        int id PK
-        string provider
-        string model
-        string api_key
-        boolean is_active
+        text output
     }
 
     execution_logs {
@@ -357,14 +356,11 @@ erDiagram
         datetime timestamp
     }
 
-    chat_history {
-        int id PK
-        string session_id
-        string role
-        text content
-        string context_type
-        int context_id
-        datetime created_at
+    system_configs {
+        string key PK
+        text value
+        string description
+        datetime updated_at
     }
 ```
 
@@ -376,10 +372,12 @@ erDiagram
 
 ```
 migrations/
-├── 001_init.sql                    -- 初始 Schema
-├── 002_remove_ai_mcp.sql           -- 移除 AI/MCP 相关表
-├── 003_execution_nodes_unique.sql  -- execution_nodes 增加唯一索引
-└── 004_execution_metadata.sql      -- executions 增加 metadata_json 字段
+├── 001_init.sql                     -- 初始 Schema
+├── 002_remove_ai_mcp.sql            -- 移除 AI/MCP 相关表
+├── 003_execution_nodes_unique.sql   -- execution_nodes 增加唯一索引
+├── 004_execution_metadata.sql       -- executions 增加 metadata_json 字段
+├── 005_add_node_files.sql           -- nodes 增加 files 字段
+└── 006_add_node_package_config.sql  -- nodes 增加 package_config 字段
 ```
 
 ### 3.5.2 迁移执行逻辑

@@ -6,8 +6,8 @@ Convert markdown files to HTML with mermaid support and fullscreen flowcharts.
 import re
 from pathlib import Path
 
-PLAN_DIR = Path("/workspace/github.com/LerkoX/flowx-studio/plan")
-WEB_DIR = Path("/workspace/github.com/LerkoX/flowx-studio/plan/docs")
+PLAN_DIR = Path(__file__).resolve().parent.parent
+WEB_DIR = Path(__file__).resolve().parent
 
 FILES = [
     ("README.md", "FlowX Studio 技术设计文档"),
@@ -21,6 +21,8 @@ FILES = [
     ("08-runtime.md", "8. 运行时与部署设计"),
     ("09-security.md", "9. 安全与错误处理设计"),
     ("10-core-deps.md", "10. FlowX 核心库依赖评估"),
+    ("11-node-package.md", "11. 节点包规范"),
+    ("IMPLEMENTATION_STATUS.md", "实现状态"),
 ]
 
 

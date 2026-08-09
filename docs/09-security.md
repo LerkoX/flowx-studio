@@ -6,35 +6,24 @@
 
 AI 生成的代码可能包含恶意逻辑，必须通过多层防护确保系统安全。
 
-#### 第一层：输入验证
+#### 第一层：输入校验
 
-- **参数类型检查**：确保输入参数符合声明的类型
-- **参数范围限制**：字符串长度、数值范围等
-- **禁止字符过滤**：过滤可能导致注入的特殊字符
+实际实现包含两类校验（不存在 `validateParam` 参数校验函数）：
 
-```go
-func validateParam(param db.Parameter, value interface{}) error {
-    switch param.Type {
-    case "string":
-        str, ok := value.(string)
-        if !ok {
-            return fmt.Errorf("parameter %s must be string", param.Name)
-        }
-        if len(str) > 10000 {
-            return fmt.Errorf("parameter %s exceeds max length", param.Name)
-        }
-    case "integer":
-        // 验证整数范围和类型
-    }
-    return nil
-}
-```
+1. **工作流 YAML 结构校验**：由 `internal/validator/workflow.go` 对工作流定义做结构校验。
+2. **代码危险模式黑名单**：Mock 执行前对节点代码做危险模式子串匹配（`internal/sandbox/executor.go:217-242,351-398`），包含：
+   - 代码非空与语言白名单校验（python/go/bash/sh/js/ts/ruby/php）
+   - 通用危险模式：`os.system`、`subprocess.*`、`eval(`、`exec(`、`socket.socket`、`urllib.request` 等
+   - Bash 特有危险命令：`rm -rf`、`dd if`、`curl | sh`、`nc -e` 等
+   - 敏感路径文本：`/etc/passwd`、`/root`、`/proc`、`/sys`、`/.ssh` 等
+
+> ⚠️ 该黑名单是**源码文本子串匹配**，可被拼接字符串、编码、变量间接引用等方式绕过，仅作为基础防护。
 
 #### 第二层：Mock 沙箱执行
 
-Mock 测试在隔离环境中运行：
+**Docker 隔离**（规划中，未实现）：
 
-**Docker 隔离**：
+> ⚠️ Docker 隔离未实现。当前实现是在**宿主机上直接创建子进程执行**代码（`internal/sandbox/executor.go:128`），仅配合上节的字符串黑名单。以下为**目标设计**：
 - 使用非 root 用户运行容器
 - 只读根文件系统（read-only rootfs）
 - 禁用网络访问（除非节点明确需要）
@@ -59,7 +48,9 @@ COPY --chown=flowx:flowx script.py .
 CMD ["python", "script.py"]
 ```
 
-**进程隔离（无 Docker 时）**：
+**进程隔离**（规划中，未实现）：
+
+> ⚠️ chroot/降权/seccomp/cgroup 均未实现。当前实现是宿主机直接子进程执行，且子进程通过 `env = os.Environ()` **继承父进程的全部环境变量**（`internal/sandbox/executor.go:132`）——若父进程环境中存在密钥类变量，会被 Mock 代码读取到，这是现状下的实际风险。以下为**目标设计**：
 
 Linux：
 ```go
@@ -78,11 +69,13 @@ cmd.SysProcAttr = &syscall.SysProcAttr{
 
 #### 第三层：文件系统隔离
 
-- 每个 Mock 执行使用独立的临时目录
-- 执行完成后立即清理临时文件
-- 禁止访问系统敏感目录（/etc, /proc, /sys 等）
+- 每个 Mock 执行使用独立的临时目录（`$TMPDIR/flowx_mock_*`），已实现
+- 执行完成后立即清理临时文件，已实现
+- 禁止访问系统敏感目录（/etc, /proc, /sys 等）：**仅为源码文本子串匹配**（`internal/sandbox/executor.go:386-395`），即在代码中出现这些路径字符串时拒绝执行；它**不是系统级文件系统限制**，运行中的代码实际仍可访问这些路径，且黑名单可被绕过
 
-#### 第四层：网络隔离
+#### 第四层：网络隔离（规划中，未实现）
+
+> ⚠️ 未实现系统级网络隔离。当前仅有源码字符串黑名单（`socket.socket`、`urllib.request`、`http.client`、`ftplib`、`smtplib`、`telnetlib` 等，见 `internal/sandbox/executor.go:355-361`），可被绕过。以下为**目标设计**：
 
 - Mock 执行默认禁用网络访问
 - 需要网络的节点在 Docker 中限制为仅允许特定域名
@@ -94,9 +87,9 @@ cmd.SysProcAttr = &syscall.SysProcAttr{
 
 V1 版本为本地单用户应用，暂不需要多用户认证。但需防止外部未授权访问：
 
-- **本地绑定**：默认绑定 `127.0.0.1`，仅本机可访问
-- **可选密码保护**：可通过配置启用密码保护
-- **CORS 限制**：仅允许同源请求
+- **绑定地址**：实际默认绑定 `0.0.0.0`（`internal/config/config.go:42`、`internal/server/server.go:35`、`boot.sh:24`），**对所有网卡开放**。⚠️ 这意味着局域网内其他机器可直接访问 API，生产环境建议显式设置 `--host 127.0.0.1` 或 `FLOWX_STUDIO_SERVER_HOST=127.0.0.1`
+- **可选密码保护**（规划中，未实现）
+- **CORS 限制**：已实现，仅允许 `http://localhost` / `http://127.0.0.1` 来源（`internal/server/server.go:105-122`）
 
 ```go
 // CORS 中间件
@@ -112,9 +105,9 @@ func corsMiddleware(next http.Handler) http.Handler {
 }
 ```
 
-#### 请求限流
+#### 请求限流（规划中，未实现）
 
-防止 API 被滥用：
+> ⚠️ 未实现，代码中不存在 RateLimiter。以下为**目标设计**：
 
 ```go
 type RateLimiter struct {
@@ -154,7 +147,9 @@ func (rl *RateLimiter) Allow(clientID string) bool {
 
 ### 9.1.3 数据安全
 
-#### API Key 加密存储
+#### API Key 加密存储（规划中，未实现/待设计）
+
+> ⚠️ 完全不存在：AI 配置存储（`ai_configs` 表）已删除，代码中没有 crypto 相关包。以下为**待设计**的目标方案：
 
 ```go
 // 使用 AES-GCM 加密
@@ -179,10 +174,10 @@ func encrypt(plaintext string, key []byte) (string, error) {
 }
 ```
 
-#### 加密密钥管理
+#### 加密密钥管理（规划中，未实现/待设计）
 
-- 优先从环境变量 `FLOWX_ENCRYPTION_KEY` 读取
-- 如未设置，自动生成并存储在 `~/.flowx/.key` 中
+- 优先从环境变量 `FLOWX_STUDIO_ENCRYPTION_KEY` 读取（统一使用 `FLOWX_STUDIO` 前缀）
+- 如未设置，自动生成并存储在 `~/.flowx-studio/.key` 中
 - 文件权限设置为 0600（仅所有者可读写）
 
 ### 9.1.4 日志安全
@@ -195,38 +190,31 @@ func encrypt(plaintext string, key []byte) (string, error) {
 
 ### 9.2.1 错误分类
 
+实际使用的 HTTP 状态码仅为 400/404/409/500：
+
 | 类别 | 示例 | 处理策略 |
 |------|------|---------|
 | 用户输入错误 | 参数缺失、格式错误 | 返回 400，提示具体错误 |
 | 资源不存在 | 节点/工作流 ID 不存在 | 返回 404 |
 | 资源冲突 | 节点名称已存在 | 返回 409，建议重命名 |
-| AI 服务错误 | API Key 无效、模型不可用 | 返回 502，记录日志 |
-| AI 生成失败 | 输出格式不符合预期 | 返回 422，返回原始响应 |
 | 执行错误 | 节点执行失败 | 返回 200（执行已记录），详情在结果中 |
 | 内部错误 | 数据库连接失败 | 返回 500，记录详细错误 |
-| 超时错误 | 执行超过时限 | 返回 504，标记执行状态为 failed |
+
+**说明**：
+- 没有 AI 服务，因此 502（AI 服务错误）/422（AI 生成失败）无来源，不会返回。
+- 504 从未返回：Mock 执行超时返回 200，结果中标记 `status: "timeout"`（`internal/sandbox/executor.go:169-175`）。
 
 ### 9.2.2 错误响应格式
 
-遵循 RFC 7807 Problem Details：
+实际实现**不是** RFC 7807，而是统一响应结构（`internal/handler/common.go:10-14,26-31`）：
+
+- 成功响应：`{"code": 200, "data": ..., "message": "success"}`
+- 错误响应：`{"code": <HTTP 状态码>, "message": "<错误描述>"}`（无 `data` 字段）
 
 ```json
 {
-  "type": "https://flowx.dev/errors/validation-error",
-  "title": "Validation Error",
-  "status": 400,
-  "detail": "Invalid request parameters",
-  "instance": "/api/v1/nodes",
-  "errors": [
-    {
-      "field": "name",
-      "message": "Node name is required"
-    },
-    {
-      "field": "language",
-      "message": "Language must be one of: python, go, bash, node"
-    }
-  ]
+  "code": 400,
+  "message": "invalid request body: ..."
 }
 ```
 
@@ -309,7 +297,9 @@ apiClient.interceptors.response.use(
 );
 ```
 
-### 9.2.4 AI 生成失败处理
+### 9.2.4 AI 生成失败处理（规划中，未实现）
+
+> ⚠️ 代码中不存在 `NodeGenerator.GenerateNode`，AI 节点生成功能未实现。以下为**目标设计**。
 
 AI 生成可能失败的场景：
 
@@ -355,26 +345,12 @@ func (g *NodeGenerator) GenerateNode(ctx context.Context, description string, op
 2. **依赖节点失败**：上游节点失败导致下游跳过
 3. **系统错误**：数据库错误、内存不足
 
-**处理策略**：
+**处理策略**（对应实际代码：`WorkflowService`（`internal/service/workflow.go:33`）、`logExecutionError`（workflow.go:318）、`persistRuntimeEvent`（workflow.go:513）、`StartEventBridge`（workflow.go:628））：
 
-```go
-func (s *ExecutionService) handleExecutionError(executionID int64, nodeID string, err error) {
-    // 1. 记录错误
-    s.executionRepo.UpdateNodeError(executionID, nodeID, err.Error())
-    
-    // 2. 更新节点状态
-    s.executionRepo.UpdateNodeStatus(executionID, nodeID, "failed")
-    
-    // 3. 判断是否需要终止整个工作流
-    if isFatalError(err) {
-        s.executionRepo.UpdateStatus(executionID, "failed", time.Now())
-        s.eventBridge.EmitExecutionError(executionID, err)
-    }
-    
-    // 4. 推送错误事件到前端
-    s.eventBridge.EmitNodeError(executionID, nodeID, err)
-}
-```
+1. **记录错误**：`logExecutionError(execID, nodeName, message)` 把节点错误写入 `execution_logs`。
+2. **更新节点状态**：`persistRuntimeEvent` 消费 RuntimeAdapter 的事件，更新 `execution_nodes` 状态为 `failed`。
+3. **汇总执行状态**：执行结束时根据各节点状态解析最终状态（`resolveFinalStatusFromNodes`），更新 `executions` 记录。
+4. **推送错误事件到前端**：`StartEventBridge` 启动的事件桥把事件经 EventBus 推送到 SSE 客户端。
 
 ## 9.3 日志与监控
 
@@ -390,7 +366,7 @@ func (s *ExecutionService) handleExecutionError(executionID int64, nodeID string
 | ERROR | 请求失败、执行错误、外部服务异常 |
 | FATAL | 系统启动失败、数据库连接失败 |
 
-**日志字段规范**：
+**日志字段规范**（规划中，未实现——当前仅标准库 `log.Printf` 控制台输出，无结构化日志）：
 
 ```go
 log.Info("Execution started",
@@ -402,7 +378,9 @@ log.Info("Execution started",
 )
 ```
 
-### 9.3.2 关键指标监控
+### 9.3.2 关键指标监控（规划中，未实现）
+
+> ⚠️ 未实现，无 Prometheus 指标暴露。以下为**目标设计**：
 
 需要监控的关键指标：
 
@@ -419,7 +397,9 @@ log.Info("Execution started",
 | nodes_total | Gauge | 注册节点总数 |
 | workflows_total | Gauge | 工作流总数 |
 
-### 9.3.3 健康检查
+### 9.3.3 健康检查（规划中，未实现）
+
+> ⚠️ 未实现，`GET /api/v1/health` 端点不存在。以下为**目标设计**：
 
 提供健康检查端点：
 
@@ -442,14 +422,16 @@ GET /api/v1/health
 }
 ```
 
-## 9.4 备份与恢复
+## 9.4 备份与恢复（规划中，未实现）
 
-### 9.4.1 自动备份
+> ⚠️ 备份、导出 API 均未实现。以下为**目标设计**。
+
+### 9.4.1 自动备份（规划中，未实现）
 
 - 每次启动时自动创建数据库备份（保留最近 3 个）
 - 数据库文件变化超过 10% 时触发增量备份
 
-### 9.4.2 手动导出
+### 9.4.2 手动导出（规划中，未实现）
 
 提供 API 导出所有数据：
 
@@ -461,22 +443,24 @@ POST /api/v1/export
 
 ### 9.4.3 恢复
 
-通过替换数据库文件恢复：
+通过替换数据库文件恢复（手动操作，无自动化备份）：
 
 ```bash
 # 停止服务
-pkill flowx
+pkill flowx-studio
 
-# 恢复备份
-cp ~/.flowx/flowx.db.backup ~/.flowx/flowx.db
+# 恢复备份（需自行提前备份）
+cp ~/.flowx-studio/studio.db.backup ~/.flowx-studio/studio.db
 
 # 启动服务
-flowx
+flowx-studio server
 ```
 
-## 9.5 安全审计
+## 9.5 安全审计（规划中，未实现）
 
-### 9.5.1 操作审计日志
+> ⚠️ 未实现，数据库中不存在 `audit_logs` 表。以下为**目标设计**。
+
+### 9.5.1 操作审计日志（规划中，未实现）
 
 记录所有关键操作：
 
@@ -493,7 +477,7 @@ CREATE TABLE audit_logs (
 );
 ```
 
-### 9.5.2 审计事件
+### 9.5.2 审计事件（规划中，未实现）
 
 需要审计的操作：
 - 节点创建、删除

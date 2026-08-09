@@ -53,6 +53,8 @@
 <li><a href="08-runtime.html">8. 运行时与部署设计</a></li>
 <li><a href="09-security.html" class="active">9. 安全与错误处理设计</a></li>
 <li><a href="10-core-deps.html">10. FlowX 核心库依赖评估</a></li>
+<li><a href="11-node-package.html">11. 节点包规范</a></li>
+<li><a href="IMPLEMENTATION_STATUS.html">实现状态</a></li>
 </ul>
 </nav>
         <main class="content">
@@ -65,34 +67,25 @@
 
 <p>AI 生成的代码可能包含恶意逻辑，必须通过多层防护确保系统安全。</p>
 
-<h4 id="第一层输入验证">第一层：输入验证</h4>
+<h4 id="第一层输入校验">第一层：输入校验</h4>
 
-<ul>
-<li><strong>参数类型检查</strong>：确保输入参数符合声明的类型</li>
-<li><strong>参数范围限制</strong>：字符串长度、数值范围等</li>
-<li><strong>禁止字符过滤</strong>：过滤可能导致注入的特殊字符</li>
-</ul>
-<pre><code class="language-go">func validateParam(param db.Parameter, value interface{}) error {
-    switch param.Type {
-    case "string":
-        str, ok := value.(string)
-        if !ok {
-            return fmt.Errorf("parameter %s must be string", param.Name)
-        }
-        if len(str) &gt; 10000 {
-            return fmt.Errorf("parameter %s exceeds max length", param.Name)
-        }
-    case "integer":
-        // 验证整数范围和类型
-    }
-    return nil
-}</code></pre>
+<p>实际实现包含两类校验（不存在 <code>validateParam</code> 参数校验函数）：</p>
+
+<ol>
+<li><strong>工作流 YAML 结构校验</strong>：由 <code>internal/validator/workflow.go</code> 对工作流定义做结构校验。</li>
+<li><strong>代码危险模式黑名单</strong>：Mock 执行前对节点代码做危险模式子串匹配（<code>internal/sandbox/executor.go:217-242,351-398</code>），包含：</li>
+<li>代码非空与语言白名单校验（python/go/bash/sh/js/ts/ruby/php）</li>
+<li>通用危险模式：<code>os.system</code>、<code>subprocess.*</code>、<code>eval(</code>、<code>exec(</code>、<code>socket.socket</code>、<code>urllib.request</code> 等</li>
+<li>Bash 特有危险命令：<code>rm -rf</code>、<code>dd if</code>、<code>curl | sh</code>、<code>nc -e</code> 等</li>
+<li>敏感路径文本：<code>/etc/passwd</code>、<code>/root</code>、<code>/proc</code>、<code>/sys</code>、<code>/.ssh</code> 等</li>
+</ol>
+<blockquote>⚠️ 该黑名单是<strong>源码文本子串匹配</strong>，可被拼接字符串、编码、变量间接引用等方式绕过，仅作为基础防护。</blockquote>
 
 <h4 id="第二层mock-沙箱执行">第二层：Mock 沙箱执行</h4>
 
-<p>Mock 测试在隔离环境中运行：</p>
+<p><strong>Docker 隔离</strong>（规划中，未实现）：</p>
 
-<p><strong>Docker 隔离</strong>：</p>
+<blockquote>⚠️ Docker 隔离未实现。当前实现是在<strong>宿主机上直接创建子进程执行</strong>代码（<code>internal/sandbox/executor.go:128</code>），仅配合上节的字符串黑名单。以下为<strong>目标设计</strong>：</blockquote>
 <ul>
 <li>使用非 root 用户运行容器</li>
 <li>只读根文件系统（read-only rootfs）</li>
@@ -116,7 +109,9 @@ COPY --chown=flowx:flowx script.py .
 # 只读执行
 CMD ["python", "script.py"]</code></pre>
 
-<p><strong>进程隔离（无 Docker 时）</strong>：</p>
+<p><strong>进程隔离</strong>（规划中，未实现）：</p>
+
+<blockquote>⚠️ chroot/降权/seccomp/cgroup 均未实现。当前实现是宿主机直接子进程执行，且子进程通过 <code>env = os.Environ()</code> <strong>继承父进程的全部环境变量</strong>（<code>internal/sandbox/executor.go:132</code>）——若父进程环境中存在密钥类变量，会被 Mock 代码读取到，这是现状下的实际风险。以下为<strong>目标设计</strong>：</blockquote>
 
 <p>Linux：</p>
 <pre><code class="language-go">// 使用 seccomp 限制系统调用
@@ -134,11 +129,13 @@ cmd.SysProcAttr = &amp;syscall.SysProcAttr{
 <h4 id="第三层文件系统隔离">第三层：文件系统隔离</h4>
 
 <ul>
-<li>每个 Mock 执行使用独立的临时目录</li>
-<li>执行完成后立即清理临时文件</li>
-<li>禁止访问系统敏感目录（/etc, /proc, /sys 等）</li>
+<li>每个 Mock 执行使用独立的临时目录（<code>$TMPDIR/flowx_mock_*</code>），已实现</li>
+<li>执行完成后立即清理临时文件，已实现</li>
+<li>禁止访问系统敏感目录（/etc, /proc, /sys 等）：<strong>仅为源码文本子串匹配</strong>（<code>internal/sandbox/executor.go:386-395</code>），即在代码中出现这些路径字符串时拒绝执行；它<strong>不是系统级文件系统限制</strong>，运行中的代码实际仍可访问这些路径，且黑名单可被绕过</li>
 </ul>
-<h4 id="第四层网络隔离">第四层：网络隔离</h4>
+<h4 id="第四层网络隔离规划中未实现">第四层：网络隔离（规划中，未实现）</h4>
+
+<blockquote>⚠️ 未实现系统级网络隔离。当前仅有源码字符串黑名单（<code>socket.socket</code>、<code>urllib.request</code>、<code>http.client</code>、<code>ftplib</code>、<code>smtplib</code>、<code>telnetlib</code> 等，见 <code>internal/sandbox/executor.go:355-361</code>），可被绕过。以下为<strong>目标设计</strong>：</blockquote>
 
 <ul>
 <li>Mock 执行默认禁用网络访问</li>
@@ -152,9 +149,9 @@ cmd.SysProcAttr = &amp;syscall.SysProcAttr{
 <p>V1 版本为本地单用户应用，暂不需要多用户认证。但需防止外部未授权访问：</p>
 
 <ul>
-<li><strong>本地绑定</strong>：默认绑定 <code>127.0.0.1</code>，仅本机可访问</li>
-<li><strong>可选密码保护</strong>：可通过配置启用密码保护</li>
-<li><strong>CORS 限制</strong>：仅允许同源请求</li>
+<li><strong>绑定地址</strong>：实际默认绑定 <code>0.0.0.0</code>（<code>internal/config/config.go:42</code>、<code>internal/server/server.go:35</code>、<code>boot.sh:24</code>），<strong>对所有网卡开放</strong>。⚠️ 这意味着局域网内其他机器可直接访问 API，生产环境建议显式设置 <code>--host 127.0.0.1</code> 或 <code>FLOWX_STUDIO_SERVER_HOST=127.0.0.1</code></li>
+<li><strong>可选密码保护</strong>（规划中，未实现）</li>
+<li><strong>CORS 限制</strong>：已实现，仅允许 <code>http://localhost</code> / <code>http://127.0.0.1</code> 来源（<code>internal/server/server.go:105-122</code>）</li>
 </ul>
 <pre><code class="language-go">// CORS 中间件
 func corsMiddleware(next http.Handler) http.Handler {
@@ -168,9 +165,9 @@ func corsMiddleware(next http.Handler) http.Handler {
     })
 }</code></pre>
 
-<h4 id="请求限流">请求限流</h4>
+<h4 id="请求限流规划中未实现">请求限流（规划中，未实现）</h4>
 
-<p>防止 API 被滥用：</p>
+<blockquote>⚠️ 未实现，代码中不存在 RateLimiter。以下为<strong>目标设计</strong>：</blockquote>
 
 <pre><code class="language-go">type RateLimiter struct {
     requests map[string][]time.Time
@@ -209,7 +206,9 @@ func (rl *RateLimiter) Allow(clientID string) bool {
 </ul>
 <h3 id="913-数据安全">9.1.3 数据安全</h3>
 
-<h4 id="api-key-加密存储">API Key 加密存储</h4>
+<h4 id="api-key-加密存储规划中未实现待设计">API Key 加密存储（规划中，未实现/待设计）</h4>
+
+<blockquote>⚠️ 完全不存在：AI 配置存储（<code>ai_configs</code> 表）已删除，代码中没有 crypto 相关包。以下为<strong>待设计</strong>的目标方案：</blockquote>
 
 <pre><code class="language-go">// 使用 AES-GCM 加密
 func encrypt(plaintext string, key []byte) (string, error) {
@@ -232,11 +231,11 @@ func encrypt(plaintext string, key []byte) (string, error) {
     return base64.StdEncoding.EncodeToString(ciphertext), nil
 }</code></pre>
 
-<h4 id="加密密钥管理">加密密钥管理</h4>
+<h4 id="加密密钥管理规划中未实现待设计">加密密钥管理（规划中，未实现/待设计）</h4>
 
 <ul>
-<li>优先从环境变量 <code>FLOWX_ENCRYPTION_KEY</code> 读取</li>
-<li>如未设置，自动生成并存储在 <code>~/.flowx/.key</code> 中</li>
+<li>优先从环境变量 <code>FLOWX_STUDIO_ENCRYPTION_KEY</code> 读取（统一使用 <code>FLOWX_STUDIO</code> 前缀）</li>
+<li>如未设置，自动生成并存储在 <code>~/.flowx-studio/.key</code> 中</li>
 <li>文件权限设置为 0600（仅所有者可读写）</li>
 </ul>
 <h3 id="914-日志安全">9.1.4 日志安全</h3>
@@ -249,6 +248,8 @@ func encrypt(plaintext string, key []byte) (string, error) {
 <h2 id="92-错误处理设计">9.2 错误处理设计</h2>
 
 <h3 id="921-错误分类">9.2.1 错误分类</h3>
+
+<p>实际使用的 HTTP 状态码仅为 400/404/409/500：</p>
 
 <table>
 <thead>
@@ -275,16 +276,6 @@ func encrypt(plaintext string, key []byte) (string, error) {
 <td>返回 409，建议重命名</td>
 </tr>
 <tr>
-<td>AI 服务错误</td>
-<td>API Key 无效、模型不可用</td>
-<td>返回 502，记录日志</td>
-</tr>
-<tr>
-<td>AI 生成失败</td>
-<td>输出格式不符合预期</td>
-<td>返回 422，返回原始响应</td>
-</tr>
-<tr>
 <td>执行错误</td>
 <td>节点执行失败</td>
 <td>返回 200（执行已记录），详情在结果中</td>
@@ -294,34 +285,25 @@ func encrypt(plaintext string, key []byte) (string, error) {
 <td>数据库连接失败</td>
 <td>返回 500，记录详细错误</td>
 </tr>
-<tr>
-<td>超时错误</td>
-<td>执行超过时限</td>
-<td>返回 504，标记执行状态为 failed</td>
-</tr>
 </tbody>
 </table>
 
+<p><strong>说明</strong>：</p>
+<ul>
+<li>没有 AI 服务，因此 502（AI 服务错误）/422（AI 生成失败）无来源，不会返回。</li>
+<li>504 从未返回：Mock 执行超时返回 200，结果中标记 <code>status: "timeout"</code>（<code>internal/sandbox/executor.go:169-175</code>）。</li>
+</ul>
 <h3 id="922-错误响应格式">9.2.2 错误响应格式</h3>
 
-<p>遵循 RFC 7807 Problem Details：</p>
+<p>实际实现<strong>不是</strong> RFC 7807，而是统一响应结构（<code>internal/handler/common.go:10-14,26-31</code>）：</p>
 
+<ul>
+<li>成功响应：<code>{"code": 200, "data": ..., "message": "success"}</code></li>
+<li>错误响应：<code>{"code": &lt;HTTP 状态码&gt;, "message": "&lt;错误描述&gt;"}</code>（无 <code>data</code> 字段）</li>
+</ul>
 <pre><code class="language-json">{
-  "type": "https://flowx.dev/errors/validation-error",
-  "title": "Validation Error",
-  "status": 400,
-  "detail": "Invalid request parameters",
-  "instance": "/api/v1/nodes",
-  "errors": [
-    {
-      "field": "name",
-      "message": "Node name is required"
-    },
-    {
-      "field": "language",
-      "message": "Language must be one of: python, go, bash, node"
-    }
-  ]
+  "code": 400,
+  "message": "invalid request body: ..."
 }</code></pre>
 
 <h3 id="923-前端错误处理">9.2.3 前端错误处理</h3>
@@ -399,7 +381,9 @@ apiClient.interceptors.response.use(
   }
 );</code></pre>
 
-<h3 id="924-ai-生成失败处理">9.2.4 AI 生成失败处理</h3>
+<h3 id="924-ai-生成失败处理规划中未实现">9.2.4 AI 生成失败处理（规划中，未实现）</h3>
+
+<blockquote>⚠️ 代码中不存在 <code>NodeGenerator.GenerateNode</code>，AI 节点生成功能未实现。以下为<strong>目标设计</strong>。</blockquote>
 
 <p>AI 生成可能失败的场景：</p>
 
@@ -445,25 +429,14 @@ apiClient.interceptors.response.use(
 <li><strong>依赖节点失败</strong>：上游节点失败导致下游跳过</li>
 <li><strong>系统错误</strong>：数据库错误、内存不足</li>
 </ol>
-<p><strong>处理策略</strong>：</p>
+<p><strong>处理策略</strong>（对应实际代码：<code>WorkflowService</code>（<code>internal/service/workflow.go:33</code>）、<code>logExecutionError</code>（workflow.go:318）、<code>persistRuntimeEvent</code>（workflow.go:513）、<code>StartEventBridge</code>（workflow.go:628））：</p>
 
-<pre><code class="language-go">func (s *ExecutionService) handleExecutionError(executionID int64, nodeID string, err error) {
-    // 1. 记录错误
-    s.executionRepo.UpdateNodeError(executionID, nodeID, err.Error())
-    
-    // 2. 更新节点状态
-    s.executionRepo.UpdateNodeStatus(executionID, nodeID, "failed")
-    
-    // 3. 判断是否需要终止整个工作流
-    if isFatalError(err) {
-        s.executionRepo.UpdateStatus(executionID, "failed", time.Now())
-        s.eventBridge.EmitExecutionError(executionID, err)
-    }
-    
-    // 4. 推送错误事件到前端
-    s.eventBridge.EmitNodeError(executionID, nodeID, err)
-}</code></pre>
-
+<ol>
+<li><strong>记录错误</strong>：<code>logExecutionError(execID, nodeName, message)</code> 把节点错误写入 <code>execution_logs</code>。</li>
+<li><strong>更新节点状态</strong>：<code>persistRuntimeEvent</code> 消费 RuntimeAdapter 的事件，更新 <code>execution_nodes</code> 状态为 <code>failed</code>。</li>
+<li><strong>汇总执行状态</strong>：执行结束时根据各节点状态解析最终状态（<code>resolveFinalStatusFromNodes</code>），更新 <code>executions</code> 记录。</li>
+<li><strong>推送错误事件到前端</strong>：<code>StartEventBridge</code> 启动的事件桥把事件经 EventBus 推送到 SSE 客户端。</li>
+</ol>
 <h2 id="93-日志与监控">9.3 日志与监控</h2>
 
 <h3 id="931-日志规范">9.3.1 日志规范</h3>
@@ -501,7 +474,7 @@ apiClient.interceptors.response.use(
 </tbody>
 </table>
 
-<p><strong>日志字段规范</strong>：</p>
+<p><strong>日志字段规范</strong>（规划中，未实现——当前仅标准库 <code>log.Printf</code> 控制台输出，无结构化日志）：</p>
 
 <pre><code class="language-go">log.Info("Execution started",
     "execution_id", executionID,
@@ -511,7 +484,9 @@ apiClient.interceptors.response.use(
     "timestamp", time.Now().UTC(),
 )</code></pre>
 
-<h3 id="932-关键指标监控">9.3.2 关键指标监控</h3>
+<h3 id="932-关键指标监控规划中未实现">9.3.2 关键指标监控（规划中，未实现）</h3>
+
+<blockquote>⚠️ 未实现，无 Prometheus 指标暴露。以下为<strong>目标设计</strong>：</blockquote>
 
 <p>需要监控的关键指标：</p>
 
@@ -577,7 +552,9 @@ apiClient.interceptors.response.use(
 </tbody>
 </table>
 
-<h3 id="933-健康检查">9.3.3 健康检查</h3>
+<h3 id="933-健康检查规划中未实现">9.3.3 健康检查（规划中，未实现）</h3>
+
+<blockquote>⚠️ 未实现，<code>GET /api/v1/health</code> 端点不存在。以下为<strong>目标设计</strong>：</blockquote>
 
 <p>提供健康检查端点：</p>
 
@@ -596,15 +573,17 @@ apiClient.interceptors.response.use(
   }
 }</code></pre>
 
-<h2 id="94-备份与恢复">9.4 备份与恢复</h2>
+<h2 id="94-备份与恢复规划中未实现">9.4 备份与恢复（规划中，未实现）</h2>
 
-<h3 id="941-自动备份">9.4.1 自动备份</h3>
+<blockquote>⚠️ 备份、导出 API 均未实现。以下为<strong>目标设计</strong>。</blockquote>
+
+<h3 id="941-自动备份规划中未实现">9.4.1 自动备份（规划中，未实现）</h3>
 
 <ul>
 <li>每次启动时自动创建数据库备份（保留最近 3 个）</li>
 <li>数据库文件变化超过 10% 时触发增量备份</li>
 </ul>
-<h3 id="942-手动导出">9.4.2 手动导出</h3>
+<h3 id="942-手动导出规划中未实现">9.4.2 手动导出（规划中，未实现）</h3>
 
 <p>提供 API 导出所有数据：</p>
 
@@ -614,20 +593,22 @@ apiClient.interceptors.response.use(
 
 <h3 id="943-恢复">9.4.3 恢复</h3>
 
-<p>通过替换数据库文件恢复：</p>
+<p>通过替换数据库文件恢复（手动操作，无自动化备份）：</p>
 
 <pre><code class="language-bash"># 停止服务
-pkill flowx
+pkill flowx-studio
 
-# 恢复备份
-cp ~/.flowx/flowx.db.backup ~/.flowx/flowx.db
+# 恢复备份（需自行提前备份）
+cp ~/.flowx-studio/studio.db.backup ~/.flowx-studio/studio.db
 
 # 启动服务
-flowx</code></pre>
+flowx-studio server</code></pre>
 
-<h2 id="95-安全审计">9.5 安全审计</h2>
+<h2 id="95-安全审计规划中未实现">9.5 安全审计（规划中，未实现）</h2>
 
-<h3 id="951-操作审计日志">9.5.1 操作审计日志</h3>
+<blockquote>⚠️ 未实现，数据库中不存在 <code>audit_logs</code> 表。以下为<strong>目标设计</strong>。</blockquote>
+
+<h3 id="951-操作审计日志规划中未实现">9.5.1 操作审计日志（规划中，未实现）</h3>
 
 <p>记录所有关键操作：</p>
 
@@ -642,7 +623,7 @@ flowx</code></pre>
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );</code></pre>
 
-<h3 id="952-审计事件">9.5.2 审计事件</h3>
+<h3 id="952-审计事件规划中未实现">9.5.2 审计事件（规划中，未实现）</h3>
 
 <p>需要审计的操作：</p>
 <ul>

@@ -1,7 +1,7 @@
 # FlowX Studio 实现状态跟踪文档
 
 > 本文档记录 FlowX Studio 各模块的实现状态，区分「已实现」和「待实现」功能。
-> 最后更新：2026-06-08
+> 最后更新：2026-08-02
 
 ---
 
@@ -24,7 +24,6 @@
 
 ### 仍在完善 / V2 目标
 - 真正的 `mermaid` npm 库渲染（当前为手写 `stateDiagram-v2` 解析器）。
-- 工作流执行时 YAML 注入节点真实代码（目前节点代码在 YAML 中占位）。
 - Docker 沙箱与请求限流等安全增强。
 
 ---
@@ -36,13 +35,13 @@
 | 1 | 项目概述 | ✅ 已完成 | 前端 Phase 1-5 + 后端 V1 已完成 |
 | 2 | 系统架构 | ✅ 已完成 | 目录结构、模块划分、依赖关系已落地 |
 | 3 | 数据库设计 | ✅ 已完成 | SQLite Schema + 自动迁移已实现 |
-| 4 | API 设计 | ✅ 已完成 | 基础 CRUD + AI Provider 真实调用 + FlowX Runtime 集成已完成 |
+| 4 | API 设计 | ✅ 已完成 | 基础 CRUD + FlowX Runtime 集成已完成 |
 | 5 | 前端设计 | ✅ 已完成 | React + TS + Vite 前端已完成并构建 |
-| 6 | AI 服务层 | ✅ 已完成 | OpenAI/Anthropic/Ollama Provider + SSE 流式已实现 |
+| 6 | AI 服务层 | ❌ 已移除 | AI Provider/对话模块已删除；06 章内容转向 MCP 服务端 |
 | 7 | 节点系统 | ✅ 已完成 | CRUD + Mock 子进程执行已实现 |
 | 8 | FlowX 运行时 | ✅ 已完成 | RuntimeAdapter + EventBridge + LogPusher 已实现 |
 | 9 | 运行时与部署 | ✅ 已完成 | 单二进制 + go:embed + Cobra CLI 已完成 |
-| 10 | 安全设计 | 🟡 部分实现 | 加密 + 黑名单已完成，完整沙箱待实现 |
+| 10 | 安全设计 | 🟡 部分实现 | CORS 限制 + Mock 代码安全校验已实现，请求限流/沙箱待实现 |
 | 11 | 核心库依赖 | ✅ 已完成 | FlowX 引擎接口调研完成，replace 引用已配置 |
 | 12 | 节点包规范 | 🟡 部分实现 | `flowx.json` 导入、Mock 多文件、运行时展开已实现；工作流节点镜像执行待 FlowX 核心增强 |
 | 13 | MCP 服务端工具 | 🟡 部分实现 | 新增 `flowx-studio mcp` 子命令；`server` 仅保留 HTTP；SQLite WAL 支持多会话并发 |
@@ -58,13 +57,12 @@
 - [x] 目录结构 (`cmd/`, `internal/*`, `migrations/`)
 - [x] SQLite 数据库连接 (`modernc.org/sqlite`，纯 Go，无 CGO)
 - [x] 自动迁移系统 (`schema_migrations` 表 + 版本化 SQL 脚本)
-- [x] AES-GCM 加密模块 (`internal/crypto/crypto.go`)
 - [x] 配置加载 (Cobra + Viper，支持命令行/环境变量/配置文件)
 - [x] Gin HTTP 服务器 + CORS 中间件
 - [x] 统一 API 响应格式 (`{code, data, message}`)
 - [x] `go:embed` 嵌入前端资源
 - [x] SPA fallback 到 `index.html`
-- [x] Cobra CLI (`server` 默认命令、`version` 命令)
+- [x] Cobra CLI（`server` / `mcp` 子命令；**无 `version` 子命令**。已知问题：`Makefile` 的 `version` 目标调用 `./flowx-studio version` 会失败）
 - [x] Makefile (`build`, `run`, `clean`)
 
 #### 2. 数据模型
@@ -72,8 +70,7 @@
 - [x] Workflow 模型
 - [x] WorkflowNode 关联表模型
 - [x] Execution / ExecutionNode / ExecutionLog 模型
-- [x] AIConfig / MCPConfig / SystemConfig 模型
-- [x] ChatMessage 模型
+- [x] SystemConfig 模型
 
 #### 3. 节点管理 API
 - [x] `GET /api/v1/nodes` — 列表 + 分页 + 过滤（language/tag/search/node_type）
@@ -81,15 +78,10 @@
 - [x] `GET /api/v1/nodes/:id` — 获取详情
 - [x] `PUT /api/v1/nodes/:id` — 更新节点
 - [x] `DELETE /api/v1/nodes/:id` — 删除节点
-- [x] `POST /api/v1/nodes/:id/mock` — Mock 测试 API（V1 占位）
+- [x] `POST /api/v1/nodes/:id/mock` — Mock 测试 API（真实子进程执行）
 
 #### 4. 配置管理 API
-- [x] `GET/POST/PUT/DELETE /api/v1/config/ai` — AI 配置 CRUD
-- [x] `GET/POST/PUT/DELETE /api/v1/config/mcp` — MCP 配置 CRUD
 - [x] `GET/PUT /api/v1/config/system` — 系统配置
-- [x] `api_key` AES-GCM 加密存储，列表接口脱敏
-- [x] `auth_header_value` AES-GCM 加密存储
-- [x] MCP 本地命令黑名单校验（默认黑名单 + 可配置）
 
 #### 5. 工作流 API
 - [x] `GET/POST/PUT/DELETE /api/v1/workflows` — 工作流 CRUD
@@ -99,19 +91,16 @@
 - [x] `GET /api/v1/executions/:id/stream` — SSE 实时日志流（FlowX Runtime 真实事件）
 - [x] `GET /api/v1/executions/:id/logs` — 查询执行日志
 
-#### 6. AI 对话 API
-- [x] `POST /api/v1/ai/chat` — SSE 流式对话（V1 模拟响应）
-- [x] `GET /api/v1/ai/chat/:session_id/history` — 对话历史
-- [x] `POST /api/v1/ai/generate-node` — SSE 流式生成节点（V1 模拟）
-- [x] `POST /api/v1/ai/generate-workflow` — SSE 流式生成工作流（V1 模拟）
-- [x] 对话历史持久化到 `chat_history` 表
+#### 6. AI 对话 API — ❌ 已移除
+
+AI 对话相关 API（`/api/v1/ai/chat`、`generate-node`、`generate-workflow`、`chat_history` 表）已随架构调整全部删除。
 
 #### 7. 前端服务层
 - [x] `web/src/services/api.ts` — axios 统一客户端 + 响应拦截器
 - [x] `web/src/services/nodeService.ts` — 节点 API 封装
 - [x] `web/src/services/configService.ts` — 配置 API 封装
 - [x] `web/src/services/workflowService.ts` — 工作流 + 执行 API 封装
-- [x] `web/src/services/aiService.ts` — AI 对话 SSE 流式封装
+- [x] `web/src/services/eventService.ts` — SSE 事件订阅封装
 - [x] `web/src/stores/nodeStore.ts` — 替换 mock 为真实 API
 - [x] `web/src/stores/settingsStore.ts` — 替换 mock 为真实 API
 
@@ -119,17 +108,9 @@
 
 ### 🟡 部分实现 / V1 占位
 
-#### 1. AI Provider 真实调用
-- [x] Provider 接口设计（文档中已定义）
-- [x] SSE 流式响应框架（事件推送机制）
-- [x] **OpenAI Provider 真实 HTTP 调用** (`/v1/chat/completions`，覆盖 OpenAI/Ollama/Custom)
-- [x] **Anthropic Provider 真实 HTTP 调用** (`/v1/messages`)
-- [x] **Ollama Provider 真实 HTTP 调用** (`/api/chat`)
-- [x] 重试机制（指数退避）
-- [ ] 故障转移（主模型失败切换备用）
-- [ ] Token 使用量统计
+#### 1. AI Provider 真实调用 — ❌ 已移除
 
-**当前行为**：AI 对话调用真实 LLM API，支持 SSE 流式返回。
+AI Provider（OpenAI/Anthropic/Ollama）与 AI Service 层已随架构调整全部删除（原 `internal/ai` 已不存在）。
 
 #### 2. FlowX 引擎集成
 - [x] `replace github.com/LerkoX/flowx => ../flowx` 已配置
@@ -140,8 +121,8 @@
 - [x] **RuntimeAdapter 真实实现** (`internal/runtime/adapter.go`)
 - [x] **EventBridge 真实实现** (Listener → SSE 桥接)
 - [x] **LogPusher 真实实现** (logger.Pusher 接口实现)
-- [ ] 工作流执行时 YAML 配置注入节点代码
-- [ ] 执行状态实时持久化 (`executions`, `execution_nodes`, `execution_logs`)
+- [x] 工作流执行时 YAML 配置注入节点代码（`workflow.go` 调用 `runtime.ExpandWorkflowConfig` 展开 `nodeRef`）
+- [x] 执行状态实时持久化 (`executions`, `execution_nodes`, `execution_logs`，见 `workflow.go` 执行生命周期)
 
 **当前行为**：工作流执行调用 FlowX Runtime，`workflow_handler.go` 已接入真实适配器。
 
@@ -156,27 +137,19 @@
 
 **当前行为**：Mock 测试真实执行节点代码，支持 Python/Go/Bash/JS/TS/Ruby/PHP。
 
-#### 4. MCP 连接管理
-- [x] MCP 配置 CRUD + 加密存储
-- [x] 本地命令黑名单校验
-- [x] **本地命令模式真实启动** (`os/exec` 启动 MCP server + stdin/stdout JSON-RPC)
-- [x] **远程 SSE 模式真实连接** (HTTP SSE 长连接 + 事件解析)
-- [x] **MCP 工具发现与调用** (tools/list + tools/call)
-- [x] **连接状态心跳检测** (30s 间隔)
+#### 4. MCP 连接管理 — ❌ 已移除
 
-**当前行为**：MCP 配置可建立真实连接，支持本地命令和远程 SSE 两种模式。
+外部 MCP 客户端连接管理（配置 CRUD、本地命令/远程 SSE 连接、工具发现与调用，原 `internal/mcp`）已随架构调整全部删除。保留的是 **MCP 服务端** 能力（`internal/mcpserver`，见下文「内部 MCP 服务端工具」）。
 
 #### 5. 日志系统
 - [x] `execution_logs` 表结构
 - [x] 日志查询 API
-- [x] SSE 日志流端点（模拟事件）
-- [ ] **真实日志收集** (FlowX `logger.Pusher` 桥接)
+- [x] **真实 SSE 日志流**（FlowX Runtime 事件桥接，`adapter.go` EventBridge → SSE）
+- [x] **真实日志收集** (FlowX `logger.Pusher` 桥接，`adapter.go` LogPusher)
 - [ ] **内存环形缓冲区** (每个执行 1000 条)
 - [ ] **日志自动清理** (按保留天数)
 
 #### 6. 安全增强
-- [x] API Key 加密存储 (AES-GCM)
-- [x] MCP 命令黑名单
 - [x] CORS 本地来源限制
 - [ ] **请求限流** (AI API 10/min, 其他 100/min)
 - [ ] **参数输入验证** (类型/长度/范围检查)
@@ -184,13 +157,13 @@
 - [ ] **审计日志** (`audit_logs` 表)
 
 #### 7. 其他 V1 占位
-- [ ] 自动打开浏览器 (`openBrowser` 函数为空)
-- [ ] 单实例 PID 文件锁
+- [ ] 自动打开浏览器（未实现；配置项 `auto_open_browser` 已预留但未接线）
+- [x] 单实例 PID 文件锁（`internal/singleton/lock.go`，`main.go` 中 server 启动时获取）
 - [ ] 数据备份与恢复 API
 - [ ] 日志导出 (`POST /api/v1/executions/:id/logs/export`)
 - [ ] 工作流 Mock 执行 (`POST /api/v1/workflows/:id/mock`)
 
-#### 5. 内部 MCP 服务端工具
+#### 8. 内部 MCP 服务端工具
 - [x] `stdio` JSON-RPC 2.0 MCP 服务 (`internal/mcpserver`)
 - [x] 工具列表：`create_pipeline`、`update_pipeline`、`delete_pipeline`、`list_pipelines`、`run_pipeline`、`import_node`、`delete_node`、`list_nodes`
 - [x] `import_node` 支持从 `git` / `folder` 读取 `flowx.json` 并导入节点包
@@ -246,53 +219,79 @@
 ### 后端已创建文件
 ```
 flowx-studio/
-├── cmd/flowx-studio/main.go          # CLI 入口
-├── internal/
-│   ├── server/server.go              # Gin HTTP 服务器
+├── cmd/flowx-studio/main.go          # CLI 入口（server / mcp 子命令）
+├── internal/                         # 共 12 个包
+│   ├── server/server.go              # Gin HTTP 服务器 + go:embed 前端资源
 │   ├── handler/
 │   │   ├── common.go                 # 统一响应
-│   │   ├── node_handler.go           # 节点 API
-│   │   ├── config_handler.go         # 配置 API
-│   │   ├── mcp_handler.go            # MCP 连接管理 API
+│   │   ├── node_handler.go           # 节点 API（含 POST /nodes/import）
+│   │   ├── config_handler.go         # 系统配置 API
 │   │   ├── workflow_handler.go       # 工作流 + 执行 API
-│   │   └── ai_handler.go             # AI 对话 API
-│   ├── ai/
-│   │   ├── provider.go               # OpenAI/Anthropic/Ollama Provider
-│   │   └── service.go                # AI Service + Prompt 模板 + 重试
+│   │   └── event_handler.go          # SSE 事件订阅 API
 │   ├── runtime/
-│   │   └── adapter.go                # FlowX RuntimeAdapter + EventBridge + LogPusher
+│   │   ├── adapter.go                # FlowX RuntimeAdapter + EventBridge + LogPusher
+│   │   └── node_expander.go          # 节点包 → NodeConfig 运行时展开
 │   ├── sandbox/
-│   │   └── executor.go               # 子进程沙箱执行器 (os/exec + 安全校验)
-│   ├── mcp/
-│   │   └── manager.go                # MCP 连接管理器 (本地命令 + 远程 SSE)
-│   ├── db/db.go                      # SQLite + 迁移
+│   │   └── executor.go               # 子进程沙箱执行器 (os/exec + 安全校验 + 多文件写入)
+│   ├── mcpserver/
+│   │   ├── server.go                 # stdio JSON-RPC 2.0 MCP 服务
+│   │   ├── tools.go                  # 8 个 MCP 工具实现
+│   │   └── import_node_test.go
+│   ├── service/
+│   │   ├── node.go                   # 节点 CRUD + MockTest
+│   │   ├── node_import.go            # flowx.json 节点包导入
+│   │   ├── node_import_test.go
+│   │   ├── node_list_test.go
+│   │   └── workflow.go               # 工作流执行 + ExpandWorkflowConfig 调用
+│   ├── event/bus.go                  # 进程内事件总线
+│   ├── singleton/lock.go             # 单实例 PID 文件锁
+│   ├── validator/workflow.go         # 工作流 YAML 校验
+│   ├── db/
+│   │   ├── db.go                     # SQLite + 自动迁移
+│   │   └── migrations/               # 迁移脚本 001-006
 │   ├── model/model.go                # 所有数据模型
-│   ├── crypto/crypto.go              # AES-GCM 加密
 │   └── config/config.go              # 应用配置
-├── migrations/001_init.sql           # 初始 Schema
-├── go.mod / go.sum                   # Go 模块
+├── go.mod / go.sum                   # Go 模块（replace => ../flowx）
 └── Makefile                          # 构建脚本
 ```
+
+> 已删除：`internal/ai`、`internal/mcp`、`internal/crypto`、`handler/ai_handler.go`、`handler/mcp_handler.go`（架构调整移除）。
 
 ### 前端已修改文件
 ```
 web/src/services/
 ├── api.ts                            # axios 客户端
-├── nodeService.ts                    # 节点 API
+├── nodeService.ts                    # 节点 API（含导入接口）
 ├── configService.ts                  # 配置 API
 ├── workflowService.ts                # 工作流 API
-└── aiService.ts                      # AI SSE 流式
+└── eventService.ts                   # SSE 事件订阅
 
 web/src/stores/
+├── appStore.ts
+├── executionStore.ts
 ├── nodeStore.ts                      # 真实 API 集成
-└── settingsStore.ts                  # 真实 API 集成
+├── settingsStore.ts                  # 真实 API 集成
+└── workflowStore.ts
+
+web/src/features/                     # 按领域拆分的功能模块
+├── executor-config/
+├── node-manager/
+├── settings/
+└── workflow-canvas/
+
+web/src/pages/
+├── ExecutorConfigPage.tsx
+├── NodeManagerPage.tsx
+├── SettingsPage.tsx
+├── WorkflowCanvasPage.tsx
+└── WorkflowListPage.tsx
 ```
 
 ---
 
 ## 下一步建议（按优先级）
 
-1. **🔥 高优先级**：实现日志系统完整桥接（FlowX `logger.Pusher` → 数据库 + SSE）
-2. **中优先级**：实现安全增强（请求限流、参数验证、审计日志）
-3. **中优先级**：AI Provider 故障转移 + Token 使用量统计
-4. **低优先级**：FAP 标签解析、自动打开浏览器、数据备份等增强功能
+1. **🔥 高优先级**：实现安全增强（请求限流、参数验证、审计日志）
+2. **中优先级**：内存环形缓冲区、日志自动清理、日志导出
+3. **中优先级**：FAP 标签解析、自动打开浏览器接线、数据备份等增强功能
+4. **低优先级**：MCP 工具调用认证与限流、Prometheus 指标暴露

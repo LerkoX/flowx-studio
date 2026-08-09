@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>11. 节点包规范 - FlowX Studio</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            themeVariables: {
+                primaryColor: '#1e1e3a',
+                primaryTextColor: '#e2e8f0',
+                primaryBorderColor: '#6366f1',
+                lineColor: '#a855f7',
+                secondaryColor: '#16162a',
+                tertiaryColor: '#0f0f1a',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                fontSize: '14px'
+            },
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            },
+            sequence: {
+                useMaxWidth: true
+            },
+            gantt: {
+                useMaxWidth: true
+            }
+        });
+    </script>
+</head>
+<body>
+    <div class="layout">
+        <nav class="sidebar">
+<div class="nav-header">
+<h2>FlowX Studio</h2>
+<p>技术设计文档</p>
+</div>
+<ul class="nav-links">
+<li><a href="README.html">FlowX Studio 技术设计文档</a></li>
+<li><a href="01-overview.html">1. 项目概述与愿景</a></li>
+<li><a href="02-architecture.html">2. 系统架构设计</a></li>
+<li><a href="03-database.html">3. 数据库设计</a></li>
+<li><a href="04-api.html">4. API 设计</a></li>
+<li><a href="05-frontend.html">5. 前端设计</a></li>
+<li><a href="06-ai-service.html">6. AI 服务层设计</a></li>
+<li><a href="07-node-system.html">7. 节点系统与执行引擎</a></li>
+<li><a href="08-runtime.html">8. 运行时与部署设计</a></li>
+<li><a href="09-security.html">9. 安全与错误处理设计</a></li>
+<li><a href="10-core-deps.html">10. FlowX 核心库依赖评估</a></li>
+<li><a href="11-node-package.html" class="active">11. 节点包规范</a></li>
+<li><a href="IMPLEMENTATION_STATUS.html">实现状态</a></li>
+</ul>
+</nav>
+        <main class="content">
+            <article>
+                <h1 id="11-flowx-节点包规范flowxjson">11. FlowX 节点包规范（flowx.json）</h1>
+
+<blockquote>本文档定义 FlowX Studio 的节点包（Node Package）格式 <code>flowx.json</code>，以及节点导入、参数注入和运行时展开规则。</blockquote>
+
+<h2 id="111-背景与目标">11.1 背景与目标</h2>
+
+<blockquote><strong>历史背景</strong>：早期节点导入未真正打通——前端 <code>NodeManagerPage</code> 只是本地模拟，后端也只保存 <code>source_type/source_url/source_path</code>，不会解析来源。目前导入链路已完全实现：后端 <code>internal/service/node_import.go</code> 解析 <code>flowx.json</code>、<code>internal/handler/node_handler.go</code> 提供 <code>POST /api/v1/nodes/import</code>，前端 <code>NodeImportModal</code> + <code>nodeService.ts</code> + <code>NodeManagerPage</code> 已对接真实接口。</blockquote>
+
+<p>为了把外部节点真正导入系统，需要一份标准的节点包清单。该清单应定义：</p>
+
+<ul>
+<li>节点元信息（名称、描述、版本、作者等）</li>
+<li>节点运行时（语言、入口、镜像、执行器）</li>
+<li>节点所需参数及参数使用方式</li>
+<li>节点输出及提取方式</li>
+</ul>
+<p>同时明确以下约束：</p>
+
+<ul>
+<li><code>flowx.json</code> 与代码文件<strong>同级目录</strong>，不做代码内联</li>
+<li>参数注入同时支持 <code>env</code> 环境变量映射和 <code>run</code> 命令模板，但 <strong><code>env</code> 优先</strong></li>
+<li>节点包格式使用 <strong>JSON</strong>（<code>flowx.json</code>），原因见 <a href="#1110-为什么使用-json-而不是-flowxyaml" target="_blank">11.10 节</a></li>
+</ul>
+<h2 id="112-设计原则">11.2 设计原则</h2>
+
+<ol>
+<li><strong>包即目录</strong>：一个节点包是一个目录，包含 <code>flowx.json</code> 和若干代码文件</li>
+<li><strong>清单与代码分离</strong>：<code>flowx.json</code> 只描述元信息，不内联代码</li>
+<li><strong>可映射到现有模型</strong>：导入后可直接生成 <code>model.Node</code>（<code>internal/model/model.go:71-111</code>）</li>
+<li><strong>可展开到 FlowX 核心</strong>：运行时能把节点包展开为 <code>flowx/core.NodeConfig</code>（<code>flowx/core/config.go:113-124</code>）</li>
+<li><strong>参数注入统一</strong>：优先使用环境变量，兼容命令行模板</li>
+</ol>
+<h2 id="113-文件布局">11.3 文件布局</h2>
+
+<p>一个节点包目录示例：</p>
+
+<pre><code>image-downloader/
+├── flowx.json
+├── main.py
+├── utils.py
+├── requirements.txt
+└── mock.py</code></pre>
+
+<ul>
+<li><code>flowx.json</code>：节点包清单（必需）</li>
+<li><code>main.py</code>：入口文件（由 <code>entry</code> 指定）</li>
+<li><code>utils.py</code>：其他依赖文件（由 <code>files</code> 列出）</li>
+<li><code>requirements.txt</code>：依赖文件（可选，可被 <code>requirements</code> 字段覆盖）</li>
+<li><code>mock.py</code>：Mock 测试入口（由 <code>mock.entry</code> 指定）</li>
+</ul>
+<h2 id="114-flowxjson-schema">11.4 flowx.json Schema</h2>
+
+<h3 id="1141-完整示例">11.4.1 完整示例</h3>
+
+<pre><code class="language-json">{
+  "name": "download-image",
+  "displayName": "下载图片",
+  "description": "从 URL 下载图片并返回文件路径",
+  "version": "1.0.0",
+  "author": "flowx-team",
+  "tags": ["image", "download"],
+  "icon": "🖼️",
+  "language": "python",
+  "entry": "main.py",
+  "files": ["utils.py"],
+  "image": "python:3.11-slim",
+  "executor": {
+    "type": "docker",
+    "config": {
+      "workdir": "/app",
+      "volumes": ["/tmp:/tmp"]
+    }
+  },
+  "requirements": ["requests"],
+  "parameters": [
+    {
+      "name": "url",
+      "type": "string",
+      "description": "图片 URL",
+      "required": true
+    },
+    {
+      "name": "timeout",
+      "type": "integer",
+      "description": "超时秒数",
+      "required": false,
+      "default": 30
+    }
+  ],
+  "env": {
+    "URL": "{{ Param.url }}",
+    "TIMEOUT": "{{ Param.timeout }}"
+  },
+  "run": "python3 main.py",
+  "outputs": [
+    { "name": "file_path", "type": "string", "description": "下载后的文件路径" },
+    { "name": "size_bytes", "type": "integer", "description": "文件大小" }
+  ],
+  "extract": {
+    "type": "codec-block"
+  },
+  "mock": {
+    "enabled": true,
+    "entry": "mock.py"
+  },
+  "timeout": 60
+}</code></pre>
+
+<h3 id="1142-字段说明">11.4.2 字段说明</h3>
+
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>类型</th>
+<th>必填</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>是</td>
+<td>节点唯一标识，字母开头，支持 snake_case 或 kebab-case（正则 <code>^[a-zA-Z][a-zA-Z0-9_-]*$</code>）</td>
+</tr>
+<tr>
+<td><code>displayName</code></td>
+<td>string</td>
+<td>否</td>
+<td>展示名称</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>string</td>
+<td>否</td>
+<td>功能描述</td>
+</tr>
+<tr>
+<td><code>version</code></td>
+<td>string</td>
+<td>否</td>
+<td>版本号，如 <code>1.0.0</code></td>
+</tr>
+<tr>
+<td><code>author</code></td>
+<td>string</td>
+<td>否</td>
+<td>作者</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td>string[]</td>
+<td>否</td>
+<td>标签</td>
+</tr>
+<tr>
+<td><code>icon</code></td>
+<td>string</td>
+<td>否</td>
+<td>图标，如 <code>🖼️</code></td>
+</tr>
+<tr>
+<td><code>language</code></td>
+<td>string</td>
+<td>是</td>
+<td>运行语言：<code>python</code> / <code>go</code> / <code>bash</code> / <code>node</code> 等</td>
+</tr>
+<tr>
+<td><code>entry</code></td>
+<td>string</td>
+<td>是</td>
+<td>入口文件，如 <code>main.py</code></td>
+</tr>
+<tr>
+<td><code>files</code></td>
+<td>string[]</td>
+<td>否</td>
+<td>需要一起拷贝的其他同级文件</td>
+</tr>
+<tr>
+<td><code>image</code></td>
+<td>string</td>
+<td>否</td>
+<td>Docker 镜像；若指定，默认使用 <code>docker</code> 执行器</td>
+</tr>
+<tr>
+<td><code>executor.type</code></td>
+<td>string</td>
+<td>否</td>
+<td>执行器类型：<code>local</code> / <code>docker</code> / <code>k8s</code>；默认根据 <code>image</code> 推断</td>
+</tr>
+<tr>
+<td><code>executor.config</code></td>
+<td>object</td>
+<td>否</td>
+<td>执行器配置，透传给 FlowX 执行器（<code>flowx/executor/local/adapter.go:23-32</code>、<code>flowx/executor/docker/adapter.go:23-32</code>）</td>
+</tr>
+<tr>
+<td><code>requirements</code></td>
+<td>string[]</td>
+<td>否</td>
+<td>依赖列表；若不填，可尝试读取 <code>requirements.txt</code></td>
+</tr>
+<tr>
+<td><code>parameters</code></td>
+<td>Parameter[]</td>
+<td>是</td>
+<td>参数定义</td>
+</tr>
+<tr>
+<td><code>env</code></td>
+<td>map&lt;string, string&gt;</td>
+<td>否</td>
+<td>参数 → 环境变量映射，值支持模板表达式</td>
+</tr>
+<tr>
+<td><code>run</code></td>
+<td>string</td>
+<td>否</td>
+<td>执行命令模板；不填则按 <code>language + entry</code> 生成默认命令</td>
+</tr>
+<tr>
+<td><code>outputs</code></td>
+<td>Output[]</td>
+<td>否</td>
+<td>输出字段声明</td>
+</tr>
+<tr>
+<td><code>extract</code></td>
+<td>ExtractConfig</td>
+<td>否</td>
+<td>输出提取方式：<code>codec-block</code> 或 <code>regex</code></td>
+</tr>
+<tr>
+<td><code>mock</code></td>
+<td>MockConfig</td>
+<td>否</td>
+<td>Mock 测试配置</td>
+</tr>
+<tr>
+<td><code>timeout</code></td>
+<td>int</td>
+<td>否</td>
+<td>默认超时秒数</td>
+</tr>
+</tbody>
+</table>
+
+<h4 id="parameter">Parameter</h4>
+
+<pre><code class="language-json">{
+  "name": "url",
+  "type": "string",
+  "description": "图片 URL",
+  "required": true,
+  "default": "https://example.com/default.jpg"
+}</code></pre>
+
+<ul>
+<li><code>name</code>：参数名，唯一</li>
+<li><code>type</code>：<code>string</code> / <code>integer</code> / <code>float</code> / <code>boolean</code> / <code>array</code> / <code>object</code></li>
+<li><code>description</code>：描述</li>
+<li><code>required</code>：是否必填</li>
+<li><code>default</code>：默认值</li>
+</ul>
+<h4 id="output">Output</h4>
+
+<pre><code class="language-json">{
+  "name": "file_path",
+  "type": "string",
+  "description": "下载后的文件路径"
+}</code></pre>
+
+<h4 id="extractconfig">ExtractConfig</h4>
+
+<pre><code class="language-json">{
+  "type": "codec-block"
+}</code></pre>
+
+<p>或</p>
+
+<pre><code class="language-json">{
+  "type": "regex",
+  "patterns": {
+    "coverage": "coverage: (\\d+\\.\\d+)%"
+  }
+}</code></pre>
+
+<h4 id="mockconfig">MockConfig</h4>
+
+<pre><code class="language-json">{
+  "enabled": true,
+  "entry": "mock.py"
+}</code></pre>
+
+<h2 id="115-导入流程">11.5 导入流程</h2>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    A[用户输入 git/folder 地址] --> B[后端克隆/定位节点包]
+    B --> C[读取 flowx.json]
+    C --> D{校验通过?}
+    D -->|否| E[返回错误]
+    D -->|是| F[读取 entry 和 files]
+    F --> G[生成 model.Node]
+    G --> H[写入数据库]
+    H --> I[返回节点信息]</pre>
+    </div>
+</div>
+
+<p>后端导入服务建议放在 <code>internal/service/node_import.go</code>：</p>
+
+<ol>
+<li>接收 <code>source_type</code>（<code>git</code> / <code>folder</code>）和 <code>source_url</code> / <code>source_path</code></li>
+<li>对于 <code>git</code>，使用临时目录 clone</li>
+<li>读取并解析 <code>flowx.json</code></li>
+<li>校验必填字段、参数类型、文件存在性</li>
+<li>读取 <code>entry</code> 文件内容 → <code>Node.Code</code></li>
+<li>读取 <code>files</code> 列表 → <code>Node.Files</code>（新增 JSON 字段）</li>
+<li>若 <code>requirements</code> 为空且存在 <code>requirements.txt</code>，读取其内容</li>
+<li>若 <code>mock.enabled</code> 为真，读取 <code>mock.entry</code> 内容 → <code>MockConfig</code></li>
+<li>生成 <code>model.Node</code> 并调用 <code>NodeService.Create</code></li>
+<li>清理临时目录</li>
+</ol>
+<p>新增 API 接口：</p>
+
+<pre><code class="language-http">POST /api/v1/nodes/import
+Content-Type: application/json
+
+{
+  "source_type": "git",
+  "source_url": "https://github.com/xxx/image-downloader.git"
+}</code></pre>
+
+<h2 id="116-字段映射">11.6 字段映射</h2>
+
+<h3 id="1161-映射到-modelnode">11.6.1 映射到 model.Node</h3>
+
+<table>
+<thead>
+<tr>
+<th>flowx.json</th>
+<th>model.Node 字段</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td><code>Name</code></td>
+</tr>
+<tr>
+<td><code>displayName</code></td>
+<td><code>DisplayName</code></td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td><code>Description</code></td>
+</tr>
+<tr>
+<td><code>version</code></td>
+<td><code>Version</code></td>
+</tr>
+<tr>
+<td><code>author</code></td>
+<td><code>Author</code></td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><code>Tags</code></td>
+</tr>
+<tr>
+<td><code>icon</code></td>
+<td><code>Icon</code></td>
+</tr>
+<tr>
+<td><code>language</code></td>
+<td><code>Language</code></td>
+</tr>
+<tr>
+<td><code>entry</code></td>
+<td><code>Entry</code></td>
+</tr>
+<tr>
+<td><code>entry</code> 文件内容</td>
+<td><code>Code</code></td>
+</tr>
+<tr>
+<td><code>files</code> 文件内容</td>
+<td>新增 <code>Files</code>（JSON map）</td>
+</tr>
+<tr>
+<td><code>image</code></td>
+<td><code>Image</code> / <code>DockerConfig.Image</code></td>
+</tr>
+<tr>
+<td><code>executor.config</code></td>
+<td><code>DockerConfig</code>（仅提取 <code>workdir</code> 字段）</td>
+</tr>
+<tr>
+<td><code>executor</code>（完整配置）</td>
+<td><code>PackageConfig.Executor</code>（原样保存，运行时透传给 FlowX 执行器）</td>
+</tr>
+<tr>
+<td><code>requirements</code></td>
+<td><code>Requirements</code></td>
+</tr>
+<tr>
+<td><code>parameters</code></td>
+<td><code>Parameters</code></td>
+</tr>
+<tr>
+<td><code>outputs</code></td>
+<td><code>Outputs</code></td>
+</tr>
+<tr>
+<td><code>mock</code></td>
+<td><code>MockConfig</code></td>
+</tr>
+<tr>
+<td><code>source_type</code></td>
+<td><code>SourceType</code></td>
+</tr>
+<tr>
+<td><code>source_url</code> / <code>source_path</code></td>
+<td><code>SourceURL</code> / <code>SourcePath</code></td>
+</tr>
+</tbody>
+</table>
+
+<p><code>NodeType</code> 规则：</p>
+
+<ul>
+<li><code>entry</code> 恒必填（<code>node_import.go</code> 导入校验强制要求），因此 <code>NodeType = "code"</code></li>
+<li>image-only 节点（无 <code>entry</code> 仅有 <code>image</code>）暂不支持导入；<code>image</code> 字段仅用于指定 Docker 执行镜像</li>
+</ul>
+<h3 id="1162-运行时展开为-flowxcorenodeconfig">11.6.2 运行时展开为 flowx/core.NodeConfig</h3>
+
+<p>节点包在运行时应展开为 FlowX 核心可识别的 <code>NodeConfig</code>：</p>
+
+<pre><code class="language-yaml">DownloadImage:
+  name: "下载图片"
+  executor: docker
+  image: python:3.11-slim
+  steps:
+    - name: run
+      run: |
+        export URL="https://example.com/img.jpg"
+        export TIMEOUT="30"
+        python3 main.py
+  extract:
+    type: codec-block</code></pre>
+
+<p>展开规则：</p>
+
+<ol>
+<li>生成 <code>export</code> 环境变量注入行（见 <a href="#117-参数注入规则" target="_blank">11.7 节</a>）</li>
+<li>追加 <code>run</code> 命令；若未指定 <code>run</code>，则按 <code>language + entry</code> 生成默认命令</li>
+<li>将 <code>entry</code> 和 <code>files</code> 写入执行器工作目录</li>
+<li>透传 <code>image</code> 和 <code>executor.config</code></li>
+<li>透传 <code>extract</code> 配置</li>
+</ol>
+<p>展开逻辑建议放在 <code>internal/runtime/adapter.go</code> 或新增 <code>internal/runtime/node_expander.go</code>。</p>
+
+<h2 id="117-参数注入规则">11.7 参数注入规则</h2>
+
+<p>参数注入优先使用 <code>env</code>，其次使用 <code>run</code> 模板，最后回退到默认 <code>FLOWX_PARAM_*</code> 环境变量。</p>
+
+<h3 id="规则-1env-优先">规则 1：env 优先</h3>
+
+<p>如果 <code>flowx.json</code> 中定义了 <code>env</code>，则按 env 生成环境变量注入：</p>
+
+<pre><code class="language-json">"env": {
+  "URL": "{{ Param.url }}",
+  "TIMEOUT": "{{ Param.timeout }}"
+}</code></pre>
+
+<p>展开后：</p>
+
+<pre><code class="language-bash">export URL="&lt;求值后的 Param.url&gt;"
+export TIMEOUT="&lt;求值后的 Param.timeout&gt;"</code></pre>
+
+<p><code>env</code> 的值支持 FlowX 模板表达式，包括：</p>
+
+<ul>
+<li><code>{{ Param.name }}</code>：工作流参数</li>
+<li><code>{{ 上游节点ID.输出字段 }}</code>：上游节点输出。FlowX 会将 metadata 中 <code>NodeID.key</code> 格式的键转换为嵌套 map 注入模板上下文（<code>flowx/dag/eval_context.go:94-115</code>），因此直接以节点 ID 作为顶层变量访问，例如 <code>{{ DownloadImage.file_path }}</code>；<strong>不存在</strong> <code>{{ Metadata.UpNode.field }}</code> 语法</li>
+<li>常量字符串</li>
+</ul>
+<h3 id="规则-2run-模板">规则 2：run 模板</h3>
+
+<p>如果定义了 <code>run</code>，则追加在 env 注入之后。<code>run</code> 中也支持 <code>{{ Param.name }}</code> 模板。</p>
+
+<p>示例：</p>
+
+<pre><code class="language-json">"run": "python3 main.py --url '{{ Param.url }}'"</code></pre>
+
+<h3 id="规则-3默认-env-回退">规则 3：默认 env 回退</h3>
+
+<p>如果 <code>env</code> 未定义，则为每个 <code>parameter</code> 自动生成默认环境变量：</p>
+
+<pre><code class="language-bash">export FLOWX_PARAM_URL="&lt;值&gt;"
+export FLOWX_PARAM_TIMEOUT="&lt;值&gt;"</code></pre>
+
+<p>注意：<code>NodeService.MockTest</code>（<code>internal/service/node.go:243-251</code>）使用<strong>裸大写参数名</strong>作为环境变量（如 <code>URL</code>），而节点包展开器使用 <code>FLOWX_PARAM_</code> 前缀（如 <code>FLOWX_PARAM_URL</code>），两处命名目前不一致（已知问题）。</p>
+
+<h3 id="规则-4默认-run-命令">规则 4：默认 run 命令</h3>
+
+<p>如果 <code>run</code> 未定义，则根据 <code>language</code> 和 <code>entry</code> 生成默认命令：</p>
+
+<table>
+<thead>
+<tr>
+<th>language</th>
+<th>默认 run</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>python</code></td>
+<td><code>python3 &lt;entry&gt;</code></td>
+</tr>
+<tr>
+<td><code>go</code></td>
+<td><code>go run &lt;entry&gt;</code></td>
+</tr>
+<tr>
+<td><code>bash</code></td>
+<td><code>bash &lt;entry&gt;</code></td>
+</tr>
+<tr>
+<td><code>node</code></td>
+<td><code>node &lt;entry&gt;</code></td>
+</tr>
+</tbody>
+</table>
+
+<h2 id="118-mock-测试">11.8 Mock 测试</h2>
+
+<p>当 <code>mock.enabled</code> 为 <code>true</code> 时：</p>
+
+<ol>
+<li>读取 <code>mock.entry</code> 文件内容</li>
+<li>存入 <code>Node.MockConfig</code>（<code>enabled: true, entry: &lt;文件名&gt;</code>）</li>
+<li>Mock 测试时复用与真实运行相同的参数注入逻辑</li>
+<li>运行的是 mock 入口文件而非 <code>entry</code></li>
+</ol>
+<p>Mock 测试入口 API 仍使用 <code>POST /api/v1/nodes/:id/mock</code>。</p>
+
+<h2 id="119-api-与前端改动">11.9 API 与前端改动</h2>
+
+<h3 id="后端">后端</h3>
+
+<ol>
+<li>新增 <code>internal/service/node_import.go</code>：导入核心逻辑</li>
+<li>新增 <code>internal/handler/node_import_handler.go</code>：<code>POST /api/v1/nodes/import</code></li>
+<li>扩展 <code>model.Node</code>：新增 <code>Files</code> JSON 字段</li>
+<li>扩展 <code>sandbox.Executor</code>：支持多文件写入/挂载</li>
+<li>扩展 <code>internal/runtime/adapter.go</code>：实现节点包 → <code>NodeConfig</code> 展开</li>
+</ol>
+<h3 id="前端">前端</h3>
+
+<ol>
+<li><code>NodeImportModal</code> 移除 <code>image</code> 类型，只保留 <code>git</code> / <code>folder</code></li>
+<li><code>NodeManagerPage.handleAddNode</code> 改为调用 <code>POST /api/v1/nodes/import</code></li>
+<li>导入完成后刷新节点列表</li>
+</ol>
+<h2 id="1110-为什么使用-json-而不是-flowxyaml">11.10 为什么使用 JSON 而不是 flowx.yaml</h2>
+
+<p>推荐 <code>flowx.json</code>，不推荐使用 <code>flowx.yaml</code> 作为节点包清单。</p>
+
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th>JSON</th>
+<th>YAML</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>解析与校验</td>
+<td>原生支持，可配 JSON Schema</td>
+<td>需要额外解析器，易受缩进影响</td>
+</tr>
+<tr>
+<td>版本控制</td>
+<td>差异清晰，格式歧义少</td>
+<td>多行字符串和注释差异较乱</td>
+</tr>
+<tr>
+<td>代码分离</td>
+<td>适合作为清单，代码放在独立文件</td>
+<td>容易诱使内联代码</td>
+</tr>
+<tr>
+<td>概念混淆</td>
+<td>生态中 <code>flowx-yaml</code> 已表示“输出提取块”</td>
+<td><code>flowx.yaml</code> 容易与输出格式混淆</td>
+</tr>
+<tr>
+<td>工具链对齐</td>
+<td>与 <code>flowx-studio</code> JSON API 和 TS 类型天然对齐</td>
+<td>FlowX 核心流水线配置是 YAML，但那是 pipeline，不是 node package</td>
+</tr>
+</tbody>
+</table>
+
+<p>节点包是“清单 + 同级代码文件”的结构，JSON 是最自然的 manifest 格式。</p>
+
+<h2 id="1111-校验规则">11.11 校验规则</h2>
+
+<p>导入时必须校验：</p>
+
+<ol>
+<li><code>name</code> 必填，字母开头，支持 snake_case 或 kebab-case（正则 <code>^[a-zA-Z][a-zA-Z0-9_-]*$</code>）</li>
+<li><code>language</code> 必填且在支持列表内（<code>python</code> / <code>go</code> / <code>bash</code> / <code>node</code> 等）</li>
+<li><code>entry</code> 必填且文件存在</li>
+<li><code>files</code> 中列出的文件必须存在</li>
+<li><code>parameters</code> 中 <code>name</code> 唯一，<code>type</code> 合法</li>
+<li>~~如果 <code>image</code> 为空且 <code>executor.type</code> 为 <code>docker</code>，导入失败~~（<strong>未在代码中实现</strong>：<code>node_import.go</code> 仅校验 <code>executor.type</code> 类型名合法性，不检查 <code>image</code> 是否配置）</li>
+<li><code>mock.entry</code> 若存在，文件必须存在</li>
+<li>节点名称唯一（数据库唯一约束）</li>
+</ol>
+<h2 id="1112-实现任务已全部完成">11.12 实现任务（已全部完成 ✅）</h2>
+
+<ul>
+<li>[x] 新增 <code>model.Node.Files</code> 字段并创建数据库迁移（迁移 005）</li>
+<li>[x] 实现 <code>internal/service/node_import.go</code> 导入服务</li>
+<li>[x] 实现 <code>POST /api/v1/nodes/import</code> 接口（<code>node_handler.go</code>）</li>
+<li>[x] 扩展 <code>sandbox.Executor</code> 支持多文件写入（<code>executor.go</code>）</li>
+<li>[x] 实现节点包 → <code>flowx/core.NodeConfig</code> 展开逻辑（<code>internal/runtime/node_expander.go</code>）</li>
+<li>[x] 更新前端 <code>NodeImportModal</code> 和 <code>NodeManagerPage</code></li>
+<li>[x] 为导入流程编写单元测试和端到端测试（<code>node_import_test.go</code>、<code>internal/mcpserver/import_node_test.go</code>）</li>
+</ul>
+<h2 id="1113-参考资料">11.13 参考资料</h2>
+
+<ul>
+<li><code>flowx/core/config.go:113-124</code> — <code>NodeConfig</code> 结构定义</li>
+<li><code>flowx/dag/eval_context.go:80-115</code> — 模板上下文（<code>Param</code> 与 <code>Metadata</code>）</li>
+<li><code>flowx/executor/local/adapter.go:23-32</code> — local 执行器配置项</li>
+<li><code>flowx/executor/docker/adapter.go:23-32</code> — docker 执行器配置项</li>
+<li><code>flowx-studio/internal/model/model.go:71-111</code> — <code>Node</code> 数据模型</li>
+<li><code>flowx-studio/internal/service/node.go:243-251</code> — <code>MockTest</code> 参数环境变量注入</li>
+</ul>
+            </article>
+        </main>
+    </div>
+    <div id="mermaid-overlay" class="mermaid-overlay" onclick="closeMermaidFullscreen(event)">
+        <div class="mermaid-overlay-content">
+            <button class="mermaid-close-btn" onclick="closeMermaidFullscreen(event)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+                关闭
+            </button>
+            <div id="mermaid-overlay-diagram"></div>
+            <div class="mermaid-zoom-controls">
+                <button onclick="zoomOut()" title="缩小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <button onclick="zoomIn()" title="放大">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <div class="zoom-separator"></div>
+                <span id="mermaid-scale-display" class="zoom-scale">100%</span>
+                <div class="zoom-separator"></div>
+                <button onclick="zoomFit()" title="适应屏幕">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path>
+                    </svg>
+                </button>
+                <button onclick="zoomReset()" title="原始大小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="1 4 1 10 7 10"></polyline>
+                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>

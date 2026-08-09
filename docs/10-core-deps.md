@@ -36,6 +36,7 @@ type Runtime interface {
     Resume(ctx context.Context, id string) error
     ModifyGraph(ctx context.Context, id string, modifications dag.GraphModifications) error
     UpdateConfig(ctx context.Context, id string, newConfigYAML string) error
+    ListPipelines() []string
 }
 ```
 
@@ -60,9 +61,12 @@ type Pipeline interface {
     SetTemplateEngine(engine template.TemplateEngine)
     GetTemplateEngine() template.TemplateEngine
     SetPusher(pusher logger.Pusher)
+    SetParam(param map[string]interface{})
+    GetParam() Metadata
     Pause() error
     Resume(ctx context.Context) error
     IsModifiable() bool
+    CurrentNode() Node
 }
 ```
 
@@ -332,9 +336,9 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 
 | flowx-studio 版本 | 依赖 FlowX 版本 | 兼容性说明 |
 |-------------------|----------------|-----------|
-| v0.1.0 | v1.3.0+ | 初始版本，直接使用 `CurrentNode()` 和 `PipelineNodeFailed` 接口 |
+| v0.1.0 | 伪版本 `v0.0.0-20260527104758-c693505dcf32`（`go.mod:8`），通过 `replace github.com/LerkoX/flowx => ../flowx`（`go.mod:5`）指向本地仓库 | 初始版本，直接使用 `CurrentNode()` 和 `PipelineNodeFailed` 接口 |
 
-> **注意**：所有增强功能已合并到 FlowX 主分支，flowx-studio v0.1.0 可直接依赖最新版本，无需过渡方案。
+> **注意**：FlowX 核心库目前**没有任何 git tag**，因此 go.mod 中记录的是基于提交时间的伪版本，而非此前预期的 `v1.3.0+`。flowx-studio 通过 `replace` 指令依赖本地 `../flowx` 目录，增强功能（`CurrentNode()`、`PipelineNodeFailed`、`ListPipelines()`）均已包含在该本地代码中，无需过渡方案。
 
 ## 10.6 实现记录
 

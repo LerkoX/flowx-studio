@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>7. 节点系统与执行引擎 - FlowX Studio</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            themeVariables: {
+                primaryColor: '#1e1e3a',
+                primaryTextColor: '#e2e8f0',
+                primaryBorderColor: '#6366f1',
+                lineColor: '#a855f7',
+                secondaryColor: '#16162a',
+                tertiaryColor: '#0f0f1a',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                fontSize: '14px'
+            },
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            },
+            sequence: {
+                useMaxWidth: true
+            },
+            gantt: {
+                useMaxWidth: true
+            }
+        });
+    </script>
+</head>
+<body>
+    <div class="layout">
+        <nav class="sidebar">
+<div class="nav-header">
+<h2>FlowX Studio</h2>
+<p>技术设计文档</p>
+</div>
+<ul class="nav-links">
+<li><a href="README.html">FlowX Studio 技术设计文档</a></li>
+<li><a href="01-overview.html">1. 项目概述与愿景</a></li>
+<li><a href="02-architecture.html">2. 系统架构设计</a></li>
+<li><a href="03-database.html">3. 数据库设计</a></li>
+<li><a href="04-api.html">4. API 设计</a></li>
+<li><a href="05-frontend.html">5. 前端设计</a></li>
+<li><a href="06-ai-service.html">6. AI 服务层设计</a></li>
+<li><a href="07-node-system.html" class="active">7. 节点系统与执行引擎</a></li>
+<li><a href="08-runtime.html">8. 运行时与部署设计</a></li>
+<li><a href="09-security.html">9. 安全与错误处理设计</a></li>
+<li><a href="10-core-deps.html">10. FlowX 核心库依赖评估</a></li>
+<li><a href="11-node-package.html">11. 节点包规范</a></li>
+<li><a href="IMPLEMENTATION_STATUS.html">实现状态</a></li>
+</ul>
+</nav>
+        <main class="content">
+            <article>
+                <h1 id="7-节点系统与执行引擎">7. 节点系统与执行引擎</h1>
+
+<h2 id="71-节点注册中心">7.1 节点注册中心</h2>
+
+<h3 id="711-节点定义">7.1.1 节点定义</h3>
+
+<p>节点是 FlowX 工作流中的最小执行单元。节点模型定义于 <code>internal/model/model.go</code>：</p>
+
+<pre><code class="language-go">type Node struct {
+    ID          int64
+    Name        string             // 唯一标识（蛇形命名）
+    DisplayName string             // 显示名称
+    Description string             // 功能描述
+    Version     string             // 版本号（存储字段）
+    Author      string             // 作者
+    Icon        string             // 图标
+    NodeType    string             // code | image
+
+    // 代码节点字段
+    Language     string            // 见下方语言清单
+    Code         string            // 实现代码
+    Entry        string            // 入口文件（如 main.py）
+    Requirements []string          // 依赖列表
+
+    // 镜像节点字段
+    Image        string            // 镜像节点使用的镜像
+
+    // 通用配置
+    Parameters   []NodeParameter   // 参数定义
+    Outputs      []NodeOutput      // 输出定义
+    DockerConfig *NodeDockerConfig // Docker 配置
+    MockConfig   *NodeMockConfig   // Mock 配置
+
+    // 节点包文件（文件名 -&gt; 内容）
+    Files        map[string]string
+
+    // 完整的 flowx.json 包配置（运行时展开使用）
+    PackageConfig *NodePackage
+
+    // 来源信息
+    SourceType  string             // git | manual | folder
+    SourceURL   string
+    SourcePath  string
+
+    Tags        []string
+    CreatedAt   time.Time
+    UpdatedAt   time.Time
+}
+
+type NodeParameter struct {
+    Name        string      `json:"name"`
+    Type        string      `json:"type"`        // string | integer | float | boolean | array | object
+    Description string      `json:"description"`
+    Required    bool        `json:"required"`
+    Default     interface{} `json:"default,omitempty"`
+}
+
+type NodeMockConfig struct {
+    Enabled bool   `json:"enabled"`
+    Entry   string `json:"entry,omitempty"`
+    Code    string `json:"code,omitempty"`
+}
+
+type NodeDockerConfig struct {
+    Image   string `json:"image,omitempty"`
+    Workdir string `json:"workdir,omitempty"`
+}</code></pre>
+
+<p><strong>支持的语言</strong>（<code>sandbox/executor.go</code>）：</p>
+<p><code>python, go, bash, sh, javascript, js, node, typescript, ts, ruby, php</code></p>
+
+<h3 id="712-flowxjson-节点包">7.1.2 flowx.json 节点包</h3>
+
+<p>节点包通过 <code>flowx.json</code> 描述，对应模型 <code>NodePackage</code>，详见 <a href="11-node-package.md" target="_blank">11. 节点包规范</a>：</p>
+
+<pre><code class="language-go">type NodePackage struct {
+    Name         string             // 必填，节点名
+    DisplayName  string
+    Description  string
+    Version      string
+    Author       string
+    Tags         []string
+    Icon         string
+    Language     string             // 必填
+    Entry        string             // 必填，入口文件
+    Files        []string           // 额外文件
+    Image        string             // 镜像（docker 执行器）
+    Executor     NodeExecutorConfig // 执行器配置（type + config）
+    Requirements []string           // 依赖列表
+    Parameters   []NodeParameter    // 参数定义
+    Env          map[string]string  // 环境变量注入（优先级高于自动参数注入）
+    Run          string             // 自定义运行命令
+    Outputs      []NodeOutput
+    Extract      *NodeExtractConfig // 输出提取配置
+    Mock         *NodeMockConfig
+    Timeout      int
+}</code></pre>
+
+<p>导入时读取并校验 <code>flowx.json</code>（<code>node_import.go</code>），运行时以 <code>PackageConfig</code> 作为节点展开的关键依据（<code>node_expander.go</code>）。</p>
+
+<h3 id="713-节点导入">7.1.3 节点导入</h3>
+
+<p><code>NodeImportService</code> 支持两种来源：</p>
+
+<ul>
+<li><strong>Git 仓库</strong>：<code>ImportFromGit(url)</code>，浅克隆（<code>git clone --depth 1</code>）到临时目录后导入</li>
+<li><strong>本地文件夹</strong>：<code>ImportFromFolder(path)</code></li>
+</ul>
+<p>HTTP 接口：<code>POST /api/v1/nodes/import</code>。</p>
+
+<p>导入流程：读取 <code>flowx.json</code> → <code>validatePackage</code> 校验（名称格式、语言受支持、入口文件存在、<code>files</code> 列表文件存在、参数类型合法、执行器类型为 <code>local|docker|k8s|kubernetes</code>、Mock 入口文件存在）→ 读取入口代码与附加文件构建 <code>Node</code> 入库。若未声明 <code>requirements</code>，会回退读取包内 <code>requirements.txt</code>。</p>
+
+<h3 id="714-节点生命周期">7.1.4 节点生命周期</h3>
+
+<blockquote>注意：<code>Node</code> 模型<strong>没有持久化的 status 字段</strong>，当前实现不存在"生成中/已注册/可用"的状态机。节点创建（AI 生成或导入）即入库保存；Mock 测试仅返回执行结果，不改变节点任何状态。</blockquote>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    A[AI 生成或导入节点] --> B[保存到数据库]
+    B --> C[可选: Mock 测试]
+    B --> D[被工作流引用]
+    D --> E[执行]</pre>
+    </div>
+</div>
+
+<h3 id="715-节点版本管理">7.1.5 节点版本管理</h3>
+
+<p><code>Node</code> 已包含 <code>Version</code> 字段（随节点存储展示），但当前不提供多版本管理机制。节点名称全局唯一，由数据库 <code>name</code> 字段的 UNIQUE 约束保证；创建同名节点会返回 <code>node name already exists</code> 错误，需用户选择覆盖（更新）或重命名。</p>
+
+<h2 id="72-节点代码规范">7.2 节点代码规范</h2>
+
+<h3 id="721-输入规范">7.2.1 输入规范</h3>
+
+<p>节点通过<strong>环境变量</strong>接收输入参数。运行时展开路径使用 <code>FLOWX_PARAM_</code> 前缀：</p>
+
+<pre><code class="language-bash"># 参数名格式：FLOWX_PARAM_{大写参数名}
+FLOWX_PARAM_URL=https://example.com/image.jpg
+FLOWX_PARAM_TIMEOUT=30</code></pre>
+
+<blockquote><strong>已知不一致</strong>：参数注入存在两条路径，环境变量名不同：</blockquote>
+<blockquote>- <strong>运行时展开路径</strong>（<code>node_expander.go</code>）：生成 <code>export FLOWX_PARAM_{大写参数名}="{{ Param.xxx }}"</code>，带 <code>FLOWX_PARAM_</code> 前缀；若 <code>flowx.json</code> 声明了 <code>env</code> 字段，则直接使用 <code>env</code> 配置。</blockquote>
+<blockquote>- <strong>Mock 测试路径</strong>（<code>service/node.go</code> MockTest）：直接以<strong>大写参数名</strong>（无 <code>FLOWX_PARAM_</code> 前缀）注入环境变量，如 <code>URL=...</code>。</blockquote>
+<blockquote></blockquote>
+<blockquote>编写节点代码时如需兼容 Mock 测试，建议同时读取两种变量名。</blockquote>
+
+<p>不同语言的读取示例（以运行时展开路径为例）：</p>
+
+<p><strong>Python</strong>：</p>
+<pre><code class="language-python">import os
+
+url = os.environ.get('FLOWX_PARAM_URL')
+timeout = int(os.environ.get('FLOWX_PARAM_TIMEOUT', '30'))</code></pre>
+
+<p><strong>Go</strong>：</p>
+<pre><code class="language-go">package main
+
+import (
+    "os"
+    "strconv"
+)
+
+func main() {
+    url := os.Getenv("FLOWX_PARAM_URL")
+    timeout, _ := strconv.Atoi(os.Getenv("FLOWX_PARAM_TIMEOUT"))
+}</code></pre>
+
+<p><strong>Bash</strong>：</p>
+<pre><code class="language-bash">URL="${FLOWX_PARAM_URL}"
+TIMEOUT="${FLOWX_PARAM_TIMEOUT:-30}"</code></pre>
+
+<h3 id="722-输出规范">7.2.2 输出规范</h3>
+
+<p>节点将结果输出到 <strong>stdout</strong>。为使下游节点能引用当前节点的输出，必须使用 <code>flowx-yaml</code> 代码块格式，FlowX 引擎会自动提取并写入 Metadata：</p>
+
+<p><strong>标准输出（成功）</strong>：</p>
+
+<pre><code class="language-bash">echo '```flowx-yaml'
+echo "file_path: \"/tmp/image.jpg\"  # 下载文件路径"
+echo "size_bytes: 2048  # 文件大小字节数"
+echo '```'</code></pre>
+
+<p>提取后，FlowX 引擎将其存储到 Metadata 中的格式为：</p>
+
+<pre><code class="language-go">// Metadata["{nodeId}.file_path"] = FieldItem{
+//     Value:       "/tmp/image.jpg",
+//     Description: "下载文件路径",      // 从行尾注释提取
+//     SrcNode:     "{nodeId}",          // 自动设置为当前节点ID
+// }
+// Metadata["{nodeId}.size_bytes"] = FieldItem{
+//     Value:       2048,
+//     Description: "文件大小字节数",
+//     SrcNode:     "{nodeId}",
+// }</code></pre>
+
+<p><strong>下游节点引用方式</strong>：</p>
+
+<pre><code class="language-yaml">Nodes:
+  Download:
+    # ... 执行下载 ...
+    extract:
+      type: codec-block
+    steps:
+      - name: download
+        run: |
+          echo '```flowx-yaml'
+          echo "file_path: \"/tmp/image.jpg\"  # 下载文件路径"
+          echo '```'
+
+  Process:
+    steps:
+      - name: process
+        run: |
+          echo "Processing {{ Metadata.Download.file_path }}"</code></pre>
+
+<p><strong>规则说明</strong>：</p>
+<ul>
+<li>必须包裹在 <code> </code>`<code>flowx-yaml </code> 代码块中</li>
+<li>字段值后可用 <code># 描述</code> 添加行尾注释，自动提取为 <code>Description</code></li>
+<li>提取的 key 会自动加上节点前缀：<code>{nodeId}.{key}</code></li>
+<li>复杂类型（数组、对象）会被序列化为 JSON 字符串存储，下游节点自动解析</li>
+<li>节点展开时若 <code>flowx.json</code> 未声明 <code>extract</code>，默认使用 <code>extract.type: codec-block</code></li>
+</ul>
+<p><strong>错误时输出到 stderr 并返回非 0 exit code</strong>：</p>
+
+<pre><code class="language-bash">echo '{"success": false, "error": "下载失败：连接超时"}' &gt;&amp;2
+exit 1</code></pre>
+
+<h3 id="723-ai-prompt-中的代码规范要求">7.2.3 AI Prompt 中的代码规范要求</h3>
+
+<p>在生成节点的 Prompt 中，必须明确要求 AI：</p>
+
+<ol>
+<li>使用环境变量读取参数（运行时展开路径为 <code>FLOWX_PARAM_*</code> 格式；注意 Mock 测试路径无前缀，见 7.2.1）</li>
+<li>使用 <code>flowx-yaml</code> 代码块输出结果到 stdout，以便下游节点通过 Metadata 引用</li>
+<li>错误时输出 JSON 到 stderr 并 exit 1</li>
+<li>包含基本的错误处理</li>
+<li>提供有意义的日志输出</li>
+<li>为 <code>flowx-yaml</code> 中的字段添加行尾注释（<code># 描述</code>），方便生成字段说明</li>
+</ol>
+<h2 id="73-mock-模式">7.3 Mock 模式</h2>
+
+<h3 id="731-mock-代码规范">7.3.1 Mock 代码规范</h3>
+
+<p>Mock <strong>是可选的</strong>（<code>NodeMockConfig.Enabled</code>）。Mock 代码的要求：</p>
+
+<ol>
+<li><strong>不依赖外部服务</strong>：不调用真实 API、不连接真实数据库</li>
+<li><strong>返回合理数据</strong>：返回与真实输出结构一致的模拟数据</li>
+<li><strong>快速执行</strong>：Mock 执行时间控制在 1-2 秒内</li>
+<li><strong>验证逻辑</strong>：验证输入参数的有效性</li>
+</ol>
+<p>若节点未启用 Mock 或 Mock 代码为空，Mock 测试会<strong>回退执行真实代码</strong>（<code>service/node.go</code> MockTest）。</p>
+
+<p><strong>Mock 代码示例（Python）</strong>：</p>
+
+<pre><code class="language-python">import os
+import sys
+import time
+
+# 读取参数
+url = os.environ.get('FLOWX_PARAM_URL', 'https://example.com/default.jpg')
+
+# 验证参数
+if not url.startswith(('http://', 'https://')):
+    print(json.dumps({
+        "success": False,
+        "error": "Invalid URL format"
+    }), file=sys.stderr)
+    sys.exit(1)
+
+# 模拟执行
+print("Mock: 模拟下载图片...")
+time.sleep(0.5)
+
+# 返回模拟结果（flowx-yaml 格式，供下游节点引用）
+print('```flowx-yaml')
+print('file_path: "/tmp/mock_image_12345.jpg"  # 下载文件路径')
+print('size_bytes: 2048  # 文件大小字节数')
+print('format: "JPEG"  # 图片格式')
+print('width: 1920  # 图片宽度')
+print('height: 1080  # 图片高度')
+print('```')</code></pre>
+
+<h3 id="732-沙箱执行器">7.3.2 沙箱执行器</h3>
+
+<p>Mock 测试由 <code>sandbox.Executor</code> 结构体执行（<code>internal/sandbox/executor.go</code>），<strong>不是</strong>独立的 MockExecutor 接口：</p>
+
+<pre><code class="language-go">// Executor 沙箱执行器
+type Executor struct {
+    Timeout       time.Duration // 超时时间（默认 30s）
+    MaxOutputSize int64         // 最大输出长度（默认 1MB）
+    WorkDir       string        // 工作目录（默认系统临时目录）
+}
+
+type ExecuteOptions struct {
+    Code     string            // 节点代码
+    Language string            // 编程语言
+    Entry    string            // 入口文件（可选，如 main.py）
+    EnvVars  map[string]string // 环境变量参数
+    ExtraEnv map[string]string // 额外环境变量
+    Files    map[string]string // 额外文件（文件名 -&gt; 内容）
+}
+
+// Execute 执行节点代码
+func (e *Executor) Execute(opts ExecuteOptions) *Result
+
+type Result struct {
+    Status     string                 // success | failed | timeout
+    DurationMs int64
+    Output     map[string]interface{} // 尝试从 stdout 解析 JSON
+    Stdout     string
+    Stderr     string
+    Logs       string
+    Error      string
+    ExitCode   int
+}</code></pre>
+
+<p><strong>执行策略（实际实现）</strong>：</p>
+
+<ol>
+<li><strong>本地子进程</strong>：使用 <code>os/exec</code> 直接在本机启动子进程执行代码，<strong>不使用 Docker</strong>，也没有 seccomp/cgroup/sandbox-exec 等系统级隔离</li>
+<li><strong>安全校验（字符串黑名单）</strong>：</li>
+<li>语言白名单：仅支持 <code>python, go, bash, sh, javascript, js, node, typescript, ts, ruby, php</code></li>
+<li>危险模式黑名单：如 <code>os.system</code>、<code>subprocess.*</code>、<code>eval(</code>、<code>exec(</code>、<code>rm -rf</code>、<code>curl | sh</code> 等</li>
+<li>敏感路径黑名单：如 <code>/etc/passwd</code>、<code>/root</code>、<code>/.ssh</code> 等</li>
+<li><strong>超时控制</strong>：默认 30 秒；Mock 测试接口可传 <code>timeout</code>（秒），上限 5 分钟</li>
+<li><strong>输出处理</strong>：stdout/stderr 超过 1MB 截断；尝试将 stdout（或其最后一行）解析为 JSON 作为 <code>Output</code></li>
+</ol>
+<h3 id="733-mock-测试流程">7.3.3 Mock 测试流程</h3>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    A[用户点击Mock测试] --> B[Frontend发送POST /api/v1/nodes/:id/mock]
+    B --> C[Server读取节点, 选择Mock代码或真实代码]
+    C --> D[注入大写参数名环境变量]
+    D --> E[sandbox.Executor安全校验]
+    E -->|校验失败| L[返回安全错误]
+    E -->|通过| F[本地子进程执行 默认30s超时]
+    F --> G[收集stdout/stderr并解析JSON]
+    G --> H{结果}
+    H -->|success| I[显示输出数据和日志]
+    H -->|failed/timeout| J[显示错误信息和日志]</pre>
+    </div>
+</div>
+
+<h2 id="74-执行引擎集成">7.4 执行引擎集成</h2>
+
+<h3 id="741-运行时适配器与节点展开">7.4.1 运行时适配器与节点展开</h3>
+
+<p>运行时适配器为 <code>runtime.Adapter</code>（<code>internal/runtime/adapter.go</code>），包装 FlowX Runtime，提供 <code>ExecuteWorkflow</code> / <code>GetPipelineStatus</code> / <code>CancelExecution</code> / 事件通道等能力：</p>
+
+<pre><code class="language-go">// Adapter FlowX 运行时适配器
+type Adapter struct {
+    runtime   flowx.Runtime
+    eventCh   chan ExecutionEvent
+    logPusher *LogPusher
+    mu        sync.RWMutex
+}
+
+// ExecuteWorkflow 通过 RunAsync 异步执行，并注册 pipeline-&gt;execution 映射
+func (a *Adapter) ExecuteWorkflow(ctx context.Context, executionID int64, configYAML string) error</code></pre>
+
+<p>节点展开为<strong>包级函数</strong>（<code>internal/runtime/node_expander.go</code>），不是 <code>BuildPipelineConfig</code> 方法：</p>
+
+<pre><code class="language-go">// ExpandWorkflowConfig 展开工作流 YAML 中的 nodeRef 引用，返回展开后的 YAML
+func ExpandWorkflowConfig(configYAML string, lookup func(name string) (*model.Node, error)) (string, error)
+
+// ExpandNodeToConfig 将 model.Node 展开为 flowx 核心的 NodeConfig
+func ExpandNodeToConfig(node *model.Node) (*core.NodeConfig, error)</code></pre>
+
+<p><strong>注入机制</strong>：<code>ExpandNodeToConfig</code> 以节点的 <code>PackageConfig</code>（flowx.json）为依据，生成一段 shell 脚本放入<strong>单个 step</strong>（<code>name: run</code>）：</p>
+
+<ol>
+<li><code>export KEY="{{ Param.xxx }}"</code> 注入环境变量（默认 <code>FLOWX_PARAM_{大写参数名}</code>；<code>flowx.json</code> 的 <code>env</code> 字段优先）</li>
+<li><code>cat &gt; {entry} &lt;&lt; 'FLOWX_FILE_EOF'</code> heredoc 写入入口代码及 <code>files</code> 附加文件</li>
+<li>追加运行命令（<code>flowx.json</code> 的 <code>run</code> 字段；缺省时按语言推断，如 <code>python3 main.py</code>）</li>
+</ol>
+<p>同时以 <code>{nodeName}-executor</code> 为名向 <code>cfg.Executors</code> 写入执行器配置，类型来自 <code>flowx.json</code> 的 <code>executor.type</code>（缺省时：有 <code>image</code> 为 <code>docker</code>，否则 <code>local</code>）。未声明 <code>extract</code> 时默认 <code>codec-block</code>。</p>
+
+<h3 id="742-事件桥接">7.4.2 事件桥接</h3>
+
+<p>FlowX 引擎事件经由 <code>studioListener</code>（实现 <code>dag.Listener</code> 接口，<code>adapter.go</code>）桥接：</p>
+
+<pre><code class="language-go">type studioListener struct {
+    adapter     *Adapter
+    executionID int64
+}
+
+// Handle 处理 dag 事件并推入 adapter.eventCh：
+//   PipelineStart      -&gt; "execution_start"   (携带 params)
+//   PipelineFinish     -&gt; "execution_complete" (携带 params/metadata)
+//   PipelineNodeStart  -&gt; "node_start"
+//   PipelineNodeFinish -&gt; "node_complete" (status=success)
+//   PipelineNodeFailed -&gt; "node_complete" (status=failed)
+func (l *studioListener) Handle(p dag.Pipeline, event dag.Event)</code></pre>
+
+<p><code>WorkflowService.StartEventBridge</code>（<code>workflow.go</code>）启动 goroutine 消费 <code>adapter.GetEvents()</code>，调用 <code>persistRuntimeEvent</code> 将事件持久化到数据库（更新 <code>executions</code> / <code>execution_nodes</code> 表）并转发到 <code>event.Bus</code>，最终经 SSE 推送前端：</p>
+
+<ul>
+<li>全局 SSE：<code>GET /api/v1/events</code></li>
+<li>单次执行 SSE：<code>GET /api/v1/executions/:id/stream</code></li>
+</ul>
+<p>此外 <code>WorkflowService</code> 自身还会发布 <code>execution.started</code> / <code>execution.completed</code> / <code>execution.log</code> 事件。注意：<strong>日志事件类型是 <code>execution.log</code>，不存在 <code>node_log</code></strong>。</p>
+
+<h3 id="743-执行状态持久化">7.4.3 执行状态持久化</h3>
+
+<p>执行由 <code>WorkflowService.Run</code> / <code>runWorkflow</code> 完成（<code>workflow.go</code>），<strong>直接执行 SQL</strong>，无独立仓储层：</p>
+
+<pre><code class="language-go">// Run 校验工作流后直接以 running 状态插入执行记录（无 pending 阶段）
+func (s *WorkflowService) Run(id int64, params map[string]interface{}, dryRun bool) (int64, string, error)
+
+func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
+    ctx := context.Background()
+
+    // 1. 展开工作流 YAML（nodeRef -&gt; 实际节点配置）
+    yamlConfig, _ := runtime.ExpandWorkflowConfig(wf.YAMLConfig, s.nodeSvc.GetByName)
+
+    // 2. 发布 execution.started，启动异步执行（listener 事件经 RunAsync 传入）
+    err := s.runtime.ExecuteWorkflow(ctx, execID, yamlConfig)
+
+    // 3. 每 500ms 轮询 GetPipelineStatus，直到 SUCCESS / FAILED / CANCELLED
+    for {
+        status, _ := s.runtime.GetPipelineStatus(execID)
+        if status == "SUCCESS" || status == "FAILED" || status == "CANCELLED" { break }
+        time.Sleep(500 * time.Millisecond)
+    }
+
+    // 4. 若 pipeline 已被清理导致轮询出错，
+    //    由 resolveFinalStatusFromNodes 根据 execution_nodes 表兜底判定最终状态
+
+    // 5. 更新 executions 最终状态，发布 execution.completed
+}</code></pre>
+
+<h2 id="75-执行日志管理">7.5 执行日志管理</h2>
+
+<h3 id="751-日志架构">7.5.1 日志架构</h3>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart LR
+    A[FlowX 引擎] --> B[logger.Pusher]
+    B --> C[LogPusher]
+    C --> D[WorkflowService.handleLogEntry]
+    D --> E[SQLite execution_logs]
+    D --> F[event.Bus execution.log]
+    F --> G[SSE /api/v1/events 与 /executions/:id/stream]
+    G --> H[前端 LogViewer]</pre>
+    </div>
+</div>
+
+<h3 id="752-日志收集与实时推送">7.5.2 日志收集与实时推送</h3>
+
+<p>日志链路（<strong>实时逐条处理</strong>，无内存环形缓冲区、无批量写库）：</p>
+
+<ol>
+<li><strong>Pusher 层</strong>：<code>LogPusher</code>（<code>adapter.go</code>）实现 FlowX 核心库的 <code>logger.Pusher</code> 接口（<code>Push</code> / <code>PushBatch</code> / <code>Close</code>），并将 pipeline 内部 ID 映射为 <code>exec-{executionID}</code></li>
+<li><strong>处理层</strong>：<code>WorkflowService.handleLogEntry</code>（<code>workflow.go</code>）通过 <code>Adapter.OnLog</code> 注册为回调，对每条日志：</li>
+<li>立即 <code>INSERT INTO execution_logs</code> 持久化</li>
+<li>立即向 <code>event.Bus</code> 发布 <code>execution.log</code> 事件</li>
+<li><strong>推送层</strong>：事件总线经 SSE（<code>GET /api/v1/events</code>、<code>GET /api/v1/executions/:id/stream</code>）实时推送到前端</li>
+</ol>
+<p><strong>日志来源</strong>：</p>
+<ul>
+<li><strong>节点标准输出</strong>：捕获 stdout/stderr（Python print、Go fmt 等）</li>
+<li><strong>引擎事件</strong>：节点开始、完成、失败等状态变更</li>
+<li><strong>系统日志</strong>：执行器生命周期、执行启动失败的兜底错误日志（<code>logExecutionError</code>）</li>
+</ul>
+<h3 id="753-日志存储">7.5.3 日志存储</h3>
+
+<ul>
+<li>所有日志<strong>实时逐条持久化</strong>到 <code>execution_logs</code> 表（见 3.3.5 节）</li>
+<li>支持按执行 ID、节点 ID、日志级别查询</li>
+<li>分页加载，每页默认 100 条</li>
+</ul>
+<p><strong>日志清理</strong>：当前<strong>未实现</strong>自动清理与保留策略（规划中）。</p>
+
+<h3 id="754-日志格式">7.5.4 日志格式</h3>
+
+<pre><code class="language-json">{
+  "id": 1024,
+  "execution_id": 42,
+  "node_id": "download",
+  "node_name": "下载图片",
+  "step_name": "download_image",
+  "level": "info",
+  "message": "开始下载图片: https://example.com/image.jpg",
+  "output": "HTTP/1.1 200 OK\nContent-Length: 2048...",
+  "timestamp": "2025-01-20T10:00:01.123Z"
+}</code></pre>
+
+<p><strong>级别定义</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>级别</th>
+<th>颜色</th>
+<th>使用场景</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>debug</code></td>
+<td>灰色</td>
+<td>开发调试、详细的执行跟踪</td>
+</tr>
+<tr>
+<td><code>info</code></td>
+<td>青色</td>
+<td>节点开始/完成、正常操作</td>
+</tr>
+<tr>
+<td><code>warn</code></td>
+<td>黄色</td>
+<td>超时、降级、资源限制触发</td>
+</tr>
+<tr>
+<td><code>error</code></td>
+<td>红色</td>
+<td>节点执行失败、异常错误</td>
+</tr>
+<tr>
+<td><code>fatal</code></td>
+<td>深红</td>
+<td>系统级致命错误</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="755-日志查询-api">7.5.5 日志查询 API</h3>
+
+<p>后端提供日志查询接口 <code>GET /api/v1/executions/:id/logs</code>（<code>GetExecutionLogs</code>，详见 4.5.4 节），当前支持的过滤条件：</p>
+
+<ul>
+<li>按执行 ID 查询日志列表</li>
+<li>按节点 ID 过滤（<code>node_id</code>）</li>
+<li>按日志级别过滤（<code>level</code>）</li>
+<li>分页加载（<code>limit</code>/<code>offset</code>，limit 上限 1000）</li>
+</ul>
+<blockquote>关键词搜索（message 字段）与日志导出（JSON / TXT / Markdown）<strong>尚未实现</strong>（规划中）。</blockquote>
+
+<h2 id="76-执行超时与取消">7.6 执行超时与取消</h2>
+
+<h3 id="761-超时控制">7.6.1 超时控制</h3>
+
+<blockquote>工作流/节点级执行超时<strong>当前未实现</strong>：<code>runWorkflow</code> 使用裸 <code>context.Background()</code>，没有 <code>context.WithTimeout</code> 包装（规划中）。</blockquote>
+<blockquote></blockquote>
+<blockquote>目前唯一实际的超时是 <strong>Mock 测试超时</strong>：<code>sandbox.Executor</code> 默认 30 秒，Mock 接口可传 <code>timeout</code>（秒），上限 5 分钟。节点真实执行时的超时由 FlowX 引擎侧 YAML 配置决定，Studio 层不额外控制。</blockquote>
+
+<h3 id="762-手动取消">7.6.2 手动取消</h3>
+
+<p>底层能力已存在：<code>Adapter.CancelExecution(ctx, executionID)</code> 调用 FlowX Runtime 的 <code>Cancel</code> 优雅停止执行。</p>
+
+<blockquote>但 HTTP 取消接口（<code>POST /api/v1/executions/:id/cancel</code>）<strong>路由尚未注册</strong>，前端暂无法触发取消（待接线）。</blockquote>
+
+<h2 id="77-并发与资源限制">7.7 并发与资源限制</h2>
+
+<blockquote>当前<strong>未实现</strong>并发执行限制（ExecutionLimiter）与资源隔离（ResourceLimits / Docker 资源配额）：</blockquote>
+<blockquote></blockquote>
+<blockquote>- 同时执行的工作流数量无上限控制</blockquote>
+<blockquote>- Mock 测试为本地子进程执行，仅通过字符串黑名单做安全校验，无 CPU/内存/磁盘配额</blockquote>
+<blockquote></blockquote>
+<blockquote>该能力规划中，后续版本引入。</blockquote>
+
+            </article>
+        </main>
+    </div>
+    <div id="mermaid-overlay" class="mermaid-overlay" onclick="closeMermaidFullscreen(event)">
+        <div class="mermaid-overlay-content">
+            <button class="mermaid-close-btn" onclick="closeMermaidFullscreen(event)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+                关闭
+            </button>
+            <div id="mermaid-overlay-diagram"></div>
+            <div class="mermaid-zoom-controls">
+                <button onclick="zoomOut()" title="缩小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <button onclick="zoomIn()" title="放大">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <div class="zoom-separator"></div>
+                <span id="mermaid-scale-display" class="zoom-scale">100%</span>
+                <div class="zoom-separator"></div>
+                <button onclick="zoomFit()" title="适应屏幕">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path>
+                    </svg>
+                </button>
+                <button onclick="zoomReset()" title="原始大小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="1 4 1 10 7 10"></polyline>
+                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>

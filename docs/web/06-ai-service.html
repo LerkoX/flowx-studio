@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>6. AI 服务层设计 - FlowX Studio</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            themeVariables: {
+                primaryColor: '#1e1e3a',
+                primaryTextColor: '#e2e8f0',
+                primaryBorderColor: '#6366f1',
+                lineColor: '#a855f7',
+                secondaryColor: '#16162a',
+                tertiaryColor: '#0f0f1a',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                fontSize: '14px'
+            },
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            },
+            sequence: {
+                useMaxWidth: true
+            },
+            gantt: {
+                useMaxWidth: true
+            }
+        });
+    </script>
+</head>
+<body>
+    <div class="layout">
+        <nav class="sidebar">
+<div class="nav-header">
+<h2>FlowX Studio</h2>
+<p>技术设计文档</p>
+</div>
+<ul class="nav-links">
+<li><a href="README.html">FlowX Studio 技术设计文档</a></li>
+<li><a href="01-overview.html">1. 项目概述与愿景</a></li>
+<li><a href="02-architecture.html">2. 系统架构设计</a></li>
+<li><a href="03-database.html">3. 数据库设计</a></li>
+<li><a href="04-api.html">4. API 设计</a></li>
+<li><a href="05-frontend.html">5. 前端设计</a></li>
+<li><a href="06-ai-service.html" class="active">6. AI 服务层设计</a></li>
+<li><a href="07-node-system.html">7. 节点系统与执行引擎</a></li>
+<li><a href="08-runtime.html">8. 运行时与部署设计</a></li>
+<li><a href="09-security.html">9. 安全与错误处理设计</a></li>
+<li><a href="10-core-deps.html">10. FlowX 核心库依赖评估</a></li>
+<li><a href="11-node-package.html">11. 节点包规范</a></li>
+<li><a href="IMPLEMENTATION_STATUS.html">实现状态</a></li>
+</ul>
+</nav>
+        <main class="content">
+            <article>
+                <h1 id="6-ai-集成mcp-服务端">6. AI 集成（MCP 服务端）</h1>
+
+<blockquote>本文档描述 FlowX Studio 当前的 AI 集成方式：FlowX Studio 自身作为 <strong>stdio MCP 服务端</strong>，由外部 AI 客户端（Claude Code、opencode 等）驱动流水线与节点的生成、校验、执行。</blockquote>
+
+<h2 id="61-设计演变">6.1 设计演变</h2>
+
+<p>早期版本（2026-07-12 之前）曾内置一套后端 AI 服务层，包含：</p>
+
+<ul>
+<li>多 Provider 抽象（OpenAI / Anthropic / Ollama）</li>
+<li>Prompt 工程模板、NodeGenerator / WorkflowGenerator</li>
+<li>API Key 的 AES-GCM 加密存储、<code>ai_call_logs</code> 调用审计</li>
+<li>FAP（FlowX Action Protocol）动作协议与对话式交互</li>
+</ul>
+<p>这套方案要求服务端持有各家 AI 的密钥、维护 Prompt 模板并承担重试与会话管理，复杂度高且与「可视化查看器」的定位不符。<strong>2026-07-12 架构调整中该服务层被整体移除</strong>：</p>
+
+<ul>
+<li><code>internal/db/migrations/002_remove_ai_mcp.sql</code> 删除 <code>ai_configs</code>、<code>chat_history</code>、<code>mcp_configs</code> 表</li>
+<li><code>internal/ai</code> 包与 <code>/api/v1/ai</code> 路由全部移除</li>
+</ul>
+<p>当前架构为「<strong>外部 AI 客户端 + FlowX Studio stdio MCP 服务端</strong>」，职责划分清晰：</p>
+
+<table>
+<thead>
+<tr>
+<th>职责</th>
+<th>承担方</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>需求理解、YAML/节点包生成、失败重试、会话管理</td>
+<td>外部 AI 客户端（Claude Code、opencode 等）</td>
+</tr>
+<tr>
+<td>YAML 校验、持久化、节点导入、流水线执行、事件推送</td>
+<td>FlowX Studio（MCP 服务端）</td>
+</tr>
+</tbody>
+</table>
+
+<p>服务端不再感知任何 AI Provider，不存储密钥，不维护 Prompt。AI 能力完全来自用户自己选择的客户端。</p>
+
+<h2 id="62-总体架构">6.2 总体架构</h2>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart LR
+    subgraph 外部
+        AI[AI 客户端<br/>Claude Code / opencode / ...]
+    end
+
+    subgraph FlowX Studio
+        MCP[flowx-studio mcp<br/>stdio MCP 服务端<br/>internal/mcpserver]
+        VAL[WorkflowValidator<br/>internal/validator]
+        SVC[WorkflowService / NodeService<br/>NodeImportService]
+        BUS[Event Bus<br/>internal/event]
+        HTTP[HTTP Server<br/>flowx-studio server]
+    end
+
+    DB[(SQLite)]
+    RT[FlowX Runtime]
+    UI[Web UI]
+
+    AI -- "JSON-RPC 2.0 over stdio" --> MCP
+    MCP --> VAL
+    MCP --> SVC
+    VAL --> SVC
+    SVC --> DB
+    SVC --> RT
+    SVC --> BUS
+    BUS --> HTTP
+    HTTP -- "SSE: GET /api/v1/events" --> UI</pre>
+    </div>
+</div>
+
+<p>要点：</p>
+
+<ul>
+<li><strong>AI 客户端</strong>通过标准 MCP 配置拉起 <code>flowx-studio mcp</code> 子进程，以 stdio 进行 JSON-RPC 2.0 通信。</li>
+<li><strong>MCP 服务端</strong>只暴露 8 个工具，所有写操作先经 <code>WorkflowValidator</code> / <code>NodeImportService</code> 校验，失败时返回错误文本引导 AI 重新生成。</li>
+<li><strong>HTTP Server</strong>（<code>flowx-studio server</code>）与 MCP 服务端相互独立；Web UI 通过 SSE 订阅事件总线，实时感知 AI 客户端造成的流水线/节点变更。</li>
+</ul>
+<h2 id="63-传输与协议">6.3 传输与协议</h2>
+
+<h3 id="631-stdio-json-rpc-20">6.3.1 stdio + JSON-RPC 2.0</h3>
+
+<p>MCP 服务端实现位于 <code>internal/mcpserver/server.go</code>：</p>
+
+<ul>
+<li>传输层为 <strong>stdio</strong>：逐行读取 stdin（每行一个 JSON 消息），响应逐行写入 stdout（<code>server.go:63-105</code>）。</li>
+<li>消息格式为 <strong>JSON-RPC 2.0</strong>，<code>jsonrpc</code> 字段必须为 <code>"2.0"</code>，否则返回 <code>-32600</code>；无法解析的输入返回 <code>-32700</code>；未知方法返回 <code>-32601</code>；参数非法返回 <code>-32602</code>。</li>
+<li><code>initialize</code> 握手返回 <code>protocolVersion: "2024-11-05"</code>，<code>serverInfo: {name: "flowx-studio", version: "1.0.0"}</code>，能力声明仅包含 <code>tools</code>（<code>server.go:123-138</code>）。</li>
+<li>支持的方法：<code>initialize</code>、<code>initialized</code>（通知，无响应）、<code>tools/list</code>、<code>tools/call</code>。</li>
+<li><code>tools/call</code> 优先读取标准 MCP 的 <code>params.arguments</code> 字段；若为空则兼容把参数直接放在 <code>params</code> 顶层的客户端（<code>server.go:159-163</code>）。</li>
+<li>工具结果统一包装为 <code>{content: [{type: "text", text: ...}], isError: bool}</code>，业务错误<strong>不使用 JSON-RPC error</strong>，而是通过 <code>isError: true</code> + 错误文本返回，便于 AI 读取后自行修正重试。</li>
+</ul>
+<h3 id="632-启动方式与并发模型">6.3.2 启动方式与并发模型</h3>
+
+<pre><code class="language-bash">flowx-studio mcp</code></pre>
+
+<p><code>cmd/flowx-studio/main.go:51-56</code> 注册 <code>mcp</code> 子命令，<code>main.go:157-178</code> 的 <code>runMCP</code> 实现有以下特点：</p>
+
+<ul>
+<li><strong>不持有单例 PID 锁</strong>：与 <code>server</code> 子命令不同（<code>server</code> 通过 <code>singleton.New(...flowx-studio.pid)</code> 保证单实例，<code>main.go:107-112</code>），MCP 进程允许每个 AI 会话独立启动一个实例，天然支持多客户端并发。</li>
+<li><strong>不启动 HTTP server</strong>：只初始化数据库、事件总线、Runtime Adapter 和各 Service，然后在 stdio 上阻塞监听。</li>
+<li>同样启动 <code>StartEventBridge</code>，执行事件会照常进入事件总线（仅对同进程订阅者可见；Web UI 实时刷新依赖的是 <code>server</code> 进程内的事件总线，见 6.7 节的边界说明）。</li>
+</ul>
+<h2 id="64-工具清单">6.4 工具清单</h2>
+
+<p><code>tools/list</code> 返回 8 个工具（定义见 <code>internal/mcpserver/tools.go:18-184</code>）。所有工具调用结果均为文本；失败时 <code>isError: true</code> 且文本中包含可供 AI 修正的错误详情。</p>
+
+<h3 id="641-create_pipeline">6.4.1 create_pipeline</h3>
+
+<p>创建流水线。YAML 非法时返回校验错误，AI 应修正后重试。</p>
+
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>必填</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>是</td>
+<td>流水线名称</td>
+</tr>
+<tr>
+<td><code>yaml_config</code></td>
+<td>string</td>
+<td>是</td>
+<td>FlowX YAML 配置（必须是合法 YAML）</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>string</td>
+<td>否</td>
+<td>描述</td>
+</tr>
+<tr>
+<td><code>intent</code></td>
+<td>string</td>
+<td>否</td>
+<td>意图说明</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>string</td>
+<td>否</td>
+<td><code>draft</code>（默认）/ <code>active</code> / <code>archived</code></td>
+</tr>
+</tbody>
+</table>
+
+<p>返回：成功 <code>Created pipeline id=&lt;id&gt; name=&lt;name&gt;</code>；失败 <code>Failed to create pipeline: &lt;err&gt;. Please regenerate the YAML and retry.</code>（<code>tools.go:186-213</code>）。</p>
+
+<h3 id="642-update_pipeline">6.4.2 update_pipeline</h3>
+
+<p>按 ID 更新流水线，YAML 同样会被校验，非法即拒绝。</p>
+
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>必填</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>integer</td>
+<td>是</td>
+<td>流水线 ID</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>是</td>
+<td>名称</td>
+</tr>
+<tr>
+<td><code>yaml_config</code></td>
+<td>string</td>
+<td>是</td>
+<td>FlowX YAML 配置</td>
+</tr>
+<tr>
+<td><code>description</code> / <code>intent</code> / <code>status</code></td>
+<td>string</td>
+<td>否</td>
+<td>同 create</td>
+</tr>
+</tbody>
+</table>
+
+<p>返回：<code>Updated pipeline id=&lt;id&gt;</code> 或带 <code>Please regenerate the YAML and retry.</code> 的错误（<code>tools.go:215-239</code>）。</p>
+
+<h3 id="643-delete_pipeline">6.4.3 delete_pipeline</h3>
+
+<p>按 ID 删除流水线。参数：<code>id</code>（integer，必填）。返回 <code>Deleted pipeline id=&lt;id&gt;</code>。</p>
+
+<h3 id="644-list_pipelines">6.4.4 list_pipelines</h3>
+
+<p>分页列出流水线，供 AI 查询已有资源。参数均可选：</p>
+
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>默认</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>status</code></td>
+<td>string</td>
+<td>-</td>
+<td>按状态过滤</td>
+</tr>
+<tr>
+<td><code>search</code></td>
+<td>string</td>
+<td>-</td>
+<td>关键字搜索</td>
+</tr>
+<tr>
+<td><code>page</code></td>
+<td>integer</td>
+<td>1</td>
+<td>页码</td>
+</tr>
+<tr>
+<td><code>page_size</code></td>
+<td>integer</td>
+<td>20</td>
+<td>每页数量</td>
+</tr>
+</tbody>
+</table>
+
+<p>返回：分页结果的 JSON 字符串。</p>
+
+<h3 id="645-run_pipeline">6.4.5 run_pipeline</h3>
+
+<p>按 ID 触发执行。参数：<code>id</code>（integer，必填）。</p>
+
+<p>返回：<code>Started execution id=&lt;execID&gt; streamUrl=/api/v1/executions/&lt;execID&gt;/stream</code>。<code>streamUrl</code> 指向 HTTP server 上的 SSE 日志流，AI 可把它交给用户查看实时日志（<code>tools.go:270-282</code>、<code>internal/service/workflow.go:199</code>）。</p>
+
+<h3 id="646-import_node">6.4.6 import_node</h3>
+
+<p>从 Git 仓库或本地文件夹导入节点包（读取 <code>flowx.json</code>）。<strong>这是通过 MCP 新增节点的唯一途径</strong>（<code>tools.go:127-147</code>）。</p>
+
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>必填</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>source_type</code></td>
+<td>string</td>
+<td>是</td>
+<td><code>git</code> 或 <code>folder</code></td>
+</tr>
+<tr>
+<td><code>source_url</code></td>
+<td>string</td>
+<td><code>git</code> 时必填</td>
+<td>Git 仓库 URL</td>
+</tr>
+<tr>
+<td><code>source_path</code></td>
+<td>string</td>
+<td><code>folder</code> 时必填</td>
+<td>本地目录路径</td>
+</tr>
+</tbody>
+</table>
+
+<p>返回：导入成功的节点摘要 JSON（<code>id</code>、<code>name</code>、<code>display_name</code>、<code>version</code>、<code>language</code>、<code>node_type</code>、<code>image</code>、<code>parameters</code>、<code>outputs</code>）。详见 6.6 节。</p>
+
+<h3 id="647-delete_node">6.4.7 delete_node</h3>
+
+<p>按 ID 删除节点。参数：<code>id</code>（integer，必填）。返回 <code>Deleted node id=&lt;id&gt;</code>。</p>
+
+<h3 id="648-list_nodes">6.4.8 list_nodes</h3>
+
+<p>分页列出节点，供 AI 在生成 YAML 前查询可用节点名（用于 <code>nodeRef</code>）。参数均可选：<code>language</code>、<code>tag</code>、<code>search</code>、<code>node_type</code>、<code>page</code>（默认 1）、<code>page_size</code>（默认 20）。返回分页结果 JSON。</p>
+
+<h2 id="65-yaml-生成与校验约定">6.5 YAML 生成与校验约定</h2>
+
+<h3 id="651-校验规则">6.5.1 校验规则</h3>
+
+<p><code>create_pipeline</code> / <code>update_pipeline</code> 落库前都会经过 <code>WorkflowValidator</code>（<code>internal/validator/workflow.go</code>），规则如下：</p>
+
+<ol>
+<li><code>yaml_config</code> 非空且能被 YAML 解析。</li>
+<li>必须包含非空字符串字段 <code>Name</code>。</li>
+<li><code>Nodes</code> 必须是非空 map。</li>
+<li><code>Graph</code> 必须是非空字符串，且：</li>
+<li>以 <code>stateDiagram</code>（即 Mermaid <code>stateDiagram-v2</code>）开头；</li>
+<li>至少包含一条状态迁移（形如 <code>A --&gt; B</code>，支持 <code>[*]</code> 起止节点）。</li>
+<li>若存在 <code>Executors</code>，其必须是 map，且每个节点声明的 <code>executor</code> 必须在 <code>Executors</code> 中有定义。</li>
+</ol>
+<p>校验失败时工具返回如 <code>Failed to create pipeline: 'Graph' must start with 'stateDiagram-v2'. Please regenerate the YAML and retry.</code>，<strong>错误文本即重试指令</strong>，AI 客户端应修正 YAML 后再次调用同一工具。</p>
+
+<h3 id="652-校验-重试循环">6.5.2 校验-重试循环</h3>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">sequenceDiagram
+    participant AI as AI 客户端
+    participant MCP as flowx-studio mcp
+    participant V as WorkflowValidator
+    participant DB as SQLite
+
+    AI->>MCP: tools/call create_pipeline(yaml_config)
+    MCP->>V: ValidateWorkflow(yaml)
+    alt 校验失败
+        V-->>MCP: error（缺字段 / Graph 非法 / executor 未定义）
+        MCP-->>AI: isError=true, "...Please regenerate the YAML and retry."
+        AI->>AI: 根据错误修正 YAML
+        AI->>MCP: tools/call create_pipeline（重试）
+    end
+    MCP->>DB: 持久化
+    MCP-->>AI: Created pipeline id=N</pre>
+    </div>
+</div>
+
+<h3 id="653-noderef-引用与展开">6.5.3 nodeRef 引用与展开</h3>
+
+<p>YAML 的节点可通过 <code>config.nodeRef</code> 引用已导入的节点包，而不必内联代码：</p>
+
+<pre><code class="language-yaml">Name: demo
+Graph: |
+  stateDiagram-v2
+    [*] --&gt; download
+    download --&gt; [*]
+Nodes:
+  download:
+    executor: download-image-executor
+    config:
+      nodeRef: download-image
+Executors:
+  download-image-executor:
+    type: docker</code></pre>
+
+<p>执行前 <code>ExpandWorkflowConfig</code>（<code>internal/runtime/node_expander.go:103-164</code>）会：</p>
+
+<ol>
+<li>按 <code>nodeRef</code> 名称查找节点（<code>list_nodes</code> 可查可用名称）；</li>
+<li>用 <code>ExpandNodeToConfig</code> 把节点包展开为 FlowX 核心 <code>NodeConfig</code>：注入环境变量（<code>env</code> 映射或默认 <code>FLOWX_PARAM_&lt;NAME&gt;</code> 模板）、写入入口文件与附属文件、拼接运行命令（<code>run</code> 或按语言默认）；</li>
+<li>自动补充 <code>&lt;node名&gt;-executor</code> 的 Executor 定义（<code>image</code> 存在时默认 <code>docker</code>，否则 <code>local</code>）。</li>
+</ol>
+<p>因此 AI 生成 YAML 时通常只需关心 <code>Graph</code> 拓扑和 <code>nodeRef</code> 引用，节点实现细节由节点包承载。</p>
+
+<h2 id="66-节点包导入">6.6 节点包导入</h2>
+
+<p><code>import_node</code> 的背后是 <code>NodeImportService</code>（<code>internal/service/node_import.go</code>）：</p>
+
+<ul>
+<li><strong>git</strong>：<code>git clone --depth 1</code> 到临时目录后导入，导入完成即清理（<code>node_import.go:27-48</code>）。</li>
+<li><strong>folder</strong>：直接读取本地目录（<code>node_import.go:51-66</code>）。</li>
+</ul>
+<p>两种来源最终都读取目录下的 <code>flowx.json</code> 清单并做完整校验（<code>validatePackage</code>，<code>node_import.go:99-162</code>）：</p>
+
+<ul>
+<li><code>name</code> 必填，须以字母开头、仅含字母数字/下划线/连字符；</li>
+<li><code>language</code> 必填且受沙箱支持；</li>
+<li><code>entry</code> 入口文件必须存在，<code>files</code> 列出的每个文件必须存在；</li>
+<li><code>parameters</code> 不允许重名，类型限定为 <code>string/integer/float/boolean/array/object</code>；</li>
+<li><code>executor.type</code> 若提供，限定为 <code>local/docker/k8s</code>；</li>
+<li>启用 mock 时 <code>mock.entry</code> 文件必须存在。</li>
+</ul>
+<p>校验通过后读取入口/附属文件内容、依赖列表（<code>requirements</code> 字段或 <code>requirements.txt</code>）、mock 与 docker 配置，组装为 <code>model.Node</code> 落库，并保留 <code>source_type/source_url/source_path</code> 溯源信息。</p>
+
+<p><code>flowx.json</code> 的完整字段规范见 <a href="./11-node-package.md" target="_blank">11. FlowX 节点包规范</a>。</p>
+
+<h2 id="67-事件推送与-web-ui-联动">6.7 事件推送与 Web UI 联动</h2>
+
+<p>所有 Service 层变更都会发布到内存事件总线（<code>internal/event/bus.go</code>），事件类型包括：</p>
+
+<ul>
+<li><code>workflow.created</code> / <code>workflow.updated</code> / <code>workflow.deleted</code></li>
+<li><code>node.created</code> / <code>node.updated</code> / <code>node.deleted</code></li>
+<li><code>execution.started</code> / <code>execution.completed</code> / <code>execution.log</code></li>
+</ul>
+<p>HTTP server 通过 <code>GET /api/v1/events</code>（<code>internal/handler/event_handler.go</code>）以 SSE 向 Web UI 推送：</p>
+
+<pre><code>event: workflow.created
+data: {"Type":"workflow.created","Data":{...}}</code></pre>
+
+<p>Web UI 订阅该流即可在 AI 客户端创建/修改/运行流水线时实时刷新界面。</p>
+
+<blockquote><strong>边界说明</strong>：事件总线是进程内的。<code>flowx-studio mcp</code> 进程产生的事件只在其自身进程内广播；若需要 Web UI 实时感知 AI 的操作，通常的部署方式是同时运行 <code>flowx-studio server</code>（提供 REST API + SSE），两者共享同一 SQLite 数据库——Web UI 通过 SSE 收到的是 <code>server</code> 进程内的事件，AI 通过 MCP 写入的数据则在其下次查询或 <code>server</code> 侧操作触发的刷新中可见。</blockquote>
+
+<h2 id="68-客户端配置示例">6.8 客户端配置示例</h2>
+
+<p>任意支持 stdio MCP 的客户端，只需把 <code>flowx-studio mcp</code> 注册为一个 MCP server。通用 JSON 配置：</p>
+
+<pre><code class="language-json">{
+  "mcpServers": {
+    "flowx-studio": {
+      "command": "flowx-studio",
+      "args": ["mcp"]
+    }
+  }
+}</code></pre>
+
+<p>配置后，AI 客户端会在会话开始时自动拉起 <code>flowx-studio mcp</code> 子进程，完成 <code>initialize</code> 握手并通过 <code>tools/list</code> 发现 8 个工具。典型协作流程：</p>
+
+<div class="mermaid-container">
+    <div class="mermaid-toolbar">
+        <button class="mermaid-fullscreen-btn" onclick="toggleMermaidFullscreen(this)" title="全屏查看">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+            全屏
+        </button>
+    </div>
+    <div class="mermaid-wrapper">
+        <pre class="mermaid">flowchart TD
+    A[用户描述需求] --> B[AI: list_nodes 查询可用节点]
+    B --> C[AI: 生成 FlowX YAML]
+    C --> D[AI: create_pipeline]
+    D -->|校验失败| C
+    D -->|成功| E[AI: run_pipeline]
+    E --> F[用户通过 streamUrl / Web UI 查看执行]
+    C -.需要新节点.-> G[AI: 编写 flowx.json + 代码]
+    G --> H[AI: import_node]
+    H --> C</pre>
+    </div>
+</div>
+
+            </article>
+        </main>
+    </div>
+    <div id="mermaid-overlay" class="mermaid-overlay" onclick="closeMermaidFullscreen(event)">
+        <div class="mermaid-overlay-content">
+            <button class="mermaid-close-btn" onclick="closeMermaidFullscreen(event)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+                关闭
+            </button>
+            <div id="mermaid-overlay-diagram"></div>
+            <div class="mermaid-zoom-controls">
+                <button onclick="zoomOut()" title="缩小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <button onclick="zoomIn()" title="放大">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <div class="zoom-separator"></div>
+                <span id="mermaid-scale-display" class="zoom-scale">100%</span>
+                <div class="zoom-separator"></div>
+                <button onclick="zoomFit()" title="适应屏幕">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path>
+                    </svg>
+                </button>
+                <button onclick="zoomReset()" title="原始大小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="1 4 1 10 7 10"></polyline>
+                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
