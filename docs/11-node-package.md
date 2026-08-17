@@ -410,7 +410,7 @@ Mock 测试入口 API 仍使用 `POST /api/v1/nodes/:id/mock`。
 - [x] 扩展 `sandbox.Executor` 支持多文件写入（`executor.go`）
 - [x] 实现节点包 → `flowx/core.NodeConfig` 展开逻辑（`internal/runtime/node_expander.go`）
 - [x] 更新前端 `NodeImportModal` 和 `NodeManagerPage`
-- [x] 为导入流程编写单元测试和端到端测试（`node_import_test.go`、`internal/mcpserver/import_node_test.go`）
+- [x] 为导入流程编写单元测试和端到端测试（`node_import_test.go`、`internal/cli/import_node_test.go`）
 
 ## 11.13 参考资料
 

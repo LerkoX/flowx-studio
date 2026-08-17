@@ -115,26 +115,35 @@ go build -o flowx-studio cmd/flowx-studio/main.go
 
 ### 8.2.2 命令设计
 
-实际提供两个子命令（见 `cmd/flowx-studio/main.go:37-61`）：
+实际提供一组服务端 + 客户端子命令（见 `cmd/flowx-studio/main.go` 与 `internal/cli`）：
 
 ```bash
 # 启动 HTTP 服务（Web UI + API）
 flowx-studio server
 
-# 启动 stdio MCP 服务
-flowx-studio mcp
+# 流水线管理（HTTP 客户端）
+flowx-studio pipeline list|create|update|delete|run
+
+# 节点管理（HTTP 客户端）
+flowx-studio node list|create|delete|import|mock
+
+# 终端交互（原 FAP 动作语义，纯终端）
+flowx-studio ask --key env --prompt "部署到哪个环境？"
+flowx-studio info --title "执行完成" --message "..."
 
 # 裸运行：仅打印帮助信息，不启动 server
 flowx-studio
 
-# 查看帮助
+# 查看帮助与参数契约
 flowx-studio --help
-flowx-studio server --help
-flowx-studio mcp --help
+flowx-studio pipeline create --help
+flowx-studio pipeline create --schema   # 输出参数 JSON Schema
 ```
 
 **注意**：
 - 裸运行 `flowx-studio` 不带子命令时只打印帮助，不会启动 server。
+- 客户端子命令默认连接 `http://127.0.0.1:8080`，可用 `--server` flag 或 `FLOWX_STUDIO_SERVER_URL` 环境变量覆盖；使用前需先运行 `flowx-studio server`。
+- `ask` / `info` 为纯终端交互命令，不访问 HTTP server。
 - 目前没有 `version` 命令（规划中，未实现）。
 - 运行 YAML 工作流的 CLI 功能保留在 FlowX 核心库中（`flowx run workflow.yaml`），不在 flowx-studio 中提供。
 
@@ -156,7 +165,7 @@ Flags:
 
 ### 8.2.4 Cobra 实现示例
 
-实际实现（简化自 `cmd/flowx-studio/main.go`）。注意：没有 `versionCmd`、`--config` flag，也没有 `viper.BindPFlag`；flag 仅在显式传参时手动覆盖配置（main.go:96-101），配置加载统一由 `config.Load()` 完成。
+实际实现（简化自 `cmd/flowx-studio/main.go`）。注意：没有 `versionCmd`、`--config` flag，也没有 `viper.BindPFlag`；flag 仅在显式传参时手动覆盖配置，配置加载统一由 `config.Load()` 完成。
 
 ```go
 package main
@@ -168,8 +177,9 @@ import (
 func main() {
     rootCmd := &cobra.Command{
         Use:   "flowx-studio",
-        Short: "FlowX Studio - FlowX runtime viewer with MCP support",
+        Short: "FlowX Studio - FlowX runtime viewer with CLI client",
     }
+    rootCmd.PersistentFlags().String("server", "http://127.0.0.1:8080", "HTTP server address (env: FLOWX_STUDIO_SERVER_URL)")
 
     serverCmd := &cobra.Command{
         Use:   "server",
@@ -180,12 +190,11 @@ func main() {
     serverCmd.Flags().String("host", "0.0.0.0", "HTTP server host")
     rootCmd.AddCommand(serverCmd)
 
-    mcpCmd := &cobra.Command{
-        Use:   "mcp",
-        Short: "Start the stdio MCP server",
-        RunE:  runMCP,
-    }
-    rootCmd.AddCommand(mcpCmd)
+    // 客户端子命令（HTTP client，实现见 internal/cli）
+    rootCmd.AddCommand(cli.NewPipelineCmd())
+    rootCmd.AddCommand(cli.NewNodeCmd())
+    rootCmd.AddCommand(cli.NewAskCmd())
+    rootCmd.AddCommand(cli.NewInfoCmd())
 
     if err := rootCmd.Execute(); err != nil {
         log.Fatal(err)
@@ -314,7 +323,7 @@ defer lock.Release()
 
 `Acquire()` 的行为：
 
-1. 读取 PID 文件，通过 `/proc/<pid>/cmdline` 判断对应进程是否仍是 `flowx-studio server`（按子命令名匹配，避免误杀 `mcp` 等其他子命令进程）。
+1. 读取 PID 文件，通过 `/proc/<pid>/cmdline` 判断对应进程是否仍是 `flowx-studio server`（按子命令名匹配，避免误杀其他进程）。
 2. 若已有同子命令实例在运行：先发送 `SIGTERM` 请求其优雅退出，最多等待 5 秒；若仍未退出则发送 `SIGKILL` 强制杀死。
 3. 写入当前进程 PID，完成接管。
 
@@ -514,7 +523,7 @@ require (
 
 ### 8.9.4 单例锁与优雅关闭
 
-- 启动时写入 `~/.flowx-studio/flowx-studio.pid`，若已存在则优雅终止旧进程。
+- 启动时写入 `~/.flowx-studio/flowx-studio.pid`，若已存在则优雅终止旧进程（仅 `server` 子命令持有锁；`pipeline`/`node` 等客户端子命令为无状态 HTTP 客户端，无需锁）。
 - 收到 `SIGINT`/`SIGTERM` 后：
   1. 调用 `http.Server.Shutdown()` 关闭 HTTP 服务。
   2. 停止 FlowX Runtime 后台循环。

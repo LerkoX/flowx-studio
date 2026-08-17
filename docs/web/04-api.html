@@ -48,7 +48,7 @@
 <li><a href="03-database.html">3. 数据库设计</a></li>
 <li><a href="04-api.html" class="active">4. API 设计</a></li>
 <li><a href="05-frontend.html">5. 前端设计</a></li>
-<li><a href="06-ai-service.html">6. AI 服务层设计</a></li>
+<li><a href="06-ai-service.html">6. AI 集成（SKILL + CLI）</a></li>
 <li><a href="07-node-system.html">7. 节点系统与执行引擎</a></li>
 <li><a href="08-runtime.html">8. 运行时与部署设计</a></li>
 <li><a href="09-security.html">9. 安全与错误处理设计</a></li>
@@ -717,52 +717,83 @@ data: {"execution_id": 42, "status": "success", "duration_ms": 135000, "timestam
   }
 }</code></pre>
 
-<h2 id="48-mcp-工具">4.8 MCP 工具</h2>
+<h2 id="48-cli-命令">4.8 CLI 命令</h2>
 
-<p>除 HTTP API 外，FlowX Studio 还内置 MCP（Model Context Protocol）服务，通过 stdio 传输，使用 <code>flowx-studio mcp</code> 命令启动。MCP 服务提供以下 8 个工具：</p>
+<p>除 HTTP API 外，<code>flowx-studio</code> 二进制还提供一组 CLI 客户端子命令，作为上述 REST API 的 HTTP 客户端（默认连接 <code>http://127.0.0.1:8080</code>，可用 <code>--server</code> flag 或 <code>FLOWX_STUDIO_SERVER_URL</code> 覆盖）。它们主要供 AI Agent（经 SKILL 文件指引）与终端用户使用：</p>
 
 <table>
 <thead>
 <tr>
-<th>工具</th>
+<th>命令</th>
 <th>说明</th>
+<th>底层 API</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>create_pipeline</td>
-<td>创建流水线/工作流（YAML 配置，非法 YAML 会返回校验错误）</td>
-</tr>
-<tr>
-<td>update_pipeline</td>
-<td>更新已有流水线/工作流</td>
-</tr>
-<tr>
-<td>delete_pipeline</td>
-<td>删除流水线/工作流</td>
-</tr>
-<tr>
-<td>list_pipelines</td>
+<td><code>pipeline list</code></td>
 <td>列出流水线/工作流</td>
+<td><code>GET /workflows</code></td>
 </tr>
 <tr>
-<td>run_pipeline</td>
-<td>运行流水线/工作流</td>
+<td><code>pipeline create --file wf.yaml</code></td>
+<td>创建流水线/工作流（YAML 非法时退出码 1，stderr 含校验错误）</td>
+<td><code>POST /workflows</code></td>
 </tr>
 <tr>
-<td>import_node</td>
+<td><code>pipeline update --id N --file wf.yaml</code></td>
+<td>更新流水线/工作流</td>
+<td><code>PUT /workflows/:id</code></td>
+</tr>
+<tr>
+<td><code>pipeline delete --id N</code></td>
+<td>删除流水线/工作流</td>
+<td><code>DELETE /workflows/:id</code></td>
+</tr>
+<tr>
+<td><code>pipeline run --id N [--follow]</code></td>
+<td>运行流水线/工作流；<code>--follow</code> 跟随 SSE 日志</td>
+<td><code>POST /workflows/:id/run</code>、<code>GET /executions/:id/stream</code></td>
+</tr>
+<tr>
+<td><code>node list</code></td>
+<td>列出节点</td>
+<td><code>GET /nodes</code></td>
+</tr>
+<tr>
+<td><code>node create --file node.yaml</code></td>
+<td>创建节点（承接原 FAP <code>create_node</code> 动作）</td>
+<td><code>POST /nodes</code></td>
+</tr>
+<tr>
+<td>`node import --type git\</td>
+<td>folder ...`</td>
 <td>从 Git 仓库或本地文件夹导入节点（读取 flowx.json）</td>
 </tr>
 <tr>
-<td>delete_node</td>
+<td><code>node delete --id N</code></td>
 <td>删除节点</td>
+<td><code>DELETE /nodes/:id</code></td>
 </tr>
 <tr>
-<td>list_nodes</td>
-<td>列出节点</td>
+<td><code>node mock --id N</code></td>
+<td>Mock 测试节点</td>
+<td><code>POST /nodes/:id/mock</code></td>
+</tr>
+<tr>
+<td><code>ask --key k --prompt ...</code></td>
+<td>终端交互式提问（承接原 FAP <code>ask_input</code>，纯终端，不访问 server）</td>
+<td>无</td>
+</tr>
+<tr>
+<td><code>info --title t --message m</code></td>
+<td>终端信息卡片（承接原 FAP <code>show_info</code>，纯终端，不访问 server）</td>
+<td>无</td>
 </tr>
 </tbody>
 </table>
+
+<p>全局约定：所有查询类子命令支持 <code>--json</code> 输出结构化结果；数据写入类子命令支持 <code>--schema</code> 输出参数 JSON Schema；校验失败以非零退出码退出并在 stderr 给出重试指引。详见 <a href="./06-ai-service.md" target="_blank">06-ai-service.md</a>。</p>
 
 <h2 id="49-api-路由汇总">4.9 API 路由汇总</h2>
 

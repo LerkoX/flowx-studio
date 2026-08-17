@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>6. AI 服务层设计 - FlowX Studio</title>
+    <title>6. AI 集成（SKILL + CLI） - FlowX Studio</title>
     <link rel="stylesheet" href="style.css">
     <script type="module">
         import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
@@ -48,7 +48,7 @@
 <li><a href="03-database.html">3. 数据库设计</a></li>
 <li><a href="04-api.html">4. API 设计</a></li>
 <li><a href="05-frontend.html">5. 前端设计</a></li>
-<li><a href="06-ai-service.html" class="active">6. AI 服务层设计</a></li>
+<li><a href="06-ai-service.html" class="active">6. AI 集成（SKILL + CLI）</a></li>
 <li><a href="07-node-system.html">7. 节点系统与执行引擎</a></li>
 <li><a href="08-runtime.html">8. 运行时与部署设计</a></li>
 <li><a href="09-security.html">9. 安全与错误处理设计</a></li>
@@ -59,27 +59,35 @@
 </nav>
         <main class="content">
             <article>
-                <h1 id="6-ai-集成mcp-服务端">6. AI 集成（MCP 服务端）</h1>
+                <h1 id="6-ai-集成skill-cli-渐进式披露">6. AI 集成（SKILL + CLI 渐进式披露）</h1>
 
-<blockquote>本文档描述 FlowX Studio 当前的 AI 集成方式：FlowX Studio 自身作为 <strong>stdio MCP 服务端</strong>，由外部 AI 客户端（Claude Code、opencode 等）驱动流水线与节点的生成、校验、执行。</blockquote>
+<blockquote>本文档描述 FlowX Studio 当前的 AI 集成方式：FlowX Studio 提供一个 <strong>SKILL（技能文件）+ <code>flowx-studio</code> CLI 客户端</strong>，由外部 AI Agent（Claude Code、opencode、pi 等）通过 Shell 调用 CLI，CLI 再以 HTTP 客户端身份与 <code>flowx-studio server</code> 启动的 Web 服务端交互，完成流水线与节点的生成、校验、执行。</blockquote>
 
 <h2 id="61-设计演变">6.1 设计演变</h2>
 
-<p>早期版本（2026-07-12 之前）曾内置一套后端 AI 服务层，包含：</p>
+<h3 id="第一阶段后端-ai-服务层已移除">第一阶段：后端 AI 服务层（已移除）</h3>
+
+<p>早期版本（2026-07-12 之前）曾内置一套后端 AI 服务层，包含多 Provider 抽象（OpenAI / Anthropic / Ollama）、Prompt 模板、API Key 加密存储与 FAP（FlowX Action Protocol）动作协议。该方案要求服务端持有密钥、维护 Prompt 并承担会话管理，复杂度高，<strong>2026-07-12 架构调整中整体移除</strong>。</p>
+
+<h3 id="第二阶段stdio-mcp-服务端已移除">第二阶段：stdio MCP 服务端（已移除）</h3>
+
+<p>2026-07-12 至 2026-08-17 期间，AI 集成采用「外部 AI 客户端 + FlowX Studio stdio MCP 服务端」模式（<code>flowx-studio mcp</code> 子命令，JSON-RPC 2.0 over stdio，8 个工具）。实践中暴露出几个问题：</p>
 
 <ul>
-<li>多 Provider 抽象（OpenAI / Anthropic / Ollama）</li>
-<li>Prompt 工程模板、NodeGenerator / WorkflowGenerator</li>
-<li>API Key 的 AES-GCM 加密存储、<code>ai_call_logs</code> 调用审计</li>
-<li>FAP（FlowX Action Protocol）动作协议与对话式交互</li>
+<li><strong>依赖客户端 MCP 支持</strong>：并非所有 Agent/客户端都支持 MCP 协议，接入面受限。</li>
+<li><strong>进程模型复杂</strong>：MCP 进程由客户端按会话拉起，与 <code>server</code> 进程相互独立，事件总线是进程内的，导致「MCP 写入的数据 Web UI 无法实时感知」的边界问题。</li>
+<li><strong>协议开销</strong>：JSON-RPC 握手、工具发现、<code>isError</code> 包装等协议层代码与业务无关，维护成本高。</li>
 </ul>
-<p>这套方案要求服务端持有各家 AI 的密钥、维护 Prompt 模板并承担重试与会话管理，复杂度高且与「可视化查看器」的定位不符。<strong>2026-07-12 架构调整中该服务层被整体移除</strong>：</p>
+<h3 id="第三阶段skill-cli-渐进式披露当前">第三阶段：SKILL + CLI 渐进式披露（当前）</h3>
+
+<p><strong>2026-08-17 架构调整</strong>：移除 <code>internal/mcpserver</code> 与 <code>flowx-studio mcp</code> 子命令，改为 <strong>SKILL + CLI</strong> 模式：</p>
 
 <ul>
-<li><code>internal/db/migrations/002_remove_ai_mcp.sql</code> 删除 <code>ai_configs</code>、<code>chat_history</code>、<code>mcp_configs</code> 表</li>
-<li><code>internal/ai</code> 包与 <code>/api/v1/ai</code> 路由全部移除</li>
+<li><strong>SKILL</strong>：仓库内提供 <code>skills/flowx-studio/SKILL.md</code>，安装到 Agent 的技能目录后，Agent 在路由阶段只需加载一份简短速查表，便知道「何时用、用什么命令」。</li>
+<li><strong>CLI 客户端</strong>：<code>flowx-studio</code> 在 <code>server</code> 子命令之外提供一组客户端子命令（<code>pipeline</code> / <code>node</code> / <code>ask</code> / <code>info</code> 等），它们是 <code>flowx-studio server</code> 的 <strong>HTTP 客户端</strong>，通过 REST API 完成全部读写。</li>
+<li><strong>渐进式披露</strong>：SKILL.md 只放最小必要信息；详细用法由 <code>flowx-studio &lt;cmd&gt; --help</code> 按需展开；机器可读的参数契约由 <code>flowx-studio &lt;cmd&gt; --schema</code> 输出。Agent 只在需要时才加载更深层的信息，上下文开销最小。</li>
 </ul>
-<p>当前架构为「<strong>外部 AI 客户端 + FlowX Studio stdio MCP 服务端</strong>」，职责划分清晰：</p>
+<p>职责划分：</p>
 
 <table>
 <thead>
@@ -91,17 +99,32 @@
 <tbody>
 <tr>
 <td>需求理解、YAML/节点包生成、失败重试、会话管理</td>
-<td>外部 AI 客户端（Claude Code、opencode 等）</td>
+<td>外部 AI Agent（Claude Code、opencode、pi 等）</td>
+</tr>
+<tr>
+<td>SKILL 路由与调用指引</td>
+<td><code>skills/flowx-studio/SKILL.md</code></td>
+</tr>
+<tr>
+<td>命令行入口、HTTP 调用、输出格式化、错误码</td>
+<td><code>flowx-studio</code> CLI 客户端子命令</td>
 </tr>
 <tr>
 <td>YAML 校验、持久化、节点导入、流水线执行、事件推送</td>
-<td>FlowX Studio（MCP 服务端）</td>
+<td>FlowX Studio HTTP Server（<code>flowx-studio server</code>）</td>
 </tr>
 </tbody>
 </table>
 
-<p>服务端不再感知任何 AI Provider，不存储密钥，不维护 Prompt。AI 能力完全来自用户自己选择的客户端。</p>
+<p>服务端不感知任何 AI Provider，不存储密钥，不维护 Prompt。AI 能力完全来自用户自己选择的 Agent。</p>
 
+<p><strong>相比 MCP 模式的收益</strong>：</p>
+
+<ul>
+<li>任何能执行 Shell 命令的 Agent 都可接入，无协议门槛。</li>
+<li>所有写操作都经过 HTTP server 单进程，事件总线只有一份，Web UI 通过 SSE 可<strong>实时</strong>感知 Agent 的全部操作（旧 MCP 模式的跨进程边界问题随之消失）。</li>
+<li>CLI 即文档：<code>--help</code> / <code>--schema</code> 自描述，SKILL.md 可以保持极简。</li>
+</ul>
 <h2 id="62-总体架构">6.2 总体架构</h2>
 
 <div class="mermaid-container">
@@ -116,24 +139,27 @@
     <div class="mermaid-wrapper">
         <pre class="mermaid">flowchart LR
     subgraph 外部
-        AI[AI 客户端<br/>Claude Code / opencode / ...]
+        AI[AI Agent<br/>Claude Code / opencode / pi / ...]
+        SKILL[skills/flowx-studio/SKILL.md<br/>技能速查表]
     end
 
     subgraph FlowX Studio
-        MCP[flowx-studio mcp<br/>stdio MCP 服务端<br/>internal/mcpserver]
+        CLI["flowx-studio CLI<br/>pipeline / node / ask / info<br/>(HTTP 客户端)"]
+        HTTP["flowx-studio server<br/>Gin HTTP Server"]
         VAL[WorkflowValidator<br/>internal/validator]
         SVC[WorkflowService / NodeService<br/>NodeImportService]
         BUS[Event Bus<br/>internal/event]
-        HTTP[HTTP Server<br/>flowx-studio server]
     end
 
     DB[(SQLite)]
     RT[FlowX Runtime]
     UI[Web UI]
 
-    AI -- "JSON-RPC 2.0 over stdio" --> MCP
-    MCP --> VAL
-    MCP --> SVC
+    AI -. "路由阶段加载" .-> SKILL
+    AI -- "Shell 调用" --> CLI
+    CLI -- "HTTP REST /api/v1" --> HTTP
+    HTTP --> VAL
+    HTTP --> SVC
     VAL --> SVC
     SVC --> DB
     SVC --> RT
@@ -146,234 +172,214 @@
 <p>要点：</p>
 
 <ul>
-<li><strong>AI 客户端</strong>通过标准 MCP 配置拉起 <code>flowx-studio mcp</code> 子进程，以 stdio 进行 JSON-RPC 2.0 通信。</li>
-<li><strong>MCP 服务端</strong>只暴露 8 个工具，所有写操作先经 <code>WorkflowValidator</code> / <code>NodeImportService</code> 校验，失败时返回错误文本引导 AI 重新生成。</li>
-<li><strong>HTTP Server</strong>（<code>flowx-studio server</code>）与 MCP 服务端相互独立；Web UI 通过 SSE 订阅事件总线，实时感知 AI 客户端造成的流水线/节点变更。</li>
+<li><strong>AI Agent</strong> 通过 Shell 执行 <code>flowx-studio</code> 子命令；SKILL.md 告诉它何时用哪个命令。</li>
+<li><strong>CLI 客户端</strong>只做参数解析、HTTP 调用与输出格式化，不含业务逻辑；默认连接 <code>http://127.0.0.1:8080</code>，可用 <code>--server</code> flag 或 <code>FLOWX_STUDIO_SERVER_URL</code> 环境变量覆盖。</li>
+<li><strong>HTTP Server</strong> 是唯一持有业务逻辑与事件总线的进程；CLI 的一切写入都会触发事件，经 SSE 实时推送到 Web UI。</li>
+<li><strong>前置条件</strong>：使用 CLI 客户端子命令前，必须先运行 <code>flowx-studio server</code>。</li>
 </ul>
-<h2 id="63-传输与协议">6.3 传输与协议</h2>
+<h2 id="63-渐进式披露progressive-disclosure">6.3 渐进式披露（Progressive Disclosure）</h2>
 
-<h3 id="631-stdio-json-rpc-20">6.3.1 stdio + JSON-RPC 2.0</h3>
+<p>AI 集成不依赖大而全的系统 Prompt，而是把信息分三层，Agent 按需深入：</p>
 
-<p>MCP 服务端实现位于 <code>internal/mcpserver/server.go</code>：</p>
+<table>
+<thead>
+<tr>
+<th>层级</th>
+<th>载体</th>
+<th>内容</th>
+<th>加载时机</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>L1 路由层</td>
+<td><code>skills/flowx-studio/SKILL.md</code></td>
+<td>场景描述、命令速查表、典型流程、错误处理约定</td>
+<td>Agent 判断任务匹配时加载（常驻上下文，极简）</td>
+</tr>
+<tr>
+<td>L2 用法层</td>
+<td><code>flowx-studio &lt;cmd&gt; --help</code></td>
+<td>子命令完整用法、flag 说明、示例</td>
+<td>Agent 首次使用某命令时执行查看</td>
+</tr>
+<tr>
+<td>L3 契约层</td>
+<td><code>flowx-studio &lt;cmd&gt; --schema</code></td>
+<td>该命令参数的 JSON Schema（名称/类型/必填/枚举/默认值）</td>
+<td>Agent 需要精确构造参数或批量调用时查看</td>
+</tr>
+</tbody>
+</table>
+
+<p>设计约定：</p>
 
 <ul>
-<li>传输层为 <strong>stdio</strong>：逐行读取 stdin（每行一个 JSON 消息），响应逐行写入 stdout（<code>server.go:63-105</code>）。</li>
-<li>消息格式为 <strong>JSON-RPC 2.0</strong>，<code>jsonrpc</code> 字段必须为 <code>"2.0"</code>，否则返回 <code>-32600</code>；无法解析的输入返回 <code>-32700</code>；未知方法返回 <code>-32601</code>；参数非法返回 <code>-32602</code>。</li>
-<li><code>initialize</code> 握手返回 <code>protocolVersion: "2024-11-05"</code>，<code>serverInfo: {name: "flowx-studio", version: "1.0.0"}</code>，能力声明仅包含 <code>tools</code>（<code>server.go:123-138</code>）。</li>
-<li>支持的方法：<code>initialize</code>、<code>initialized</code>（通知，无响应）、<code>tools/list</code>、<code>tools/call</code>。</li>
-<li><code>tools/call</code> 优先读取标准 MCP 的 <code>params.arguments</code> 字段；若为空则兼容把参数直接放在 <code>params</code> 顶层的客户端（<code>server.go:159-163</code>）。</li>
-<li>工具结果统一包装为 <code>{content: [{type: "text", text: ...}], isError: bool}</code>，业务错误<strong>不使用 JSON-RPC error</strong>，而是通过 <code>isError: true</code> + 错误文本返回，便于 AI 读取后自行修正重试。</li>
+<li><strong><code>--schema</code> 输出 JSON Schema</strong>：每个数据写入类子命令必须支持，输出到 stdout，退出码 0。Agent 解析 Schema 后即可一次性构造合法参数，减少试错往返。</li>
+<li><strong>错误即指令</strong>：校验失败时 CLI 以<strong>非零退出码</strong>退出，stderr 输出人类/AI 均可读的错误详情，并以 <code>Please regenerate the YAML and retry.</code> 之类的重试指引结尾（语义同旧 MCP 的 <code>isError: true</code> 文本）。</li>
+<li><strong><code>--json</code> 机器可读输出</strong>：所有查询类子命令支持 <code>--json</code>，输出结构化 JSON（默认输出为人类可读的表格/摘要）。</li>
+<li><strong>SKILL.md 保持极简</strong>：只放命令速查与流程图，不复制 flag 细节；细节一律通过 <code>--help</code> / <code>--schema</code> 在运行时获取，避免文档与实现漂移。</li>
 </ul>
-<h3 id="632-启动方式与并发模型">6.3.2 启动方式与并发模型</h3>
+<h2 id="64-cli-命令清单">6.4 CLI 命令清单</h2>
 
-<pre><code class="language-bash">flowx-studio mcp</code></pre>
+<p>CLI 客户端子命令覆盖原 MCP 8 个工具的全部能力，并新增原 FAP 动作对应的命令。全局 flag：</p>
 
-<p><code>cmd/flowx-studio/main.go:51-56</code> 注册 <code>mcp</code> 子命令，<code>main.go:157-178</code> 的 <code>runMCP</code> 实现有以下特点：</p>
+<table>
+<thead>
+<tr>
+<th>Flag / 环境变量</th>
+<th>说明</th>
+<th>默认值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--server</code> / <code>FLOWX_STUDIO_SERVER_URL</code></td>
+<td>HTTP server 地址</td>
+<td><code>http://127.0.0.1:8080</code></td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>以 JSON 输出结果</td>
+<td>false</td>
+</tr>
+<tr>
+<td><code>--schema</code></td>
+<td>输出该命令参数的 JSON Schema 后退出</td>
+<td>false</td>
+</tr>
+</tbody>
+</table>
+
+<p>退出码约定：<code>0</code> 成功；<code>1</code> 业务/校验失败（stderr 含错误详情与重试指引）；<code>2</code> 用法错误（参数解析失败，由 Cobra 输出用法）。</p>
+
+<h3 id="641-流水线命令pipeline">6.4.1 流水线命令（pipeline）</h3>
+
+<table>
+<thead>
+<tr>
+<th>命令</th>
+<th>说明</th>
+<th>对应原 MCP 工具</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>flowx-studio pipeline list [--status s] [--search kw] [--page n] [--page-size n]</code></td>
+<td>分页列出流水线</td>
+<td><code>list_pipelines</code></td>
+</tr>
+<tr>
+<td><code>flowx-studio pipeline create --name n --file wf.yaml [--description d] [--status draft]</code></td>
+<td>创建流水线，YAML 经服务端校验</td>
+<td><code>create_pipeline</code></td>
+</tr>
+<tr>
+<td><code>flowx-studio pipeline update --id N [--name n] [--file wf.yaml] [--status s]</code></td>
+<td>更新流水线，YAML 同样被校验</td>
+<td><code>update_pipeline</code></td>
+</tr>
+<tr>
+<td><code>flowx-studio pipeline delete --id N</code></td>
+<td>删除流水线</td>
+<td><code>delete_pipeline</code></td>
+</tr>
+<tr>
+<td><code>flowx-studio pipeline run --id N [--follow]</code></td>
+<td>触发执行，输出 execution id 与 stream URL；<code>--follow</code> 时在终端持续跟随 SSE 日志</td>
+<td><code>run_pipeline</code></td>
+</tr>
+</tbody>
+</table>
+
+<p>说明：</p>
 
 <ul>
-<li><strong>不持有单例 PID 锁</strong>：与 <code>server</code> 子命令不同（<code>server</code> 通过 <code>singleton.New(...flowx-studio.pid)</code> 保证单实例，<code>main.go:107-112</code>），MCP 进程允许每个 AI 会话独立启动一个实例，天然支持多客户端并发。</li>
-<li><strong>不启动 HTTP server</strong>：只初始化数据库、事件总线、Runtime Adapter 和各 Service，然后在 stdio 上阻塞监听。</li>
-<li>同样启动 <code>StartEventBridge</code>，执行事件会照常进入事件总线（仅对同进程订阅者可见；Web UI 实时刷新依赖的是 <code>server</code> 进程内的事件总线，见 6.7 节的边界说明）。</li>
+<li>YAML 通过 <code>--file</code> 从文件读入（<code>-</code> 表示 stdin），避免超长命令行转义问题。</li>
+<li><code>pipeline run</code> 默认输出 <code>Started execution id=&lt;execID&gt; streamUrl=/api/v1/executions/&lt;execID&gt;/stream</code>；加 <code>--follow</code> 后 CLI 订阅该 SSE 流并把日志打印到终端，直到执行结束。</li>
 </ul>
-<h2 id="64-工具清单">6.4 工具清单</h2>
-
-<p><code>tools/list</code> 返回 8 个工具（定义见 <code>internal/mcpserver/tools.go:18-184</code>）。所有工具调用结果均为文本；失败时 <code>isError: true</code> 且文本中包含可供 AI 修正的错误详情。</p>
-
-<h3 id="641-create_pipeline">6.4.1 create_pipeline</h3>
-
-<p>创建流水线。YAML 非法时返回校验错误，AI 应修正后重试。</p>
+<h3 id="642-节点命令node">6.4.2 节点命令（node）</h3>
 
 <table>
 <thead>
 <tr>
-<th>参数</th>
-<th>类型</th>
-<th>必填</th>
+<th>命令</th>
 <th>说明</th>
+<th>对应原 MCP 工具</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>name</code></td>
-<td>string</td>
-<td>是</td>
-<td>流水线名称</td>
+<td><code>flowx-studio node list [--language l] [--tag t] [--search kw] [--node-type t] [--page n] [--page-size n]</code></td>
+<td>分页列出节点（生成 YAML 前查询可用 <code>nodeRef</code> 名称）</td>
+<td><code>list_nodes</code></td>
 </tr>
 <tr>
-<td><code>yaml_config</code></td>
-<td>string</td>
-<td>是</td>
-<td>FlowX YAML 配置（必须是合法 YAML）</td>
+<td><code>flowx-studio node import --type git --url &lt;repo&gt;</code> / <code>flowx-studio node import --type folder --path &lt;dir&gt;</code></td>
+<td>从 Git 仓库或本地文件夹导入节点包（读取 <code>flowx.json</code>）</td>
+<td><code>import_node</code></td>
 </tr>
 <tr>
-<td><code>description</code></td>
-<td>string</td>
-<td>否</td>
-<td>描述</td>
+<td><code>flowx-studio node create --file node.yaml</code></td>
+<td>直接创建代码节点（对应原 FAP <code>create_node</code> 动作）</td>
+<td>无（原 FAP 能力）</td>
 </tr>
 <tr>
-<td><code>intent</code></td>
-<td>string</td>
-<td>否</td>
-<td>意图说明</td>
+<td><code>flowx-studio node delete --id N</code></td>
+<td>删除节点</td>
+<td><code>delete_node</code></td>
 </tr>
 <tr>
-<td><code>status</code></td>
-<td>string</td>
-<td>否</td>
-<td><code>draft</code>（默认）/ <code>active</code> / <code>archived</code></td>
+<td><code>flowx-studio node mock --id N [--params '{...}']</code></td>
+<td>触发节点 Mock 测试并输出结果</td>
+<td>无（新增，便于 Agent 自验）</td>
 </tr>
 </tbody>
 </table>
 
-<p>返回：成功 <code>Created pipeline id=&lt;id&gt; name=&lt;name&gt;</code>；失败 <code>Failed to create pipeline: &lt;err&gt;. Please regenerate the YAML and retry.</code>（<code>tools.go:186-213</code>）。</p>
+<h3 id="643-交互命令原-fap-动作的-cli-等价物">6.4.3 交互命令（原 FAP 动作的 CLI 等价物）</h3>
 
-<h3 id="642-update_pipeline">6.4.2 update_pipeline</h3>
-
-<p>按 ID 更新流水线，YAML 同样会被校验，非法即拒绝。</p>
+<p>原 FAP（FlowX Action Protocol）定义了 <code>create_node</code> / <code>update_workflow</code> / <code>ask_input</code> / <code>show_info</code> 四种动作标签。FAP 协议本身已移除，其语义由以下 CLI 命令承接：</p>
 
 <table>
 <thead>
 <tr>
-<th>参数</th>
-<th>类型</th>
-<th>必填</th>
-<th>说明</th>
+<th>原 FAP 标签</th>
+<th>CLI 命令</th>
+<th>行为</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>id</code></td>
-<td>integer</td>
-<td>是</td>
-<td>流水线 ID</td>
+<td><code>[[ACTION:create_node]]</code></td>
+<td><code>flowx-studio node create --file node.yaml</code></td>
+<td>创建节点，输出新节点摘要</td>
 </tr>
 <tr>
-<td><code>name</code></td>
-<td>string</td>
-<td>是</td>
-<td>名称</td>
+<td><code>[[ACTION:update_workflow]]</code></td>
+<td><code>flowx-studio pipeline update --id N --file wf.yaml</code></td>
+<td>更新流水线，非法 YAML 拒绝并给出重试指引</td>
 </tr>
 <tr>
-<td><code>yaml_config</code></td>
-<td>string</td>
-<td>是</td>
-<td>FlowX YAML 配置</td>
+<td><code>[[ACTION:ask_input]]</code></td>
+<td><code>flowx-studio ask --key name --prompt "请输入环境" [--type string] [--options a,b,c] [--default v]</code></td>
+<td>在终端向用户发起一次交互式提问，把用户回答以 <code>&lt;key&gt;=&lt;value&gt;</code> 输出到 stdout，供 Agent 捕获后继续</td>
 </tr>
 <tr>
-<td><code>description</code> / <code>intent</code> / <code>status</code></td>
-<td>string</td>
-<td>否</td>
-<td>同 create</td>
+<td><code>[[ACTION:show_info]]</code></td>
+<td>`flowx-studio info --title "构建完成" --message "..." [--level info\</td>
+<td>warn\</td>
 </tr>
 </tbody>
 </table>
 
-<p>返回：<code>Updated pipeline id=&lt;id&gt;</code> 或带 <code>Please regenerate the YAML and retry.</code> 的错误（<code>tools.go:215-239</code>）。</p>
-
-<h3 id="643-delete_pipeline">6.4.3 delete_pipeline</h3>
-
-<p>按 ID 删除流水线。参数：<code>id</code>（integer，必填）。返回 <code>Deleted pipeline id=&lt;id&gt;</code>。</p>
-
-<h3 id="644-list_pipelines">6.4.4 list_pipelines</h3>
-
-<p>分页列出流水线，供 AI 查询已有资源。参数均可选：</p>
-
-<table>
-<thead>
-<tr>
-<th>参数</th>
-<th>类型</th>
-<th>默认</th>
-<th>说明</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>status</code></td>
-<td>string</td>
-<td>-</td>
-<td>按状态过滤</td>
-</tr>
-<tr>
-<td><code>search</code></td>
-<td>string</td>
-<td>-</td>
-<td>关键字搜索</td>
-</tr>
-<tr>
-<td><code>page</code></td>
-<td>integer</td>
-<td>1</td>
-<td>页码</td>
-</tr>
-<tr>
-<td><code>page_size</code></td>
-<td>integer</td>
-<td>20</td>
-<td>每页数量</td>
-</tr>
-</tbody>
-</table>
-
-<p>返回：分页结果的 JSON 字符串。</p>
-
-<h3 id="645-run_pipeline">6.4.5 run_pipeline</h3>
-
-<p>按 ID 触发执行。参数：<code>id</code>（integer，必填）。</p>
-
-<p>返回：<code>Started execution id=&lt;execID&gt; streamUrl=/api/v1/executions/&lt;execID&gt;/stream</code>。<code>streamUrl</code> 指向 HTTP server 上的 SSE 日志流，AI 可把它交给用户查看实时日志（<code>tools.go:270-282</code>、<code>internal/service/workflow.go:199</code>）。</p>
-
-<h3 id="646-import_node">6.4.6 import_node</h3>
-
-<p>从 Git 仓库或本地文件夹导入节点包（读取 <code>flowx.json</code>）。<strong>这是通过 MCP 新增节点的唯一途径</strong>（<code>tools.go:127-147</code>）。</p>
-
-<table>
-<thead>
-<tr>
-<th>参数</th>
-<th>类型</th>
-<th>必填</th>
-<th>说明</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>source_type</code></td>
-<td>string</td>
-<td>是</td>
-<td><code>git</code> 或 <code>folder</code></td>
-</tr>
-<tr>
-<td><code>source_url</code></td>
-<td>string</td>
-<td><code>git</code> 时必填</td>
-<td>Git 仓库 URL</td>
-</tr>
-<tr>
-<td><code>source_path</code></td>
-<td>string</td>
-<td><code>folder</code> 时必填</td>
-<td>本地目录路径</td>
-</tr>
-</tbody>
-</table>
-
-<p>返回：导入成功的节点摘要 JSON（<code>id</code>、<code>name</code>、<code>display_name</code>、<code>version</code>、<code>language</code>、<code>node_type</code>、<code>image</code>、<code>parameters</code>、<code>outputs</code>）。详见 6.6 节。</p>
-
-<h3 id="647-delete_node">6.4.7 delete_node</h3>
-
-<p>按 ID 删除节点。参数：<code>id</code>（integer，必填）。返回 <code>Deleted node id=&lt;id&gt;</code>。</p>
-
-<h3 id="648-list_nodes">6.4.8 list_nodes</h3>
-
-<p>分页列出节点，供 AI 在生成 YAML 前查询可用节点名（用于 <code>nodeRef</code>）。参数均可选：<code>language</code>、<code>tag</code>、<code>search</code>、<code>node_type</code>、<code>page</code>（默认 1）、<code>page_size</code>（默认 20）。返回分页结果 JSON。</p>
+<p><code>ask</code> 与 <code>info</code> 不访问 HTTP server，是纯粹的终端交互命令：Agent 在 Shell 会话中执行它们即可与用户完成「提问 / 展示」闭环，替代了原 FAP 需要前端配合渲染表单与卡片的能力。</p>
 
 <h2 id="65-yaml-生成与校验约定">6.5 YAML 生成与校验约定</h2>
 
 <h3 id="651-校验规则">6.5.1 校验规则</h3>
 
-<p><code>create_pipeline</code> / <code>update_pipeline</code> 落库前都会经过 <code>WorkflowValidator</code>（<code>internal/validator/workflow.go</code>），规则如下：</p>
+<p><code>pipeline create</code> / <code>pipeline update</code> 的 YAML 由服务端 <code>WorkflowValidator</code>（<code>internal/validator/workflow.go</code>）校验，规则如下：</p>
 
 <ol>
 <li><code>yaml_config</code> 非空且能被 YAML 解析。</li>
@@ -384,7 +390,11 @@
 <li>至少包含一条状态迁移（形如 <code>A --&gt; B</code>，支持 <code>[*]</code> 起止节点）。</li>
 <li>若存在 <code>Executors</code>，其必须是 map，且每个节点声明的 <code>executor</code> 必须在 <code>Executors</code> 中有定义。</li>
 </ol>
-<p>校验失败时工具返回如 <code>Failed to create pipeline: 'Graph' must start with 'stateDiagram-v2'. Please regenerate the YAML and retry.</code>，<strong>错误文本即重试指令</strong>，AI 客户端应修正 YAML 后再次调用同一工具。</p>
+<p>校验失败时服务端返回 400，CLI 将其转换为退出码 1，stderr 输出如：</p>
+
+<pre><code>Error: failed to create pipeline: 'Graph' must start with 'stateDiagram-v2'. Please regenerate the YAML and retry.</code></pre>
+
+<p><strong>错误文本即重试指令</strong>，Agent 应修正 YAML 后再次执行同一命令。</p>
 
 <h3 id="652-校验-重试循环">6.5.2 校验-重试循环</h3>
 
@@ -399,21 +409,25 @@
     </div>
     <div class="mermaid-wrapper">
         <pre class="mermaid">sequenceDiagram
-    participant AI as AI 客户端
-    participant MCP as flowx-studio mcp
+    participant AI as AI Agent
+    participant CLI as flowx-studio CLI
+    participant HTTP as flowx-studio server
     participant V as WorkflowValidator
     participant DB as SQLite
 
-    AI->>MCP: tools/call create_pipeline(yaml_config)
-    MCP->>V: ValidateWorkflow(yaml)
+    AI->>CLI: pipeline create --file wf.yaml
+    CLI->>HTTP: POST /api/v1/workflows
+    HTTP->>V: ValidateWorkflow(yaml)
     alt 校验失败
-        V-->>MCP: error（缺字段 / Graph 非法 / executor 未定义）
-        MCP-->>AI: isError=true, "...Please regenerate the YAML and retry."
+        V-->>HTTP: error（缺字段 / Graph 非法 / executor 未定义）
+        HTTP-->>CLI: 400 + 错误详情
+        CLI-->>AI: 退出码 1, stderr "...Please regenerate the YAML and retry."
         AI->>AI: 根据错误修正 YAML
-        AI->>MCP: tools/call create_pipeline（重试）
+        AI->>CLI: pipeline create --file wf.yaml（重试）
     end
-    MCP->>DB: 持久化
-    MCP-->>AI: Created pipeline id=N</pre>
+    HTTP->>DB: 持久化
+    HTTP-->>CLI: 200 + 工作流对象
+    CLI-->>AI: 退出码 0, "Created pipeline id=N name=..."</pre>
     </div>
 </div>
 
@@ -435,24 +449,24 @@ Executors:
   download-image-executor:
     type: docker</code></pre>
 
-<p>执行前 <code>ExpandWorkflowConfig</code>（<code>internal/runtime/node_expander.go:103-164</code>）会：</p>
+<p>执行前 <code>ExpandWorkflowConfig</code>（<code>internal/runtime/node_expander.go</code>）会：</p>
 
 <ol>
-<li>按 <code>nodeRef</code> 名称查找节点（<code>list_nodes</code> 可查可用名称）；</li>
+<li>按 <code>nodeRef</code> 名称查找节点（<code>node list</code> 可查可用名称）；</li>
 <li>用 <code>ExpandNodeToConfig</code> 把节点包展开为 FlowX 核心 <code>NodeConfig</code>：注入环境变量（<code>env</code> 映射或默认 <code>FLOWX_PARAM_&lt;NAME&gt;</code> 模板）、写入入口文件与附属文件、拼接运行命令（<code>run</code> 或按语言默认）；</li>
 <li>自动补充 <code>&lt;node名&gt;-executor</code> 的 Executor 定义（<code>image</code> 存在时默认 <code>docker</code>，否则 <code>local</code>）。</li>
 </ol>
-<p>因此 AI 生成 YAML 时通常只需关心 <code>Graph</code> 拓扑和 <code>nodeRef</code> 引用，节点实现细节由节点包承载。</p>
+<p>因此 Agent 生成 YAML 时通常只需关心 <code>Graph</code> 拓扑和 <code>nodeRef</code> 引用，节点实现细节由节点包承载。</p>
 
 <h2 id="66-节点包导入">6.6 节点包导入</h2>
 
-<p><code>import_node</code> 的背后是 <code>NodeImportService</code>（<code>internal/service/node_import.go</code>）：</p>
+<p><code>node import</code> 的背后是 <code>NodeImportService</code>（<code>internal/service/node_import.go</code>）：</p>
 
 <ul>
-<li><strong>git</strong>：<code>git clone --depth 1</code> 到临时目录后导入，导入完成即清理（<code>node_import.go:27-48</code>）。</li>
-<li><strong>folder</strong>：直接读取本地目录（<code>node_import.go:51-66</code>）。</li>
+<li><strong>git</strong>：<code>git clone --depth 1</code> 到临时目录后导入，导入完成即清理。</li>
+<li><strong>folder</strong>：直接读取本地目录。</li>
 </ul>
-<p>两种来源最终都读取目录下的 <code>flowx.json</code> 清单并做完整校验（<code>validatePackage</code>，<code>node_import.go:99-162</code>）：</p>
+<p>两种来源最终都读取目录下的 <code>flowx.json</code> 清单并做完整校验（<code>validatePackage</code>）：</p>
 
 <ul>
 <li><code>name</code> 必填，须以字母开头、仅含字母数字/下划线/连字符；</li>
@@ -480,24 +494,45 @@ Executors:
 <pre><code>event: workflow.created
 data: {"Type":"workflow.created","Data":{...}}</code></pre>
 
-<p>Web UI 订阅该流即可在 AI 客户端创建/修改/运行流水线时实时刷新界面。</p>
+<p>由于 CLI 客户端的一切写操作都经由 HTTP server 完成，事件天然产生于 server 进程内部，Web UI 订阅该流即可<strong>实时</strong>感知 Agent 创建/修改/运行流水线的全部操作——这正是 SKILL + CLI 模式相比旧 MCP 模式（MCP 进程事件无法跨进程到达 Web UI）的关键改进。</p>
 
-<blockquote><strong>边界说明</strong>：事件总线是进程内的。<code>flowx-studio mcp</code> 进程产生的事件只在其自身进程内广播；若需要 Web UI 实时感知 AI 的操作，通常的部署方式是同时运行 <code>flowx-studio server</code>（提供 REST API + SSE），两者共享同一 SQLite 数据库——Web UI 通过 SSE 收到的是 <code>server</code> 进程内的事件，AI 通过 MCP 写入的数据则在其下次查询或 <code>server</code> 侧操作触发的刷新中可见。</blockquote>
+<h2 id="68-skill-安装与使用示例">6.8 SKILL 安装与使用示例</h2>
 
-<h2 id="68-客户端配置示例">6.8 客户端配置示例</h2>
+<h3 id="681-skill-文件">6.8.1 SKILL 文件</h3>
 
-<p>任意支持 stdio MCP 的客户端，只需把 <code>flowx-studio mcp</code> 注册为一个 MCP server。通用 JSON 配置：</p>
+<p>仓库内置 <code>skills/flowx-studio/SKILL.md</code>，安装方式因 Agent 而异（如 pi 的 <code>~/.pi/agent/skills/</code>、Claude Code 的 <code>.claude/skills/</code>）。文件内容保持极简，示例骨架：</p>
 
-<pre><code class="language-json">{
-  "mcpServers": {
-    "flowx-studio": {
-      "command": "flowx-studio",
-      "args": ["mcp"]
-    }
-  }
-}</code></pre>
+<pre><code class="language-markdown">---
+name: flowx-studio
+description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修改/运行工作流、
+  导入或创建节点时使用。前置条件：flowx-studio server 已在运行。
+---
 
-<p>配置后，AI 客户端会在会话开始时自动拉起 <code>flowx-studio mcp</code> 子进程，完成 <code>initialize</code> 握手并通过 <code>tools/list</code> 发现 8 个工具。典型协作流程：</p>
+# FlowX Studio
+
+通过 `flowx-studio` CLI 与本地 server（默认 http://127.0.0.1:8080）交互。
+每个子命令支持 `--help` 查看用法、`--schema` 查看参数 JSON Schema、`--json` 输出 JSON。
+
+## 命令速查
+
+| 任务 | 命令 |
+| --- | --- |
+| 列出节点（查 nodeRef） | `flowx-studio node list --json` |
+| 导入节点包 | `flowx-studio node import --type git --url &lt;repo&gt;` |
+| 创建节点 | `flowx-studio node create --file node.yaml` |
+| 创建流水线 | `flowx-studio pipeline create --name &lt;n&gt; --file wf.yaml` |
+| 更新流水线 | `flowx-studio pipeline update --id &lt;N&gt; --file wf.yaml` |
+| 运行流水线 | `flowx-studio pipeline run --id &lt;N&gt; [--follow]` |
+| 向用户提问 | `flowx-studio ask --key &lt;k&gt; --prompt "&lt;问题&gt;"` |
+| 展示信息卡片 | `flowx-studio info --title &lt;t&gt; --message &lt;m&gt;` |
+
+## 约定
+
+- YAML 校验失败时命令退出码为 1，stderr 含错误详情，修正 YAML 后重试。
+- 生成 YAML 时优先用 `config.nodeRef` 引用已有节点，不要内联代码。
+- Graph 必须是 `stateDiagram-v2` 且至少一条迁移。</code></pre>
+
+<h3 id="682-典型协作流程">6.8.2 典型协作流程</h3>
 
 <div class="mermaid-container">
     <div class="mermaid-toolbar">
@@ -510,15 +545,18 @@ data: {"Type":"workflow.created","Data":{...}}</code></pre>
     </div>
     <div class="mermaid-wrapper">
         <pre class="mermaid">flowchart TD
-    A[用户描述需求] --> B[AI: list_nodes 查询可用节点]
-    B --> C[AI: 生成 FlowX YAML]
-    C --> D[AI: create_pipeline]
-    D -->|校验失败| C
-    D -->|成功| E[AI: run_pipeline]
-    E --> F[用户通过 streamUrl / Web UI 查看执行]
-    C -.需要新节点.-> G[AI: 编写 flowx.json + 代码]
-    G --> H[AI: import_node]
-    H --> C</pre>
+    A[用户描述需求] --> B[Agent: node list --json 查询可用节点]
+    B --> C[Agent: 生成 FlowX YAML 写入临时文件]
+    C --> D[Agent: pipeline create --file wf.yaml]
+    D -->|退出码 1, 校验失败| C
+    D -->|成功| E[Agent: pipeline run --id N --follow]
+    E --> F[用户通过 Web UI / 终端日志查看执行]
+    C -.需要新节点.-> G[Agent: 编写 flowx.json + 代码]
+    G --> H[Agent: node import --type folder --path ./pkg]
+    H --> C
+    D -.需要用户决策.-> I[Agent: ask --key env --prompt 部署到哪个环境]
+    I --> C
+    E --> J[Agent: info --title 执行完成 --message ...]</pre>
     </div>
 </div>
 

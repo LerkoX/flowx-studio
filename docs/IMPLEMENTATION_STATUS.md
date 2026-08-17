@@ -1,7 +1,19 @@
 # FlowX Studio 实现状态跟踪文档
 
 > 本文档记录 FlowX Studio 各模块的实现状态，区分「已实现」和「待实现」功能。
-> 最后更新：2026-08-02
+> 最后更新：2026-08-17
+
+---
+
+## 近期重要变更（2026-08-17）
+
+### 架构方向调整：MCP 服务端 → SKILL + CLI 渐进式披露（已落地）
+- 移除 `internal/mcpserver` 与 `flowx-studio mcp` 子命令，不再以 stdio MCP 服务端形式集成 AI。
+- 新增 **`internal/cli` CLI 客户端子命令**：`pipeline list/create/update/delete/run`、`node list/create/delete/import/mock`，作为 `flowx-studio server` 的 HTTP 客户端。
+- 新增 **终端交互命令** `ask` / `info`，承接原 FAP 的 `ask_input` / `show_info` 动作语义；原 FAP 的 `create_node` / `update_workflow` 由 `node create` / `pipeline update` 承接。**FAP 协议整体废弃，不再实现标签解析**。
+- 新增 **`skills/flowx-studio/SKILL.md`**：AI Agent 技能速查表；配合 CLI 的 `--help`（用法层）与 `--schema`（参数 JSON Schema 契约层）实现渐进式披露。
+- 约定：查询类子命令支持 `--json`；校验失败退出码 1、stderr 含重试指引；flag 用法错误退出码 2；`--server` flag / `FLOWX_STUDIO_SERVER_URL` 指定 server 地址。
+- 收益：所有写操作收敛到 HTTP server 单进程，Web UI 经 SSE 可实时感知 Agent 操作（旧 MCP 模式跨进程事件不可达的问题消失）。
 
 ---
 
@@ -37,14 +49,14 @@
 | 3 | 数据库设计 | ✅ 已完成 | SQLite Schema + 自动迁移已实现 |
 | 4 | API 设计 | ✅ 已完成 | 基础 CRUD + FlowX Runtime 集成已完成 |
 | 5 | 前端设计 | ✅ 已完成 | React + TS + Vite 前端已完成并构建 |
-| 6 | AI 服务层 | ❌ 已移除 | AI Provider/对话模块已删除；06 章内容转向 MCP 服务端 |
+| 6 | AI 服务层 | ✅ 已完成 | 后端 AI 与 MCP 服务端均已移除；SKILL + CLI 渐进式披露已落地（见 06 章） |
 | 7 | 节点系统 | ✅ 已完成 | CRUD + Mock 子进程执行已实现 |
 | 8 | FlowX 运行时 | ✅ 已完成 | RuntimeAdapter + EventBridge + LogPusher 已实现 |
 | 9 | 运行时与部署 | ✅ 已完成 | 单二进制 + go:embed + Cobra CLI 已完成 |
 | 10 | 安全设计 | 🟡 部分实现 | CORS 限制 + Mock 代码安全校验已实现，请求限流/沙箱待实现 |
 | 11 | 核心库依赖 | ✅ 已完成 | FlowX 引擎接口调研完成，replace 引用已配置 |
 | 12 | 节点包规范 | 🟡 部分实现 | `flowx.json` 导入、Mock 多文件、运行时展开已实现；工作流节点镜像执行待 FlowX 核心增强 |
-| 13 | MCP 服务端工具 | 🟡 部分实现 | 新增 `flowx-studio mcp` 子命令；`server` 仅保留 HTTP；SQLite WAL 支持多会话并发 |
+| 13 | CLI 客户端与 SKILL | ✅ 已完成 | `internal/cli`（pipeline/node/ask/info）+ `skills/flowx-studio/SKILL.md` 已落地；`mcp` 子命令已移除 |
 
 ---
 
@@ -62,7 +74,7 @@
 - [x] 统一 API 响应格式 (`{code, data, message}`)
 - [x] `go:embed` 嵌入前端资源
 - [x] SPA fallback 到 `index.html`
-- [x] Cobra CLI（`server` / `mcp` 子命令；**无 `version` 子命令**。已知问题：`Makefile` 的 `version` 目标调用 `./flowx-studio version` 会失败）
+- [x] Cobra CLI（`server` 子命令；客户端子命令 `pipeline`/`node`/`ask`/`info` 规划中；**无 `version` 子命令**。已知问题：`Makefile` 的 `version` 目标调用 `./flowx-studio version` 会失败）
 - [x] Makefile (`build`, `run`, `clean`)
 
 #### 2. 数据模型
@@ -139,7 +151,7 @@ AI Provider（OpenAI/Anthropic/Ollama）与 AI Service 层已随架构调整全�
 
 #### 4. MCP 连接管理 — ❌ 已移除
 
-外部 MCP 客户端连接管理（配置 CRUD、本地命令/远程 SSE 连接、工具发现与调用，原 `internal/mcp`）已随架构调整全部删除。保留的是 **MCP 服务端** 能力（`internal/mcpserver`，见下文「内部 MCP 服务端工具」）。
+外部 MCP 客户端连接管理（原 `internal/mcp`）已于 2026-07-12 删除；stdio MCP **服务端**（原 `internal/mcpserver`）也于 2026-08-17 移除，AI 集成改为 SKILL + CLI 模式（见上文「CLI 客户端与 SKILL」）。
 
 #### 5. 日志系统
 - [x] `execution_logs` 表结构
@@ -163,14 +175,18 @@ AI Provider（OpenAI/Anthropic/Ollama）与 AI Service 层已随架构调整全�
 - [ ] 日志导出 (`POST /api/v1/executions/:id/logs/export`)
 - [ ] 工作流 Mock 执行 (`POST /api/v1/workflows/:id/mock`)
 
-#### 8. 内部 MCP 服务端工具
-- [x] `stdio` JSON-RPC 2.0 MCP 服务 (`internal/mcpserver`)
-- [x] 工具列表：`create_pipeline`、`update_pipeline`、`delete_pipeline`、`list_pipelines`、`run_pipeline`、`import_node`、`delete_node`、`list_nodes`
-- [x] `import_node` 支持从 `git` / `folder` 读取 `flowx.json` 并导入节点包
-- [x] 新增 `flowx-studio mcp` 子命令，仅启动 stdio MCP 服务，不持有 PID 单例锁，可多会话并发
+#### 8. CLI 客户端与 SKILL（替代原 MCP 服务端）
+- [x] `internal/cli` HTTP 客户端封装（`--server` flag / `FLOWX_STUDIO_SERVER_URL`，默认 `http://127.0.0.1:8080`）
+- [x] `pipeline list / create / update / delete / run` 子命令（`run --follow` 跟随 SSE 日志）
+- [x] `node list / create / delete / import / mock` 子命令
+- [x] `ask` / `info` 终端交互命令（承接原 FAP `ask_input` / `show_info`）
+- [x] 全局 `--json` 机器可读输出、写命令 `--schema` 参数 JSON Schema 输出
+- [x] 校验失败退出码 1 + stderr 重试指引；flag 用法错误退出码 2
+- [x] `skills/flowx-studio/SKILL.md` 技能速查表
+- [x] ~~`flowx-studio mcp` stdio MCP 服务~~（2026-08-17 移除，`internal/mcpserver` 已删除，测试用例由 `internal/service/node_import_test.go` 承接）
 - [x] `flowx-studio server` 仅启动 HTTP 服务，保留 PID 单例锁且只杀 `server` 进程
-- [x] SQLite 启用 WAL + busy timeout，支持多个 `mcp` 进程同时访问同一数据库
-- [ ] MCP 工具调用认证与限流
+- [x] SQLite 启用 WAL + busy timeout（保留，支撑 CLI 高频调用下的并发读写）
+- [ ] CLI 调用认证（如本地 token）与 server 侧请求限流
 
 ---
 
@@ -187,13 +203,18 @@ AI Provider（OpenAI/Anthropic/Ollama）与 AI Service 层已随架构调整全�
 - [x] 前端 `NodeImportModal` 对接真实导入接口
 - [ ] 工作流节点镜像执行（依赖 FlowX 核心 Docker 执行器支持 `image` 配置）
 
-#### 2. FAP (FlowX Action Protocol)
-- [ ] `[[ACTION:create_node]]` 标签解析
-- [ ] `[[ACTION:update_workflow]]` 标签解析
-- [ ] `[[ACTION:ask_input]]` 交互式表单
-- [ ] `[[ACTION:show_info]]` 信息卡片
-- [ ] 操作确认/取消/编辑机制
-- [ ] 多轮对话状态机
+#### 2. FAP (FlowX Action Protocol) — ❌ 已废弃
+
+FAP 标签协议不再实现（2026-08-17 架构调整）。其动作语义由 CLI 客户端子命令承接：
+
+| 原 FAP 标签 | CLI 等价物 |
+| --- | --- |
+| `[[ACTION:create_node]]` | `flowx-studio node create --file node.yaml` |
+| `[[ACTION:update_workflow]]` | `flowx-studio pipeline update --id N --file wf.yaml` |
+| `[[ACTION:ask_input]]` | `flowx-studio ask --key k --prompt "..."`（终端交互提问） |
+| `[[ACTION:show_info]]` | `flowx-studio info --title t --message m`（终端信息卡片） |
+
+操作确认/取消与多轮对话状态由外部 AI Agent 的会话能力承担，服务端不维护对话状态。
 
 #### 3. 高级 AI 功能
 - [ ] 节点代码语法验证
@@ -219,7 +240,7 @@ AI Provider（OpenAI/Anthropic/Ollama）与 AI Service 层已随架构调整全�
 ### 后端已创建文件
 ```
 flowx-studio/
-├── cmd/flowx-studio/main.go          # CLI 入口（server / mcp 子命令）
+├── cmd/flowx-studio/main.go          # CLI 入口（server + 客户端子命令）
 ├── internal/                         # 共 12 个包
 │   ├── server/server.go              # Gin HTTP 服务器 + go:embed 前端资源
 │   ├── handler/
@@ -228,15 +249,17 @@ flowx-studio/
 │   │   ├── config_handler.go         # 系统配置 API
 │   │   ├── workflow_handler.go       # 工作流 + 执行 API
 │   │   └── event_handler.go          # SSE 事件订阅 API
+│   ├── cli/                          # CLI 客户端子命令（HTTP client）
+│   │   ├── client.go                 # HTTP 客户端封装（--server / FLOWX_STUDIO_SERVER_URL）
+│   │   ├── pipeline.go               # pipeline list/create/update/delete/run
+│   │   ├── node.go                   # node list/create/delete/import/mock
+│   │   ├── interact.go               # ask / info 终端交互命令
+│   │   └── schema.go                 # --schema 参数 JSON Schema 输出
 │   ├── runtime/
 │   │   ├── adapter.go                # FlowX RuntimeAdapter + EventBridge + LogPusher
 │   │   └── node_expander.go          # 节点包 → NodeConfig 运行时展开
 │   ├── sandbox/
 │   │   └── executor.go               # 子进程沙箱执行器 (os/exec + 安全校验 + 多文件写入)
-│   ├── mcpserver/
-│   │   ├── server.go                 # stdio JSON-RPC 2.0 MCP 服务
-│   │   ├── tools.go                  # 8 个 MCP 工具实现
-│   │   └── import_node_test.go
 │   ├── service/
 │   │   ├── node.go                   # 节点 CRUD + MockTest
 │   │   ├── node_import.go            # flowx.json 节点包导入
@@ -251,11 +274,12 @@ flowx-studio/
 │   │   └── migrations/               # 迁移脚本 001-006
 │   ├── model/model.go                # 所有数据模型
 │   └── config/config.go              # 应用配置
+├── skills/flowx-studio/SKILL.md      # AI Agent 技能速查表
 ├── go.mod / go.sum                   # Go 模块（replace => ../flowx）
 └── Makefile                          # 构建脚本
 ```
 
-> 已删除：`internal/ai`、`internal/mcp`、`internal/crypto`、`handler/ai_handler.go`、`handler/mcp_handler.go`（架构调整移除）。
+> 已删除：`internal/ai`、`internal/mcp`、`internal/mcpserver`、`internal/crypto`、`handler/ai_handler.go`、`handler/mcp_handler.go`（架构调整移除）。
 
 ### 前端已修改文件
 ```
@@ -293,5 +317,5 @@ web/src/pages/
 
 1. **🔥 高优先级**：实现安全增强（请求限流、参数验证、审计日志）
 2. **中优先级**：内存环形缓冲区、日志自动清理、日志导出
-3. **中优先级**：FAP 标签解析、自动打开浏览器接线、数据备份等增强功能
-4. **低优先级**：MCP 工具调用认证与限流、Prometheus 指标暴露
+3. **中优先级**：自动打开浏览器接线、数据备份等增强功能
+4. **低优先级**：CLI 调用认证（本地 token）、Prometheus 指标暴露

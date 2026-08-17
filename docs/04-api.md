@@ -576,20 +576,26 @@ PUT /api/v1/config/system
 }
 ```
 
-## 4.8 MCP 工具
+## 4.8 CLI 命令
 
-除 HTTP API 外，FlowX Studio 还内置 MCP（Model Context Protocol）服务，通过 stdio 传输，使用 `flowx-studio mcp` 命令启动。MCP 服务提供以下 8 个工具：
+除 HTTP API 外，`flowx-studio` 二进制还提供一组 CLI 客户端子命令，作为上述 REST API 的 HTTP 客户端（默认连接 `http://127.0.0.1:8080`，可用 `--server` flag 或 `FLOWX_STUDIO_SERVER_URL` 覆盖）。它们主要供 AI Agent（经 SKILL 文件指引）与终端用户使用：
 
-| 工具 | 说明 |
-|------|------|
-| create_pipeline | 创建流水线/工作流（YAML 配置，非法 YAML 会返回校验错误） |
-| update_pipeline | 更新已有流水线/工作流 |
-| delete_pipeline | 删除流水线/工作流 |
-| list_pipelines | 列出流水线/工作流 |
-| run_pipeline | 运行流水线/工作流 |
-| import_node | 从 Git 仓库或本地文件夹导入节点（读取 flowx.json） |
-| delete_node | 删除节点 |
-| list_nodes | 列出节点 |
+| 命令 | 说明 | 底层 API |
+|------|------|----------|
+| `pipeline list` | 列出流水线/工作流 | `GET /workflows` |
+| `pipeline create --file wf.yaml` | 创建流水线/工作流（YAML 非法时退出码 1，stderr 含校验错误） | `POST /workflows` |
+| `pipeline update --id N --file wf.yaml` | 更新流水线/工作流 | `PUT /workflows/:id` |
+| `pipeline delete --id N` | 删除流水线/工作流 | `DELETE /workflows/:id` |
+| `pipeline run --id N [--follow]` | 运行流水线/工作流；`--follow` 跟随 SSE 日志 | `POST /workflows/:id/run`、`GET /executions/:id/stream` |
+| `node list` | 列出节点 | `GET /nodes` |
+| `node create --file node.yaml` | 创建节点（承接原 FAP `create_node` 动作） | `POST /nodes` |
+| `node import --type git\|folder ...` | 从 Git 仓库或本地文件夹导入节点（读取 flowx.json） | `POST /nodes/import` |
+| `node delete --id N` | 删除节点 | `DELETE /nodes/:id` |
+| `node mock --id N` | Mock 测试节点 | `POST /nodes/:id/mock` |
+| `ask --key k --prompt ...` | 终端交互式提问（承接原 FAP `ask_input`，纯终端，不访问 server） | 无 |
+| `info --title t --message m` | 终端信息卡片（承接原 FAP `show_info`，纯终端，不访问 server） | 无 |
+
+全局约定：所有查询类子命令支持 `--json` 输出结构化结果；数据写入类子命令支持 `--schema` 输出参数 JSON Schema；校验失败以非零退出码退出并在 stderr 给出重试指引。详见 [06-ai-service.md](./06-ai-service.md)。
 
 ## 4.9 API 路由汇总
 

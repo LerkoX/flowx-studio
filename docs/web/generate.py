@@ -16,7 +16,7 @@ FILES = [
     ("03-database.md", "3. 数据库设计"),
     ("04-api.md", "4. API 设计"),
     ("05-frontend.md", "5. 前端设计"),
-    ("06-ai-service.md", "6. AI 服务层设计"),
+    ("06-ai-service.md", "6. AI 集成（SKILL + CLI）"),
     ("07-node-system.md", "7. 节点系统与执行引擎"),
     ("08-runtime.md", "8. 运行时与部署设计"),
     ("09-security.md", "9. 安全与错误处理设计"),

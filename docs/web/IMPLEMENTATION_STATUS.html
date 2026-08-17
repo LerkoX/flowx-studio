@@ -48,7 +48,7 @@
 <li><a href="03-database.html">3. 数据库设计</a></li>
 <li><a href="04-api.html">4. API 设计</a></li>
 <li><a href="05-frontend.html">5. 前端设计</a></li>
-<li><a href="06-ai-service.html">6. AI 服务层设计</a></li>
+<li><a href="06-ai-service.html">6. AI 集成（SKILL + CLI）</a></li>
 <li><a href="07-node-system.html">7. 节点系统与执行引擎</a></li>
 <li><a href="08-runtime.html">8. 运行时与部署设计</a></li>
 <li><a href="09-security.html">9. 安全与错误处理设计</a></li>
@@ -62,8 +62,21 @@
                 <h1 id="flowx-studio-实现状态跟踪文档">FlowX Studio 实现状态跟踪文档</h1>
 
 <blockquote>本文档记录 FlowX Studio 各模块的实现状态，区分「已实现」和「待实现」功能。</blockquote>
-<blockquote>最后更新：2026-08-02</blockquote>
+<blockquote>最后更新：2026-08-17</blockquote>
 
+<hr>
+
+<h2 id="近期重要变更2026-08-17">近期重要变更（2026-08-17）</h2>
+
+<h3 id="架构方向调整mcp-服务端-skill-cli-渐进式披露已落地">架构方向调整：MCP 服务端 → SKILL + CLI 渐进式披露（已落地）</h3>
+<ul>
+<li>移除 <code>internal/mcpserver</code> 与 <code>flowx-studio mcp</code> 子命令，不再以 stdio MCP 服务端形式集成 AI。</li>
+<li>新增 <strong><code>internal/cli</code> CLI 客户端子命令</strong>：<code>pipeline list/create/update/delete/run</code>、<code>node list/create/delete/import/mock</code>，作为 <code>flowx-studio server</code> 的 HTTP 客户端。</li>
+<li>新增 <strong>终端交互命令</strong> <code>ask</code> / <code>info</code>，承接原 FAP 的 <code>ask_input</code> / <code>show_info</code> 动作语义；原 FAP 的 <code>create_node</code> / <code>update_workflow</code> 由 <code>node create</code> / <code>pipeline update</code> 承接。<strong>FAP 协议整体废弃，不再实现标签解析</strong>。</li>
+<li>新增 <strong><code>skills/flowx-studio/SKILL.md</code></strong>：AI Agent 技能速查表；配合 CLI 的 <code>--help</code>（用法层）与 <code>--schema</code>（参数 JSON Schema 契约层）实现渐进式披露。</li>
+<li>约定：查询类子命令支持 <code>--json</code>；校验失败退出码 1、stderr 含重试指引；flag 用法错误退出码 2；<code>--server</code> flag / <code>FLOWX_STUDIO_SERVER_URL</code> 指定 server 地址。</li>
+<li>收益：所有写操作收敛到 HTTP server 单进程，Web UI 经 SSE 可实时感知 Agent 操作（旧 MCP 模式跨进程事件不可达的问题消失）。</li>
+</ul>
 <hr>
 
 <h2 id="近期重要变更2026-07-12">近期重要变更（2026-07-12）</h2>
@@ -137,8 +150,8 @@
 <tr>
 <td>6</td>
 <td>AI 服务层</td>
-<td>❌ 已移除</td>
-<td>AI Provider/对话模块已删除；06 章内容转向 MCP 服务端</td>
+<td>✅ 已完成</td>
+<td>后端 AI 与 MCP 服务端均已移除；SKILL + CLI 渐进式披露已落地（见 06 章）</td>
 </tr>
 <tr>
 <td>7</td>
@@ -178,9 +191,9 @@
 </tr>
 <tr>
 <td>13</td>
-<td>MCP 服务端工具</td>
-<td>🟡 部分实现</td>
-<td>新增 <code>flowx-studio mcp</code> 子命令；<code>server</code> 仅保留 HTTP；SQLite WAL 支持多会话并发</td>
+<td>CLI 客户端与 SKILL</td>
+<td>✅ 已完成</td>
+<td><code>internal/cli</code>（pipeline/node/ask/info）+ <code>skills/flowx-studio/SKILL.md</code> 已落地；<code>mcp</code> 子命令已移除</td>
 </tr>
 </tbody>
 </table>
@@ -202,7 +215,7 @@
 <li>[x] 统一 API 响应格式 (<code>{code, data, message}</code>)</li>
 <li>[x] <code>go:embed</code> 嵌入前端资源</li>
 <li>[x] SPA fallback 到 <code>index.html</code></li>
-<li>[x] Cobra CLI（<code>server</code> / <code>mcp</code> 子命令；<strong>无 <code>version</code> 子命令</strong>。已知问题：<code>Makefile</code> 的 <code>version</code> 目标调用 <code>./flowx-studio version</code> 会失败）</li>
+<li>[x] Cobra CLI（<code>server</code> 子命令；客户端子命令 <code>pipeline</code>/<code>node</code>/<code>ask</code>/<code>info</code> 规划中；<strong>无 <code>version</code> 子命令</strong>。已知问题：<code>Makefile</code> 的 <code>version</code> 目标调用 <code>./flowx-studio version</code> 会失败）</li>
 <li>[x] Makefile (<code>build</code>, <code>run</code>, <code>clean</code>)</li>
 </ul>
 <h4 id="2-数据模型">2. 数据模型</h4>
@@ -286,7 +299,7 @@
 
 <h4 id="4-mcp-连接管理-已移除">4. MCP 连接管理 — ❌ 已移除</h4>
 
-<p>外部 MCP 客户端连接管理（配置 CRUD、本地命令/远程 SSE 连接、工具发现与调用，原 <code>internal/mcp</code>）已随架构调整全部删除。保留的是 <strong>MCP 服务端</strong> 能力（<code>internal/mcpserver</code>，见下文「内部 MCP 服务端工具」）。</p>
+<p>外部 MCP 客户端连接管理（原 <code>internal/mcp</code>）已于 2026-07-12 删除；stdio MCP <strong>服务端</strong>（原 <code>internal/mcpserver</code>）也于 2026-08-17 移除，AI 集成改为 SKILL + CLI 模式（见上文「CLI 客户端与 SKILL」）。</p>
 
 <h4 id="5-日志系统">5. 日志系统</h4>
 <ul>
@@ -313,15 +326,19 @@
 <li>[ ] 日志导出 (<code>POST /api/v1/executions/:id/logs/export</code>)</li>
 <li>[ ] 工作流 Mock 执行 (<code>POST /api/v1/workflows/:id/mock</code>)</li>
 </ul>
-<h4 id="8-内部-mcp-服务端工具">8. 内部 MCP 服务端工具</h4>
+<h4 id="8-cli-客户端与-skill替代原-mcp-服务端">8. CLI 客户端与 SKILL（替代原 MCP 服务端）</h4>
 <ul>
-<li>[x] <code>stdio</code> JSON-RPC 2.0 MCP 服务 (<code>internal/mcpserver</code>)</li>
-<li>[x] 工具列表：<code>create_pipeline</code>、<code>update_pipeline</code>、<code>delete_pipeline</code>、<code>list_pipelines</code>、<code>run_pipeline</code>、<code>import_node</code>、<code>delete_node</code>、<code>list_nodes</code></li>
-<li>[x] <code>import_node</code> 支持从 <code>git</code> / <code>folder</code> 读取 <code>flowx.json</code> 并导入节点包</li>
-<li>[x] 新增 <code>flowx-studio mcp</code> 子命令，仅启动 stdio MCP 服务，不持有 PID 单例锁，可多会话并发</li>
+<li>[x] <code>internal/cli</code> HTTP 客户端封装（<code>--server</code> flag / <code>FLOWX_STUDIO_SERVER_URL</code>，默认 <code>http://127.0.0.1:8080</code>）</li>
+<li>[x] <code>pipeline list / create / update / delete / run</code> 子命令（<code>run --follow</code> 跟随 SSE 日志）</li>
+<li>[x] <code>node list / create / delete / import / mock</code> 子命令</li>
+<li>[x] <code>ask</code> / <code>info</code> 终端交互命令（承接原 FAP <code>ask_input</code> / <code>show_info</code>）</li>
+<li>[x] 全局 <code>--json</code> 机器可读输出、写命令 <code>--schema</code> 参数 JSON Schema 输出</li>
+<li>[x] 校验失败退出码 1 + stderr 重试指引；flag 用法错误退出码 2</li>
+<li>[x] <code>skills/flowx-studio/SKILL.md</code> 技能速查表</li>
+<li>[x] ~~<code>flowx-studio mcp</code> stdio MCP 服务~~（2026-08-17 移除，<code>internal/mcpserver</code> 已删除，测试用例由 <code>internal/service/node_import_test.go</code> 承接）</li>
 <li>[x] <code>flowx-studio server</code> 仅启动 HTTP 服务，保留 PID 单例锁且只杀 <code>server</code> 进程</li>
-<li>[x] SQLite 启用 WAL + busy timeout，支持多个 <code>mcp</code> 进程同时访问同一数据库</li>
-<li>[ ] MCP 工具调用认证与限流</li>
+<li>[x] SQLite 启用 WAL + busy timeout（保留，支撑 CLI 高频调用下的并发读写）</li>
+<li>[ ] CLI 调用认证（如本地 token）与 server 侧请求限流</li>
 </ul>
 <hr>
 
@@ -339,15 +356,39 @@
 <li>[x] 前端 <code>NodeImportModal</code> 对接真实导入接口</li>
 <li>[ ] 工作流节点镜像执行（依赖 FlowX 核心 Docker 执行器支持 <code>image</code> 配置）</li>
 </ul>
-<h4 id="2-fap-flowx-action-protocol">2. FAP (FlowX Action Protocol)</h4>
-<ul>
-<li>[ ] <code>[[ACTION:create_node]]</code> 标签解析</li>
-<li>[ ] <code>[[ACTION:update_workflow]]</code> 标签解析</li>
-<li>[ ] <code>[[ACTION:ask_input]]</code> 交互式表单</li>
-<li>[ ] <code>[[ACTION:show_info]]</code> 信息卡片</li>
-<li>[ ] 操作确认/取消/编辑机制</li>
-<li>[ ] 多轮对话状态机</li>
-</ul>
+<h4 id="2-fap-flowx-action-protocol-已废弃">2. FAP (FlowX Action Protocol) — ❌ 已废弃</h4>
+
+<p>FAP 标签协议不再实现（2026-08-17 架构调整）。其动作语义由 CLI 客户端子命令承接：</p>
+
+<table>
+<thead>
+<tr>
+<th>原 FAP 标签</th>
+<th>CLI 等价物</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>[[ACTION:create_node]]</code></td>
+<td><code>flowx-studio node create --file node.yaml</code></td>
+</tr>
+<tr>
+<td><code>[[ACTION:update_workflow]]</code></td>
+<td><code>flowx-studio pipeline update --id N --file wf.yaml</code></td>
+</tr>
+<tr>
+<td><code>[[ACTION:ask_input]]</code></td>
+<td><code>flowx-studio ask --key k --prompt "..."</code>（终端交互提问）</td>
+</tr>
+<tr>
+<td><code>[[ACTION:show_info]]</code></td>
+<td><code>flowx-studio info --title t --message m</code>（终端信息卡片）</td>
+</tr>
+</tbody>
+</table>
+
+<p>操作确认/取消与多轮对话状态由外部 AI Agent 的会话能力承担，服务端不维护对话状态。</p>
+
 <h4 id="3-高级-ai-功能">3. 高级 AI 功能</h4>
 <ul>
 <li>[ ] 节点代码语法验证</li>
@@ -374,7 +415,7 @@
 
 <h3 id="后端已创建文件">后端已创建文件</h3>
 <pre><code>flowx-studio/
-├── cmd/flowx-studio/main.go          # CLI 入口（server / mcp 子命令）
+├── cmd/flowx-studio/main.go          # CLI 入口（server + 客户端子命令）
 ├── internal/                         # 共 12 个包
 │   ├── server/server.go              # Gin HTTP 服务器 + go:embed 前端资源
 │   ├── handler/
@@ -383,15 +424,17 @@
 │   │   ├── config_handler.go         # 系统配置 API
 │   │   ├── workflow_handler.go       # 工作流 + 执行 API
 │   │   └── event_handler.go          # SSE 事件订阅 API
+│   ├── cli/                          # CLI 客户端子命令（HTTP client）
+│   │   ├── client.go                 # HTTP 客户端封装（--server / FLOWX_STUDIO_SERVER_URL）
+│   │   ├── pipeline.go               # pipeline list/create/update/delete/run
+│   │   ├── node.go                   # node list/create/delete/import/mock
+│   │   ├── interact.go               # ask / info 终端交互命令
+│   │   └── schema.go                 # --schema 参数 JSON Schema 输出
 │   ├── runtime/
 │   │   ├── adapter.go                # FlowX RuntimeAdapter + EventBridge + LogPusher
 │   │   └── node_expander.go          # 节点包 → NodeConfig 运行时展开
 │   ├── sandbox/
 │   │   └── executor.go               # 子进程沙箱执行器 (os/exec + 安全校验 + 多文件写入)
-│   ├── mcpserver/
-│   │   ├── server.go                 # stdio JSON-RPC 2.0 MCP 服务
-│   │   ├── tools.go                  # 8 个 MCP 工具实现
-│   │   └── import_node_test.go
 │   ├── service/
 │   │   ├── node.go                   # 节点 CRUD + MockTest
 │   │   ├── node_import.go            # flowx.json 节点包导入
@@ -406,10 +449,11 @@
 │   │   └── migrations/               # 迁移脚本 001-006
 │   ├── model/model.go                # 所有数据模型
 │   └── config/config.go              # 应用配置
+├── skills/flowx-studio/SKILL.md      # AI Agent 技能速查表
 ├── go.mod / go.sum                   # Go 模块（replace =&gt; ../flowx）
 └── Makefile                          # 构建脚本</code></pre>
 
-<blockquote>已删除：<code>internal/ai</code>、<code>internal/mcp</code>、<code>internal/crypto</code>、<code>handler/ai_handler.go</code>、<code>handler/mcp_handler.go</code>（架构调整移除）。</blockquote>
+<blockquote>已删除：<code>internal/ai</code>、<code>internal/mcp</code>、<code>internal/mcpserver</code>、<code>internal/crypto</code>、<code>handler/ai_handler.go</code>、<code>handler/mcp_handler.go</code>（架构调整移除）。</blockquote>
 
 <h3 id="前端已修改文件">前端已修改文件</h3>
 <pre><code>web/src/services/
@@ -446,8 +490,8 @@ web/src/pages/
 <ol>
 <li><strong>🔥 高优先级</strong>：实现安全增强（请求限流、参数验证、审计日志）</li>
 <li><strong>中优先级</strong>：内存环形缓冲区、日志自动清理、日志导出</li>
-<li><strong>中优先级</strong>：FAP 标签解析、自动打开浏览器接线、数据备份等增强功能</li>
-<li><strong>低优先级</strong>：MCP 工具调用认证与限流、Prometheus 指标暴露</li>
+<li><strong>中优先级</strong>：自动打开浏览器接线、数据备份等增强功能</li>
+<li><strong>低优先级</strong>：CLI 调用认证（本地 token）、Prometheus 指标暴露</li>
 </ol>
             </article>
         </main>

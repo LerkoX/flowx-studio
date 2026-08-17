@@ -15,7 +15,7 @@
 │  │   ├── db/               # sqlx 封装 + SQL 迁移           │
 │  │   ├── event/            # 进程内事件总线                  │
 │  │   ├── handler/          # HTTP 路由处理器                 │
-│  │   ├── mcpserver/        # stdio MCP 服务                 │
+│  │   ├── cli/              # CLI 客户端（HTTP client 子命令） │
 │  │   ├── model/            # 数据模型                       │
 │  │   ├── runtime/          # FlowX 运行时适配层              │
 │  │   ├── sandbox/          # Mock 子进程执行                 │
@@ -46,6 +46,7 @@ flowchart TD
         Browser1["浏览器 Web UI"]
         Browser2["浏览器 移动端"]
         CLI["CLI 终端 flowx-studio"]
+        Agent["AI Agent (经 SKILL 调用 CLI)"]
     end
     
     subgraph HTTPServer["HTTP 服务层"]
@@ -62,8 +63,8 @@ flowchart TD
         ExecMgmt["执行管理 (WorkflowService 内)"]
     end
     
-    subgraph MCPLayer["MCP 服务层"]
-        MCP["stdio MCP Server (internal/mcpserver)"]
+    subgraph CLILayer["CLI 客户端层"]
+        CLICmd["CLI 子命令 (internal/cli)<br/>pipeline / node / ask / info"]
     end
     
     subgraph StorageLayer["存储服务层"]
@@ -79,13 +80,14 @@ flowchart TD
         EventSys["Event System"]
     end
     
+    Agent --> CLILayer
     UserLayer --> HTTPServer
     GoServer --> Static
     GoServer --> API
     GoServer --> SSE
     HTTPServer --> BusinessLayer
     HTTPServer --> StorageLayer
-    MCPLayer --> BusinessLayer
+    CLILayer -- "HTTP /api/v1" --> HTTPServer
     BusinessLayer --> FlowXEngine
 ```
 
@@ -120,17 +122,21 @@ flowchart TD
 - 无 Repository 抽象层，服务直接持有 `*db.DB`（sqlx 封装）操作数据库；系统配置由 `handler.ConfigHandler` 直连 db
 - 所有业务操作通过上下文 `context.Context` 传递，支持超时和取消
 
-### 2.2.3 MCP 服务层 (internal/mcpserver)
+### 2.2.3 CLI 客户端层 (internal/cli)
 
-**职责**：以 stdio MCP Server 形式向外部 MCP 客户端（如 AI IDE）暴露节点与工作流管理能力
+**职责**：为 AI Agent 与终端用户提供命令行入口，作为 `flowx-studio server` 的 HTTP 客户端完成节点与工作流管理
 
 **核心组件**：
-- `mcpserver.New`：创建 MCP 服务端，注入 WorkflowService / NodeService / NodeImportService
-- 8 个工具：`create_pipeline` / `update_pipeline` / `delete_pipeline` / `list_pipelines` / `run_pipeline` / `import_node` / `delete_node` / `list_nodes`
+- `cli.NewHTTPClient`：基于全局 `--server` flag / `FLOWX_STUDIO_SERVER_URL` 环境变量构造 REST 客户端
+- 流水线命令组：`pipeline list / create / update / delete / run`
+- 节点命令组：`node list / create / delete / import / mock`
+- 终端交互命令：`ask`（向用户提问）、`info`（展示信息卡片），承接原 FAP 动作语义，不访问 HTTP server
 
 **设计要点**：
-- 通过 `flowx-studio mcp` 子命令启动，走标准输入输出（stdio）协议
-- MCP 服务不持有单例锁、不启动 HTTP server，允许每个会话独立启动
+- 每个数据写入类子命令支持 `--schema` 输出参数 JSON Schema，配合 `skills/flowx-studio/SKILL.md` 实现渐进式披露
+- 所有查询类子命令支持 `--json` 输出机器可读结果
+- 校验失败以非零退出码退出，stderr 输出含重试指引的错误文本
+- CLI 不持有单例锁、不直接访问数据库，一切读写经由 HTTP server，保证事件总线单一来源
 
 ### 2.2.4 存储服务层 (internal/db)
 
@@ -160,7 +166,7 @@ flowchart TD
 flowchart TD
     subgraph Studio["flowx-studio (本仓库)"]
         HTTP[HTTP Server internal/server + handler]
-        MCP[MCP Server internal/mcpserver]
+        CLI[CLI Client internal/cli]
         Service[Service Layer]
         DB[DB Layer]
         Runtime[Adapter internal/runtime]
@@ -177,7 +183,7 @@ flowchart TD
     
     HTTP --> Service
     HTTP --> DB
-    MCP --> Service
+    CLI -- "HTTP /api/v1" --> HTTP
     Service --> Runtime
     DB --> Runtime
     Runtime --> FlowX
@@ -240,7 +246,7 @@ flowchart TD
 | 构建工具 | Vite | 快速构建，热更新 |
 | 图可视化 | `@xyflow/react`（React Flow 12） | 专业的工作流图渲染 |
 | 代码查看 | `react-syntax-highlighter` | 只读代码高亮，轻量无编辑器开销 |
-| CLI 框架 | Cobra (`github.com/spf13/cobra`) | 子命令管理（server / mcp） |
+| CLI 框架 | Cobra (`github.com/spf13/cobra`) | 子命令管理（server / pipeline / node / ask / info） |
 | 进程管理 | `os/exec` + Docker API | 复用现有执行器能力 |
 | 实时通信 | SSE (Server-Sent Events) | 单向推送足够，比 WebSocket 简单 |
 
@@ -372,15 +378,16 @@ func (l *studioListener) Events() []dag.Event {
 
 ### 2.6.3 命令行入口
 
-flowx-studio 的 CLI 入口基于 Cobra，包含两个子命令：
+flowx-studio 的 CLI 入口基于 Cobra，包含服务端子命令与客户端子命令两组：
 
 ```go
 // cmd/flowx-studio/main.go
 func main() {
     rootCmd := &cobra.Command{
         Use:   "flowx-studio",
-        Short: "FlowX Studio - FlowX runtime viewer with MCP support",
+        Short: "FlowX Studio - FlowX runtime viewer with CLI client",
     }
+    rootCmd.PersistentFlags().String("server", "http://127.0.0.1:8080", "HTTP server address (env: FLOWX_STUDIO_SERVER_URL)")
 
     serverCmd := &cobra.Command{
         Use:   "server",
@@ -391,12 +398,11 @@ func main() {
     serverCmd.Flags().String("host", "0.0.0.0", "HTTP server host")
     rootCmd.AddCommand(serverCmd)
 
-    mcpCmd := &cobra.Command{
-        Use:   "mcp",
-        Short: "Start the stdio MCP server",
-        RunE:  runMCP,
-    }
-    rootCmd.AddCommand(mcpCmd)
+    // 客户端子命令（HTTP client，见 internal/cli）
+    rootCmd.AddCommand(cli.NewPipelineCmd()) // pipeline list/create/update/delete/run
+    rootCmd.AddCommand(cli.NewNodeCmd())     // node list/create/delete/import/mock
+    rootCmd.AddCommand(cli.NewAskCmd())      // ask（原 FAP ask_input）
+    rootCmd.AddCommand(cli.NewInfoCmd())     // info（原 FAP show_info）
 
     if err := rootCmd.Execute(); err != nil {
         log.Fatal(err)
@@ -405,7 +411,8 @@ func main() {
 ```
 
 - `flowx-studio server [--port 8080] [--host 0.0.0.0]`：启动 HTTP server（Web UI + RESTful API）
-- `flowx-studio mcp`：启动 stdio MCP server，供外部 MCP 客户端调用
+- `flowx-studio pipeline ...` / `flowx-studio node ...`：HTTP 客户端子命令，供 AI Agent（经 SKILL）与终端用户调用
+- `flowx-studio ask` / `flowx-studio info`：终端交互命令，承接原 FAP 动作语义
 - 裸运行 `flowx-studio`（不带子命令）仅打印帮助信息；无 `version` 子命令
 
 **注意**：FlowX 核心库（`github.com/LerkoX/flowx`）为纯库，不包含 `cmd/` 目录与 CLI 入口。
