@@ -20,6 +20,7 @@ type Server struct {
 	httpServer *http.Server
 	port       int
 	host       string
+	authToken  string
 }
 
 // New 创建服务器
@@ -44,6 +45,11 @@ func (s *Server) SetPort(port int) {
 // SetHost 设置监听地址
 func (s *Server) SetHost(host string) {
 	s.host = host
+}
+
+// SetAuthToken 设置认证 token（空字符串表示关闭认证）
+func (s *Server) SetAuthToken(token string) {
+	s.authToken = token
 }
 
 // Router 获取 gin 引擎
@@ -76,6 +82,10 @@ func (s *Server) RegisterStatic() {
 		if err != nil {
 			// 文件不存在，返回 index.html（SPA fallback）
 			c.Request.URL.Path = "/index.html"
+		}
+		// 返回 SPA 页面时种下认证 cookie，Web UI 后续 API 请求自动携带
+		if c.Request.URL.Path == "/index.html" || cleanPath == "index.html" {
+			SetAuthCookie(c, s.authToken)
 		}
 		c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
 		c.Header("Pragma", "no-cache")

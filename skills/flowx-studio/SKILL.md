@@ -31,6 +31,7 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 
 ## 约定
 
+- 认证：CLI 自动读取 `<data-dir>/auth.token`（或 `FLOWX_STUDIO_AUTH_TOKEN`），无需手动配置；401 时提示用户检查 token。
 - 退出码：`0` 成功；`1` 业务/校验失败（stderr 含错误详情与重试指引，修正后重试同一命令）；`2` 用法错误。
 - YAML 校验失败时按 stderr 的错误详情修正 YAML 后重试（错误文本即重试指令）。
 - 生成 FlowX YAML 时优先用 `config.nodeRef` 引用 `node list` 查到的已有节点，不要内联节点代码。

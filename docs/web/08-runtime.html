@@ -217,7 +217,7 @@ Flags:
 <p><strong>说明</strong>：</p>
 <ul>
 <li><code>server</code> 仅有 <code>--port</code>、<code>--host</code> 两个 flag，没有 <code>-p</code>/<code>-H</code> 短选项。</li>
-<li>没有 <code>--no-open</code>、<code>--debug</code> flag（规划中，未实现）。</li>
+<li>没有 <code>--debug</code> flag（规划中，未实现）。<code>--no-open</code> 已实现（禁用自动打开浏览器，见 8.5）。</li>
 <li>没有 <code>--data-dir</code> flag。数据目录通过环境变量 <code>FLOWX_STUDIO_DATA_DIR</code> 或配置文件设置；<code>boot.sh</code> 启动时也是通过该环境变量传递数据目录。未显式配置 <code>data.db_path</code> 时，数据库文件自动放在数据目录下的 <code>studio.db</code>。</li>
 </ul>
 <h3 id="824-cobra-实现示例">8.2.4 Cobra 实现示例</h3>
@@ -289,7 +289,7 @@ server:
   port: 8080
   host: "0.0.0.0"
   no_open: false
-  auto_open_browser: true   # 配置项已定义但未接线（规划中，未实现）
+  auto_open_browser: true   # 启动后自动打开浏览器（8.5 节，已实现）
 
 data:
   dir: "~/.flowx-studio"
@@ -433,16 +433,16 @@ defer lock.Release()</code></pre>
 <li>没有 <code>nodes/</code> 节点代码缓存目录。</li>
 <li>Mock 测试的临时目录创建在系统临时目录下（<code>$TMPDIR/flowx_mock_*</code>，见 <code>internal/sandbox/executor.go:42,79</code>），执行完成后立即清理，不在数据目录中。</li>
 </ul>
-<h2 id="85-自动浏览器打开规划中未实现">8.5 自动浏览器打开（规划中，未实现）</h2>
+<h2 id="85-自动浏览器打开已实现">8.5 自动浏览器打开（已实现）</h2>
 
-<blockquote>⚠️ 本节描述的功能均未实现：全仓库没有打开浏览器的代码，配置项 <code>auto_open_browser</code> / <code>no_open</code> 已定义但未接线。以下为<strong>目标设计</strong>。</blockquote>
+<p>2026-08-18 实现（<code>internal/server/browser.go</code> + <code>cmd/flowx-studio/main.go</code>）：</p>
 
-<h3 id="851-实现机制规划中未实现">8.5.1 实现机制（规划中，未实现）</h3>
+<h3 id="851-实现机制">8.5.1 实现机制</h3>
 
-<pre><code class="language-go">func openBrowser(url string) error {
+<pre><code class="language-go">func OpenBrowser(url string) error {
     var cmd string
     var args []string
-    
+
     switch runtime.GOOS {
     case "darwin":
         cmd = "open"
@@ -450,21 +450,24 @@ defer lock.Release()</code></pre>
     case "windows":
         cmd = "rundll32"
         args = []string{"url.dll,FileProtocolHandler", url}
-    default: // linux
+    default: // linux 及其他：无桌面环境（无 DISPLAY/WAYLAND_DISPLAY）时直接跳过
+        if os.Getenv("DISPLAY") == "" &amp;&amp; os.Getenv("WAYLAND_DISPLAY") == "" {
+            return nil
+        }
         cmd = "xdg-open"
         args = []string{url}
     }
-    
+
     return exec.Command(cmd, args...).Start()
 }</code></pre>
 
-<h3 id="852-启动时机规划中未实现">8.5.2 启动时机（规划中，未实现）</h3>
+<h3 id="852-启动时机与开关">8.5.2 启动时机与开关</h3>
 
 <ul>
-<li>服务器成功启动后（端口监听就绪）</li>
-<li>延迟 500ms 确保服务完全初始化</li>
-<li>仅在桌面环境自动打开（检测 <code>DISPLAY</code> 环境变量等）</li>
-<li>可通过 <code>FLOWX_STUDIO_SERVER_NO_OPEN=true</code> 禁用（配置键 <code>server.no_open</code> 已定义但未接线）</li>
+<li>服务器启动后延迟 500ms 打开（异步，失败仅记日志不阻塞启动）</li>
+<li>仅在桌面环境打开（Linux 检测 <code>DISPLAY</code> / <code>WAYLAND_DISPLAY</code>，headless 环境自动跳过）</li>
+<li>监听地址为 <code>0.0.0.0</code>/<code>::</code> 时浏览器 URL 使用 <code>localhost</code></li>
+<li>禁用方式（任一）：<code>--no-open</code> flag、<code>FLOWX_STUDIO_SERVER_NO_OPEN=true</code>、配置文件 <code>server.no_open: true</code>、配置文件 <code>server.auto_open_browser: false</code></li>
 </ul>
 <h2 id="86-日志系统规划中未实现">8.6 日志系统（规划中，未实现）</h2>
 

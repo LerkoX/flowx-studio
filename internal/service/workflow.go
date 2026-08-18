@@ -199,6 +199,34 @@ func (s *WorkflowService) Run(id int64, params map[string]interface{}, dryRun bo
 	return execID, fmt.Sprintf("/api/v1/executions/%d/stream", execID), nil
 }
 
+// MockRun 工作流 Mock 执行：校验 YAML 并展开 nodeRef，返回展开后的配置，
+// 不创建执行记录、不触发 FlowX Runtime。用于在真实运行前验证工作流可被正确装配。
+func (s *WorkflowService) MockRun(id int64) (map[string]interface{}, error) {
+	wf, err := s.Get(id)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.validator.ValidateWorkflow(wf); err != nil {
+		return nil, fmt.Errorf("workflow YAML invalid: %w", err)
+	}
+
+	expanded := wf.YAMLConfig
+	if s.nodeSvc != nil {
+		expanded, err = runtime.ExpandWorkflowConfig(wf.YAMLConfig, func(name string) (*model.Node, error) {
+			return s.nodeSvc.GetByName(name)
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to expand nodeRef: %w", err)
+		}
+	}
+
+	return map[string]interface{}{
+		"valid":        true,
+		"expandedYaml": expanded,
+	}, nil
+}
+
 func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 	ctx := context.Background()
 	startTime := time.Now()
@@ -454,6 +482,16 @@ func (s *WorkflowService) GetExecutionLogs(id int64, nodeID, level string, limit
 		"limit":  limit,
 		"offset": offset,
 	}, nil
+}
+
+// GetAllExecutionLogs 获取执行的全部日志（用于导出）
+func (s *WorkflowService) GetAllExecutionLogs(executionID int64) ([]model.ExecutionLog, error) {
+	var logs []model.ExecutionLog
+	if err := s.db.Select(&logs,
+		"SELECT * FROM execution_logs WHERE execution_id = ? ORDER BY timestamp ASC", executionID); err != nil {
+		return nil, fmt.Errorf("failed to get logs: %w", err)
+	}
+	return logs, nil
 }
 
 // SubscribeEvents 订阅事件

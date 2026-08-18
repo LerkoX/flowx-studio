@@ -29,6 +29,15 @@
 }
 ```
 
+## 4.2.1 认证与限流
+
+- **认证**（2026-08-18 起）：所有 `/api/v1` 请求需携带认证信息，二选一：
+  - `Authorization: Bearer <token>` 请求头（CLI 与其他客户端）
+  - `flowx_token` cookie（Web UI：服务端返回 `index.html` 时自动种下）
+  
+  token 位于数据目录的 `auth.token` 文件（首次启动自动生成，0600 权限），可用 `FLOWX_STUDIO_SERVER_AUTH_TOKEN` 覆盖。认证失败返回 `401`。
+- **限流**：每 IP 100 请求/分钟（突发 50），超限返回 `429`。
+
 ## 4.3 节点管理 API
 
 ### 4.3.1 获取节点列表
@@ -616,14 +625,16 @@ PUT /api/v1/config/system
 │   ├── GET    /:id       获取工作流详情
 │   ├── PUT    /:id       更新工作流
 │   ├── DELETE /:id       删除工作流
-│   └── POST   /:id/run   执行工作流
+│   ├── POST   /:id/run   执行工作流
+│   └── POST   /:id/mock  Mock 执行（校验 + nodeRef 展开，不真实运行）
 │
 ├── /executions
 │   ├── GET    /          获取执行历史
 │   ├── GET    /:id       获取执行详情
 │   ├── GET    /:id/nodes 获取执行节点状态
 │   ├── GET    /:id/stream 实时日志流 (SSE)
-│   └── GET    /:id/logs  查询执行日志
+│   ├── GET    /:id/logs  查询执行日志
+│   └── GET    /:id/logs/export?format=json|txt|markdown  导出执行日志
 │
 ├── /events
 │   └── GET    /          全局事件流 (SSE)
@@ -639,6 +650,8 @@ PUT /api/v1/config/system
 |------------|---------|------|
 | 200 | success | 请求成功 |
 | 400 | bad_request | 请求参数错误 |
+| 401 | unauthorized | 认证失败（token 缺失或错误） |
 | 404 | not_found | 资源不存在 |
 | 409 | conflict | 资源冲突（如名称已存在） |
+| 429 | rate_limit | 触发限流（每 IP 100 请求/分钟） |
 | 500 | internal_error | 服务器内部错误 |

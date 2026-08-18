@@ -280,6 +280,9 @@ func followExecution(ctx context.Context, execID int64) error {
 		return err
 	}
 	req.Header.Set("Accept", "text/event-stream")
+	if tok := authToken(); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {

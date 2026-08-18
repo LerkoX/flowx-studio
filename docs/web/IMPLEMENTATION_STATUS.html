@@ -84,6 +84,14 @@
 <li>Mock 测试环境变量统一为 <code>FLOWX_PARAM_</code> 前缀（保留裸大写名兼容别名），Mock 与运行时展开行为一致。</li>
 <li><code>opencode.json</code> 移除已删除的 <code>flowx-studio mcp</code> 配置。</li>
 </ul>
+<h3 id="安全与功能补全2026-08-18">安全与功能补全（2026-08-18）</h3>
+<ul>
+<li><strong>本地 token 认证</strong>：<code>/api/v1</code> 全部路由要求 <code>Authorization: Bearer &lt;token&gt;</code> 或 <code>flowx_token</code> cookie；token 存放于 <code>&lt;data-dir&gt;/auth.token</code>（0600，首次启动自动生成），可用 <code>FLOWX_STUDIO_SERVER_AUTH_TOKEN</code> 覆盖；返回 <code>index.html</code> 时自动种 cookie，Web UI 零改动；CLI 自动读取 token（<code>FLOWX_STUDIO_AUTH_TOKEN</code> &gt; token 文件）。</li>
+<li><strong>请求限流</strong>：<code>x/time/rate</code> 每 IP 100 请求/分钟（突发 50），超限返回 429。</li>
+<li><strong>工作流 Mock 执行</strong>：<code>POST /api/v1/workflows/:id/mock</code>，校验 YAML + 展开 nodeRef，返回展开后配置，不创建执行记录。</li>
+<li><strong>日志导出</strong>：<code>GET /api/v1/executions/:id/logs/export?format=json|txt|markdown</code>，带 <code>Content-Disposition</code> 下载头。</li>
+<li><strong>自动打开浏览器</strong>：接线 <code>auto_open_browser</code>/<code>no_open</code> 配置与 <code>--no-open</code> flag，headless 环境自动跳过。</li>
+</ul>
 <hr>
 
 <h2 id="近期重要变更2026-07-12">近期重要变更（2026-07-12）</h2>
@@ -182,7 +190,7 @@
 <td>10</td>
 <td>安全设计</td>
 <td>🟡 部分实现</td>
-<td>CORS 限制 + Mock 代码安全校验已实现，请求限流/沙箱待实现</td>
+<td>CORS + token 认证 + 请求限流 + Mock 代码安全校验已实现，参数验证/审计日志/Docker 沙箱待实现</td>
 </tr>
 <tr>
 <td>11</td>
@@ -320,18 +328,19 @@
 <h4 id="6-安全增强">6. 安全增强</h4>
 <ul>
 <li>[x] CORS 本地来源限制</li>
-<li>[ ] <strong>请求限流</strong> (AI API 10/min, 其他 100/min)</li>
+<li>[x] <strong>本地 token 认证</strong>（Bearer / cookie，2026-08-18）</li>
+<li>[x] <strong>请求限流</strong>（每 IP 100/min，突发 50；原 AI API 10/min 已随 AI 层移除而废止）</li>
 <li>[ ] <strong>参数输入验证</strong> (类型/长度/范围检查)</li>
 <li>[ ] <strong>Docker 沙箱</strong> (只读 rootfs + 网络隔离 + 资源限制)</li>
 <li>[ ] <strong>审计日志</strong> (<code>audit_logs</code> 表)</li>
 </ul>
 <h4 id="7-其他-v1-占位">7. 其他 V1 占位</h4>
 <ul>
-<li>[ ] 自动打开浏览器（未实现；配置项 <code>auto_open_browser</code> 已预留但未接线）</li>
+<li>[x] 自动打开浏览器（2026-08-18 接线：<code>auto_open_browser</code> / <code>no_open</code> / <code>--no-open</code>）</li>
 <li>[x] 单实例 PID 文件锁（<code>internal/singleton/lock.go</code>，<code>main.go</code> 中 server 启动时获取）</li>
 <li>[ ] 数据备份与恢复 API</li>
-<li>[ ] 日志导出 (<code>POST /api/v1/executions/:id/logs/export</code>)</li>
-<li>[ ] 工作流 Mock 执行 (<code>POST /api/v1/workflows/:id/mock</code>)</li>
+<li>[x] 日志导出 (<code>GET /api/v1/executions/:id/logs/export?format=json|txt|markdown</code>)</li>
+<li>[x] 工作流 Mock 执行 (<code>POST /api/v1/workflows/:id/mock</code>，校验 + 展开，不真实运行)</li>
 </ul>
 <h4 id="8-cli-客户端与-skill替代原-mcp-服务端">8. CLI 客户端与 SKILL（替代原 MCP 服务端）</h4>
 <ul>
@@ -495,10 +504,10 @@ web/src/pages/
 <h2 id="下一步建议按优先级">下一步建议（按优先级）</h2>
 
 <ol>
-<li><strong>🔥 高优先级</strong>：实现安全增强（请求限流、参数验证、审计日志）</li>
-<li><strong>中优先级</strong>：内存环形缓冲区、日志自动清理、日志导出</li>
-<li><strong>中优先级</strong>：自动打开浏览器接线、数据备份等增强功能</li>
-<li><strong>低优先级</strong>：CLI 调用认证（本地 token）、Prometheus 指标暴露</li>
+<li><strong>🔥 高优先级</strong>：实现安全增强（参数验证、审计日志）</li>
+<li><strong>中优先级</strong>：内存环形缓冲区、日志自动清理</li>
+<li><strong>中优先级</strong>：数据备份与恢复 API</li>
+<li><strong>低优先级</strong>：Docker 沙箱、Prometheus 指标暴露</li>
 </ol>
             </article>
         </main>

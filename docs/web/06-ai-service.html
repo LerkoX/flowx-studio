@@ -251,6 +251,8 @@
 </tbody>
 </table>
 
+<p><strong>认证</strong>：server 自 2026-08-18 起要求本地 token。CLI 按 <code>FLOWX_STUDIO_AUTH_TOKEN</code> → <code>&lt;data-dir&gt;/auth.token</code> 顺序自动解析并附加 <code>Authorization: Bearer</code> 头，无需手动配置；token 不匹配时返回 401，CLI 会提示检查 token 来源。</p>
+
 <p>退出码约定：<code>0</code> 成功；<code>1</code> 业务/校验失败（stderr 含错误详情与重试指引）或缺少必填参数（错误信息会提示查看 <code>--schema</code>）；<code>2</code> flag 解析错误（由 Cobra 输出用法）。</p>
 
 <p><code>pipeline</code> 命令组注册了别名 <code>workflow</code>，两者等价。</p>

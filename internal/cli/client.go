@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -73,6 +74,10 @@ func do(ctx context.Context, method, path string, query url.Values, body interfa
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	// 本地 token 认证：优先 FLOWX_STUDIO_AUTH_TOKEN，其次 <data-dir>/auth.token
+	if tok := authToken(); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -90,6 +95,9 @@ func do(ctx context.Context, method, path string, query url.Values, body interfa
 		return nil, fmt.Errorf("invalid response from server (HTTP %d): %s", resp.StatusCode, truncate(string(raw), 200))
 	}
 
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, &APIError{Status: resp.StatusCode, Message: "unauthorized: token mismatch. Check FLOWX_STUDIO_AUTH_TOKEN or <data-dir>/auth.token"}
+	}
 	if resp.StatusCode >= 400 || ar.Code >= 400 {
 		return nil, &APIError{Status: resp.StatusCode, Message: ar.Message}
 	}
@@ -178,4 +186,25 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+// authToken 解析认证 token：FLOWX_STUDIO_AUTH_TOKEN > <data-dir>/auth.token。
+// 读取失败（如 server 未启动过、token 文件不存在）时返回空串，由服务端决定是否拒绝。
+func authToken() string {
+	if env := strings.TrimSpace(os.Getenv("FLOWX_STUDIO_AUTH_TOKEN")); env != "" {
+		return env
+	}
+	dataDir := strings.TrimSpace(os.Getenv("FLOWX_STUDIO_DATA_DIR"))
+	if dataDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		dataDir = filepath.Join(home, ".flowx-studio")
+	}
+	raw, err := os.ReadFile(filepath.Join(dataDir, "auth.token"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
 }

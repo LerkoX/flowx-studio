@@ -109,6 +109,8 @@ CLI 客户端子命令覆盖原 MCP 8 个工具的全部能力，并新增原 FA
 | `--json` | 以 JSON 输出结果 | false |
 | `--schema` | 输出该命令参数的 JSON Schema 后退出 | false |
 
+**认证**：server 自 2026-08-18 起要求本地 token。CLI 按 `FLOWX_STUDIO_AUTH_TOKEN` → `<data-dir>/auth.token` 顺序自动解析并附加 `Authorization: Bearer` 头，无需手动配置；token 不匹配时返回 401，CLI 会提示检查 token 来源。
+
 退出码约定：`0` 成功；`1` 业务/校验失败（stderr 含错误详情与重试指引）或缺少必填参数（错误信息会提示查看 `--schema`）；`2` flag 解析错误（由 Cobra 输出用法）。
 
 `pipeline` 命令组注册了别名 `workflow`，两者等价。

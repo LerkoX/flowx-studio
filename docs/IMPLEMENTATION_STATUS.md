@@ -21,6 +21,13 @@
 - Mock 测试环境变量统一为 `FLOWX_PARAM_` 前缀（保留裸大写名兼容别名），Mock 与运行时展开行为一致。
 - `opencode.json` 移除已删除的 `flowx-studio mcp` 配置。
 
+### 安全与功能补全（2026-08-18）
+- **本地 token 认证**：`/api/v1` 全部路由要求 `Authorization: Bearer <token>` 或 `flowx_token` cookie；token 存放于 `<data-dir>/auth.token`（0600，首次启动自动生成），可用 `FLOWX_STUDIO_SERVER_AUTH_TOKEN` 覆盖；返回 `index.html` 时自动种 cookie，Web UI 零改动；CLI 自动读取 token（`FLOWX_STUDIO_AUTH_TOKEN` > token 文件）。
+- **请求限流**：`x/time/rate` 每 IP 100 请求/分钟（突发 50），超限返回 429。
+- **工作流 Mock 执行**：`POST /api/v1/workflows/:id/mock`，校验 YAML + 展开 nodeRef，返回展开后配置，不创建执行记录。
+- **日志导出**：`GET /api/v1/executions/:id/logs/export?format=json|txt|markdown`，带 `Content-Disposition` 下载头。
+- **自动打开浏览器**：接线 `auto_open_browser`/`no_open` 配置与 `--no-open` flag，headless 环境自动跳过。
+
 ---
 
 ## 近期重要变更（2026-07-12）
@@ -59,7 +66,7 @@
 | 7 | 节点系统 | ✅ 已完成 | CRUD + Mock 子进程执行已实现 |
 | 8 | FlowX 运行时 | ✅ 已完成 | RuntimeAdapter + EventBridge + LogPusher 已实现 |
 | 9 | 运行时与部署 | ✅ 已完成 | 单二进制 + go:embed + Cobra CLI 已完成 |
-| 10 | 安全设计 | 🟡 部分实现 | CORS 限制 + Mock 代码安全校验已实现，请求限流/沙箱待实现 |
+| 10 | 安全设计 | 🟡 部分实现 | CORS + token 认证 + 请求限流 + Mock 代码安全校验已实现，参数验证/审计日志/Docker 沙箱待实现 |
 | 11 | 核心库依赖 | ✅ 已完成 | FlowX 引擎接口调研完成，replace 引用已配置 |
 | 12 | 节点包规范 | 🟡 部分实现 | `flowx.json` 导入、Mock 多文件、运行时展开已实现；工作流节点镜像执行待 FlowX 核心增强 |
 | 13 | CLI 客户端与 SKILL | ✅ 已完成 | `internal/cli`（pipeline/node/ask/info）+ `skills/flowx-studio/SKILL.md` 已落地；`mcp` 子命令已移除 |
@@ -169,17 +176,18 @@ AI Provider（OpenAI/Anthropic/Ollama）与 AI Service 层已随架构调整全�
 
 #### 6. 安全增强
 - [x] CORS 本地来源限制
-- [ ] **请求限流** (AI API 10/min, 其他 100/min)
+- [x] **本地 token 认证**（Bearer / cookie，2026-08-18）
+- [x] **请求限流**（每 IP 100/min，突发 50；原 AI API 10/min 已随 AI 层移除而废止）
 - [ ] **参数输入验证** (类型/长度/范围检查)
 - [ ] **Docker 沙箱** (只读 rootfs + 网络隔离 + 资源限制)
 - [ ] **审计日志** (`audit_logs` 表)
 
 #### 7. 其他 V1 占位
-- [ ] 自动打开浏览器（未实现；配置项 `auto_open_browser` 已预留但未接线）
+- [x] 自动打开浏览器（2026-08-18 接线：`auto_open_browser` / `no_open` / `--no-open`）
 - [x] 单实例 PID 文件锁（`internal/singleton/lock.go`，`main.go` 中 server 启动时获取）
 - [ ] 数据备份与恢复 API
-- [ ] 日志导出 (`POST /api/v1/executions/:id/logs/export`)
-- [ ] 工作流 Mock 执行 (`POST /api/v1/workflows/:id/mock`)
+- [x] 日志导出 (`GET /api/v1/executions/:id/logs/export?format=json|txt|markdown`)
+- [x] 工作流 Mock 执行 (`POST /api/v1/workflows/:id/mock`，校验 + 展开，不真实运行)
 
 #### 8. CLI 客户端与 SKILL（替代原 MCP 服务端）
 - [x] `internal/cli` HTTP 客户端封装（`--server` flag / `FLOWX_STUDIO_SERVER_URL`，默认 `http://127.0.0.1:8080`）
@@ -321,7 +329,7 @@ web/src/pages/
 
 ## 下一步建议（按优先级）
 
-1. **🔥 高优先级**：实现安全增强（请求限流、参数验证、审计日志）
-2. **中优先级**：内存环形缓冲区、日志自动清理、日志导出
-3. **中优先级**：自动打开浏览器接线、数据备份等增强功能
-4. **低优先级**：CLI 调用认证（本地 token）、Prometheus 指标暴露
+1. **🔥 高优先级**：实现安全增强（参数验证、审计日志）
+2. **中优先级**：内存环形缓冲区、日志自动清理
+3. **中优先级**：数据备份与恢复 API
+4. **低优先级**：Docker 沙箱、Prometheus 指标暴露

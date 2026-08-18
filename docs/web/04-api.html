@@ -87,6 +87,17 @@
   "message": "invalid request body: ..."
 }</code></pre>
 
+<h2 id="421-认证与限流">4.2.1 认证与限流</h2>
+
+<ul>
+<li><strong>认证</strong>（2026-08-18 起）：所有 <code>/api/v1</code> 请求需携带认证信息，二选一：</li>
+<li><code>Authorization: Bearer &lt;token&gt;</code> 请求头（CLI 与其他客户端）</li>
+<li><code>flowx_token</code> cookie（Web UI：服务端返回 <code>index.html</code> 时自动种下）</li>
+</ul>
+<p>  token 位于数据目录的 <code>auth.token</code> 文件（首次启动自动生成，0600 权限），可用 <code>FLOWX_STUDIO_SERVER_AUTH_TOKEN</code> 覆盖。认证失败返回 <code>401</code>。</p>
+<ul>
+<li><strong>限流</strong>：每 IP 100 请求/分钟（突发 50），超限返回 <code>429</code>。</li>
+</ul>
 <h2 id="43-节点管理-api">4.3 节点管理 API</h2>
 
 <h3 id="431-获取节点列表">4.3.1 获取节点列表</h3>
@@ -813,14 +824,16 @@ data: {"execution_id": 42, "status": "success", "duration_ms": 135000, "timestam
 │   ├── GET    /:id       获取工作流详情
 │   ├── PUT    /:id       更新工作流
 │   ├── DELETE /:id       删除工作流
-│   └── POST   /:id/run   执行工作流
+│   ├── POST   /:id/run   执行工作流
+│   └── POST   /:id/mock  Mock 执行（校验 + nodeRef 展开，不真实运行）
 │
 ├── /executions
 │   ├── GET    /          获取执行历史
 │   ├── GET    /:id       获取执行详情
 │   ├── GET    /:id/nodes 获取执行节点状态
 │   ├── GET    /:id/stream 实时日志流 (SSE)
-│   └── GET    /:id/logs  查询执行日志
+│   ├── GET    /:id/logs  查询执行日志
+│   └── GET    /:id/logs/export?format=json|txt|markdown  导出执行日志
 │
 ├── /events
 │   └── GET    /          全局事件流 (SSE)
@@ -851,6 +864,11 @@ data: {"execution_id": 42, "status": "success", "duration_ms": 135000, "timestam
 <td>请求参数错误</td>
 </tr>
 <tr>
+<td>401</td>
+<td>unauthorized</td>
+<td>认证失败（token 缺失或错误）</td>
+</tr>
+<tr>
 <td>404</td>
 <td>not_found</td>
 <td>资源不存在</td>
@@ -859,6 +877,11 @@ data: {"execution_id": 42, "status": "success", "duration_ms": 135000, "timestam
 <td>409</td>
 <td>conflict</td>
 <td>资源冲突（如名称已存在）</td>
+</tr>
+<tr>
+<td>429</td>
+<td>rate_limit</td>
+<td>触发限流（每 IP 100 请求/分钟）</td>
 </tr>
 <tr>
 <td>500</td>

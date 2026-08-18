@@ -66,6 +66,7 @@ func main() {
 	}
 	serverCmd.Flags().Int("port", 8080, "HTTP server port")
 	serverCmd.Flags().String("host", "0.0.0.0", "HTTP server host")
+	serverCmd.Flags().Bool("no-open", false, "do not open browser on start")
 	rootCmd.AddCommand(serverCmd)
 
 	versionCmd := &cobra.Command{
@@ -138,6 +139,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("host") {
 		cfg.Server.Host, _ = cmd.Flags().GetString("host")
 	}
+	if noOpen, _ := cmd.Flags().GetBool("no-open"); noOpen {
+		cfg.Server.NoOpen = true
+	}
 
 	if err := os.MkdirAll(cfg.Data.Dir, 0755); err != nil {
 		return fmt.Errorf("failed to create data directory: %w", err)
@@ -161,11 +165,20 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	svcs.workflowSvc.StartEventBridge(ctx)
 
+	// 本地 token 认证：CLI 与 Web UI 均需提供；可用 FLOWX_STUDIO_SERVER_AUTH_TOKEN 覆盖
+	token, err := server.LoadOrCreateToken(cfg.Data.Dir, os.Getenv("FLOWX_STUDIO_SERVER_AUTH_TOKEN"))
+	if err != nil {
+		return fmt.Errorf("failed to init auth token: %w", err)
+	}
+
 	srv := server.New()
 	srv.SetPort(cfg.Server.Port)
 	srv.SetHost(cfg.Server.Host)
+	srv.SetAuthToken(token)
 
 	api := srv.Router().Group("/api/v1")
+	api.Use(server.AuthMiddleware(token))
+	api.Use(server.RateLimitMiddleware(100, 50)) // 每 IP 100 请求/分钟，突发 50
 	handler.NewConfigHandler(svcs.database).RegisterRoutes(api)
 	handler.NewWorkflowHandler(svcs.workflowSvc).RegisterRoutes(api)
 	handler.NewNodeHandler(svcs.nodeSvc).RegisterRoutes(api)
@@ -181,6 +194,22 @@ func runServer(cmd *cobra.Command, args []string) error {
 		}
 		stop()
 	}()
+
+	// 自动打开浏览器：server 就绪后延迟 500ms，可通过 --no-open /
+	// FLOWX_STUDIO_SERVER_NO_OPEN=true / 配置文件 server.no_open 禁用
+	if cfg.Server.AutoOpenBrowser && !cfg.Server.NoOpen {
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			host := cfg.Server.Host
+			if host == "0.0.0.0" || host == "::" {
+				host = "localhost"
+			}
+			url := fmt.Sprintf("http://%s:%d", host, cfg.Server.Port)
+			if err := server.OpenBrowser(url); err != nil {
+				log.Printf("failed to open browser: %v", err)
+			}
+		}()
+	}
 
 	<-ctx.Done()
 

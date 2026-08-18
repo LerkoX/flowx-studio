@@ -2,8 +2,10 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/LerkoX/flowx-studio/internal/model"
@@ -31,6 +33,7 @@ func (h *WorkflowHandler) RegisterRoutes(r *gin.RouterGroup) {
 		workflows.PUT("/:id", h.Update)
 		workflows.DELETE("/:id", h.Delete)
 		workflows.POST("/:id/run", h.Run)
+		workflows.POST("/:id/mock", h.MockRun)
 	}
 
 	executions := r.Group("/executions")
@@ -39,6 +42,7 @@ func (h *WorkflowHandler) RegisterRoutes(r *gin.RouterGroup) {
 		executions.GET("/:id", h.GetExecution)
 		executions.GET("/:id/stream", h.StreamExecution)
 		executions.GET("/:id/logs", h.GetExecutionLogs)
+		executions.GET("/:id/logs/export", h.ExportExecutionLogs)
 		executions.GET("/:id/nodes", h.GetExecutionNodes)
 	}
 }
@@ -163,6 +167,27 @@ func (h *WorkflowHandler) Run(c *gin.Context) {
 	})
 }
 
+// MockRun 工作流 Mock 执行（校验 + nodeRef 展开，不真实运行）
+func (h *WorkflowHandler) MockRun(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		Error(c, http.StatusBadRequest, "invalid workflow id")
+		return
+	}
+
+	result, err := h.service.MockRun(id)
+	if err != nil {
+		if err.Error() == "workflow not found" {
+			Error(c, http.StatusNotFound, err.Error())
+			return
+		}
+		Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	Success(c, result)
+}
+
 // ListExecutions 获取执行历史
 func (h *WorkflowHandler) ListExecutions(c *gin.Context) {
 	workflowID, _ := strconv.ParseInt(c.Query("workflow_id"), 10, 64)
@@ -237,6 +262,62 @@ func (h *WorkflowHandler) GetExecutionNodes(c *gin.Context) {
 	}
 
 	Success(c, nodes)
+}
+
+// ExportExecutionLogs 导出执行日志（GET /executions/:id/logs/export?format=json|txt|markdown）
+func (h *WorkflowHandler) ExportExecutionLogs(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		Error(c, http.StatusBadRequest, "invalid execution id")
+		return
+	}
+
+	format := c.DefaultQuery("format", "json")
+	logs, err := h.service.GetAllExecutionLogs(id)
+	if err != nil {
+		Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	filename := fmt.Sprintf("execution-%d-logs", id)
+	switch format {
+	case "json":
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s.json", filename))
+		c.JSON(http.StatusOK, gin.H{"executionId": id, "logs": logs})
+	case "txt":
+		var sb strings.Builder
+		for _, l := range logs {
+			sb.WriteString(formatLogLine(l))
+		}
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s.txt", filename))
+		c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(sb.String()))
+	case "markdown":
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("# Execution %d Logs\n\n", id))
+		sb.WriteString("| Time | Level | Node | Message |\n|---|---|---|---|\n")
+		for _, l := range logs {
+			node := ""
+			if l.NodeName != nil {
+				node = *l.NodeName
+			}
+			msg := strings.ReplaceAll(l.Message, "|", "\\|")
+			sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n",
+				l.Timestamp.Format(time.RFC3339), l.Level, node, msg))
+		}
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s.md", filename))
+		c.Data(http.StatusOK, "text/markdown; charset=utf-8", []byte(sb.String()))
+	default:
+		Error(c, http.StatusBadRequest, "format must be json, txt or markdown")
+	}
+}
+
+// formatLogLine 格式化单行日志（txt 导出用）
+func formatLogLine(l model.ExecutionLog) string {
+	node := ""
+	if l.NodeName != nil {
+		node = *l.NodeName
+	}
+	return fmt.Sprintf("%s [%s] [%s] %s\n", l.Timestamp.Format(time.RFC3339), l.Level, node, l.Message)
 }
 
 // StreamExecution SSE 实时日志流

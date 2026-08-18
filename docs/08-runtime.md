@@ -162,7 +162,7 @@ Flags:
 
 **说明**：
 - `server` 仅有 `--port`、`--host` 两个 flag，没有 `-p`/`-H` 短选项。
-- 没有 `--no-open`、`--debug` flag（规划中，未实现）。
+- 没有 `--debug` flag（规划中，未实现）。`--no-open` 已实现（禁用自动打开浏览器，见 8.5）。
 - 没有 `--data-dir` flag。数据目录通过环境变量 `FLOWX_STUDIO_DATA_DIR` 或配置文件设置；`boot.sh` 启动时也是通过该环境变量传递数据目录。未显式配置 `data.db_path` 时，数据库文件自动放在数据目录下的 `studio.db`。
 
 ### 8.2.4 Cobra 实现示例
@@ -236,7 +236,7 @@ server:
   port: 8080
   host: "0.0.0.0"
   no_open: false
-  auto_open_browser: true   # 配置项已定义但未接线（规划中，未实现）
+  auto_open_browser: true   # 启动后自动打开浏览器（8.5 节，已实现）
 
 data:
   dir: "~/.flowx-studio"
@@ -346,17 +346,17 @@ defer lock.Release()
 - 没有 `nodes/` 节点代码缓存目录。
 - Mock 测试的临时目录创建在系统临时目录下（`$TMPDIR/flowx_mock_*`，见 `internal/sandbox/executor.go:42,79`），执行完成后立即清理，不在数据目录中。
 
-## 8.5 自动浏览器打开（规划中，未实现）
+## 8.5 自动浏览器打开（已实现）
 
-> ⚠️ 本节描述的功能均未实现：全仓库没有打开浏览器的代码，配置项 `auto_open_browser` / `no_open` 已定义但未接线。以下为**目标设计**。
+2026-08-18 实现（`internal/server/browser.go` + `cmd/flowx-studio/main.go`）：
 
-### 8.5.1 实现机制（规划中，未实现）
+### 8.5.1 实现机制
 
 ```go
-func openBrowser(url string) error {
+func OpenBrowser(url string) error {
     var cmd string
     var args []string
-    
+
     switch runtime.GOOS {
     case "darwin":
         cmd = "open"
@@ -364,21 +364,24 @@ func openBrowser(url string) error {
     case "windows":
         cmd = "rundll32"
         args = []string{"url.dll,FileProtocolHandler", url}
-    default: // linux
+    default: // linux 及其他：无桌面环境（无 DISPLAY/WAYLAND_DISPLAY）时直接跳过
+        if os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
+            return nil
+        }
         cmd = "xdg-open"
         args = []string{url}
     }
-    
+
     return exec.Command(cmd, args...).Start()
 }
 ```
 
-### 8.5.2 启动时机（规划中，未实现）
+### 8.5.2 启动时机与开关
 
-- 服务器成功启动后（端口监听就绪）
-- 延迟 500ms 确保服务完全初始化
-- 仅在桌面环境自动打开（检测 `DISPLAY` 环境变量等）
-- 可通过 `FLOWX_STUDIO_SERVER_NO_OPEN=true` 禁用（配置键 `server.no_open` 已定义但未接线）
+- 服务器启动后延迟 500ms 打开（异步，失败仅记日志不阻塞启动）
+- 仅在桌面环境打开（Linux 检测 `DISPLAY` / `WAYLAND_DISPLAY`，headless 环境自动跳过）
+- 监听地址为 `0.0.0.0`/`::` 时浏览器 URL 使用 `localhost`
+- 禁用方式（任一）：`--no-open` flag、`FLOWX_STUDIO_SERVER_NO_OPEN=true`、配置文件 `server.no_open: true`、配置文件 `server.auto_open_browser: false`
 
 ## 8.6 日志系统（规划中，未实现）
 

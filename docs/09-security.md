@@ -85,65 +85,24 @@ cmd.SysProcAttr = &syscall.SysProcAttr{
 
 #### 认证与授权
 
-V1 版本为本地单用户应用，暂不需要多用户认证。但需防止外部未授权访问：
+V1 版本为本地单用户应用，采用**本地 token 认证**（2026-08-18 实现，`internal/server/auth.go`）：
 
-- **绑定地址**：实际默认绑定 `0.0.0.0`（`internal/config/config.go:42`、`internal/server/server.go:35`、`boot.sh:24`），**对所有网卡开放**。⚠️ 这意味着局域网内其他机器可直接访问 API，生产环境建议显式设置 `--host 127.0.0.1` 或 `FLOWX_STUDIO_SERVER_HOST=127.0.0.1`
-- **可选密码保护**（规划中，未实现）
-- **CORS 限制**：已实现，仅允许 `http://localhost` / `http://127.0.0.1` 来源（`internal/server/server.go:105-122`）
+- **Token 生成**：server 首次启动时在数据目录生成 `auth.token`（64 位 hex 随机串，权限 0600）；可用 `FLOWX_STUDIO_SERVER_AUTH_TOKEN` 环境变量覆盖
+- **API 校验**：`/api/v1` 全部路由要求 `Authorization: Bearer <token>` 头或 `flowx_token` cookie，缺失/错误返回 401；比对使用 `subtle.ConstantTimeCompare` 防时序攻击
+- **Web UI 免配置**：返回 `index.html` 时自动种下 `flowx_token` cookie（SameSite 语义由浏览器保证），前端同源请求自动携带，无需任何前端改动
+- **CLI 自动认证**：客户端子命令按 `FLOWX_STUDIO_AUTH_TOKEN` → `$(data-dir)/auth.token` 顺序解析 token 并自动附加请求头
+- **绑定地址**：实际默认绑定 `0.0.0.0`（`internal/config/config.go`），**对所有网卡开放**。⚠️ 这意味着局域网内其他机器可尝试访问 API——token 认证提供了第一层防护，生产环境仍建议显式设置 `--host 127.0.0.1`
+- **CORS 限制**：已实现，仅允许 `http://localhost` / `http://127.0.0.1` 来源（`internal/server/server.go`）
 
-```go
-// CORS 中间件
-func corsMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        // 仅允许本地来源
-        origin := r.Header.Get("Origin")
-        if origin == "" || strings.HasPrefix(origin, "http://localhost") {
-            w.Header().Set("Access-Control-Allow-Origin", origin)
-        }
-        next.ServeHTTP(w, r)
-    })
-}
-```
+#### 请求限流（已实现）
 
-#### 请求限流（规划中，未实现）
+基于 `golang.org/x/time/rate` 的每 IP 令牌桶限流（`internal/server/auth.go` `RateLimitMiddleware`，2026-08-18 实现）：
 
-> ⚠️ 未实现，代码中不存在 RateLimiter。以下为**目标设计**：
+- **默认配置**：每 IP 100 请求/分钟，突发容量 50；超限返回 429 `{code: 429, message: "rate limit exceeded..."}`
+- **作用范围**：`/api/v1` 全部路由（静态资源与 SSE 长连接不受限——SSE 只在建连时消耗一次令牌）
+- **内存管理**：visitor 表后台每 5 分钟清理空闲超过 10 分钟的条目
 
-```go
-type RateLimiter struct {
-    requests map[string][]time.Time
-    limit    int
-    window   time.Duration
-    mu       sync.Mutex
-}
-
-func (rl *RateLimiter) Allow(clientID string) bool {
-    rl.mu.Lock()
-    defer rl.mu.Unlock()
-    
-    now := time.Now()
-    requests := rl.requests[clientID]
-    
-    // 清理过期请求
-    var valid []time.Time
-    for _, t := range requests {
-        if now.Sub(t) < rl.window {
-            valid = append(valid, t)
-        }
-    }
-    
-    if len(valid) >= rl.limit {
-        return false
-    }
-    
-    rl.requests[clientID] = append(valid, now)
-    return true
-}
-```
-
-默认限流配置：
-- AI 生成 API：每用户 10 请求/分钟
-- 其他 API：每用户 100 请求/分钟
+> AI 生成 API 的 10/min 独立限流已随后端 AI 服务层移除而不再适用；CLI 经 token 认证后走统一限流。
 
 ### 9.1.3 数据安全
 
