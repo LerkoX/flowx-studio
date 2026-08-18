@@ -242,11 +242,15 @@ func (s *NodeService) MockTest(id int64, parameters map[string]string, timeout i
 
 	envVars := make(map[string]string)
 	for _, param := range node.Parameters {
-		key := strings.ToUpper(param.Name)
+		key := "FLOWX_PARAM_" + strings.ToUpper(param.Name)
 		if val, ok := parameters[param.Name]; ok && val != "" {
 			envVars[key] = val
 		} else if param.Default != nil {
 			envVars[key] = fmt.Sprintf("%v", param.Default)
+		}
+		// 兼容：同时注入裸大写名（历史行为），FLOWX_PARAM_ 前缀为规范写法
+		if v, ok := envVars[key]; ok {
+			envVars[strings.ToUpper(param.Name)] = v
 		}
 	}
 

@@ -207,11 +207,11 @@ type NodeDockerConfig struct {
 FLOWX_PARAM_URL=https://example.com/image.jpg
 FLOWX_PARAM_TIMEOUT=30</code></pre>
 
-<blockquote><strong>已知不一致</strong>：参数注入存在两条路径，环境变量名不同：</blockquote>
+<blockquote><strong>参数注入的两条路径</strong>（环境变量名已统一，2026-08-17 修复）：</blockquote>
 <blockquote>- <strong>运行时展开路径</strong>（<code>node_expander.go</code>）：生成 <code>export FLOWX_PARAM_{大写参数名}="{{ Param.xxx }}"</code>，带 <code>FLOWX_PARAM_</code> 前缀；若 <code>flowx.json</code> 声明了 <code>env</code> 字段，则直接使用 <code>env</code> 配置。</blockquote>
-<blockquote>- <strong>Mock 测试路径</strong>（<code>service/node.go</code> MockTest）：直接以<strong>大写参数名</strong>（无 <code>FLOWX_PARAM_</code> 前缀）注入环境变量，如 <code>URL=...</code>。</blockquote>
+<blockquote>- <strong>Mock 测试路径</strong>（<code>service/node.go</code> MockTest）：同样注入 <code>FLOWX_PARAM_{大写参数名}</code>；同时保留<strong>裸大写参数名</strong>（如 <code>URL=...</code>）作为兼容别名，存量节点代码无需修改。</blockquote>
 <blockquote></blockquote>
-<blockquote>编写节点代码时如需兼容 Mock 测试，建议同时读取两种变量名。</blockquote>
+<blockquote>新节点代码一律使用 <code>FLOWX_PARAM_</code> 前缀变量名即可，Mock 与真实执行行为一致。</blockquote>
 
 <p>不同语言的读取示例（以运行时展开路径为例）：</p>
 
@@ -300,7 +300,7 @@ exit 1</code></pre>
 <p>在生成节点的 Prompt 中，必须明确要求 AI：</p>
 
 <ol>
-<li>使用环境变量读取参数（运行时展开路径为 <code>FLOWX_PARAM_*</code> 格式；注意 Mock 测试路径无前缀，见 7.2.1）</li>
+<li>使用环境变量读取参数（<code>FLOWX_PARAM_*</code> 格式，Mock 与运行时一致，见 7.2.1）</li>
 <li>使用 <code>flowx-yaml</code> 代码块输出结果到 stdout，以便下游节点通过 Metadata 引用</li>
 <li>错误时输出 JSON 到 stderr 并 exit 1</li>
 <li>包含基本的错误处理</li>

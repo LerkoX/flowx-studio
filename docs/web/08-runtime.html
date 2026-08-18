@@ -193,14 +193,17 @@ flowx-studio
 # 查看帮助与参数契约
 flowx-studio --help
 flowx-studio pipeline create --help
-flowx-studio pipeline create --schema   # 输出参数 JSON Schema</code></pre>
+flowx-studio pipeline create --schema   # 输出参数 JSON Schema
+
+# 查看版本（由 -ldflags 注入 git 版本/commit/构建时间）
+flowx-studio version</code></pre>
 
 <p><strong>注意</strong>：</p>
 <ul>
 <li>裸运行 <code>flowx-studio</code> 不带子命令时只打印帮助，不会启动 server。</li>
 <li>客户端子命令默认连接 <code>http://127.0.0.1:8080</code>，可用 <code>--server</code> flag 或 <code>FLOWX_STUDIO_SERVER_URL</code> 环境变量覆盖；使用前需先运行 <code>flowx-studio server</code>。</li>
 <li><code>ask</code> / <code>info</code> 为纯终端交互命令，不访问 HTTP server。</li>
-<li>目前没有 <code>version</code> 命令（规划中，未实现）。</li>
+<li><code>pipeline</code> 命令组有别名 <code>workflow</code>。</li>
 <li>运行 YAML 工作流的 CLI 功能保留在 FlowX 核心库中（<code>flowx run workflow.yaml</code>），不在 flowx-studio 中提供。</li>
 </ul>
 <h3 id="823-启动参数">8.2.3 启动参数</h3>
@@ -211,17 +214,15 @@ Flags:
       --port int      HTTP 服务端口 (默认 8080)
       --host string   监听地址 (默认 "0.0.0.0")</code></pre>
 
-<p><strong>说明</strong>（见 <code>cmd/flowx-studio/main.go:47-48</code>）：</p>
+<p><strong>说明</strong>：</p>
 <ul>
-<li>仅有 <code>--port</code>、<code>--host</code> 两个 flag，没有 <code>-p</code>/<code>-H</code> 短选项。</li>
+<li><code>server</code> 仅有 <code>--port</code>、<code>--host</code> 两个 flag，没有 <code>-p</code>/<code>-H</code> 短选项。</li>
 <li>没有 <code>--no-open</code>、<code>--debug</code> flag（规划中，未实现）。</li>
-<li>没有 <code>--data-dir</code> flag。数据目录只能通过环境变量 <code>FLOWX_STUDIO_DATA_DIR</code> 或配置文件设置。</li>
+<li>没有 <code>--data-dir</code> flag。数据目录通过环境变量 <code>FLOWX_STUDIO_DATA_DIR</code> 或配置文件设置；<code>boot.sh</code> 启动时也是通过该环境变量传递数据目录。未显式配置 <code>data.db_path</code> 时，数据库文件自动放在数据目录下的 <code>studio.db</code>。</li>
 </ul>
-<p>  ⚠️ 已知问题：<code>boot.sh</code> 启动时会向二进制传递 <code>--data-dir</code> 参数，但二进制不支持该 flag，会报 <code>unknown flag</code> 错误；boot.sh 与二进制存在此不一致。</p>
-
 <h3 id="824-cobra-实现示例">8.2.4 Cobra 实现示例</h3>
 
-<p>实际实现（简化自 <code>cmd/flowx-studio/main.go</code>）。注意：没有 <code>versionCmd</code>、<code>--config</code> flag，也没有 <code>viper.BindPFlag</code>；flag 仅在显式传参时手动覆盖配置，配置加载统一由 <code>config.Load()</code> 完成。</p>
+<p>实际实现（简化自 <code>cmd/flowx-studio/main.go</code>）。注意：没有 <code>--config</code> flag，也没有 <code>viper.BindPFlag</code>；flag 仅在显式传参时手动覆盖配置，配置加载统一由 <code>config.Load()</code> 完成。</p>
 
 <pre><code class="language-go">package main
 
@@ -234,7 +235,7 @@ func main() {
         Use:   "flowx-studio",
         Short: "FlowX Studio - FlowX runtime viewer with CLI client",
     }
-    rootCmd.PersistentFlags().String("server", "http://127.0.0.1:8080", "HTTP server address (env: FLOWX_STUDIO_SERVER_URL)")
+    rootCmd.PersistentFlags().String("server", "", "HTTP server address (env: FLOWX_STUDIO_SERVER_URL, default http://127.0.0.1:8080)")
 
     serverCmd := &amp;cobra.Command{
         Use:   "server",

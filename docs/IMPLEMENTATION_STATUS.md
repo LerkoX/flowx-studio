@@ -15,6 +15,12 @@
 - 约定：查询类子命令支持 `--json`；校验失败退出码 1、stderr 含重试指引；flag 用法错误退出码 2；`--server` flag / `FLOWX_STUDIO_SERVER_URL` 指定 server 地址。
 - 收益：所有写操作收敛到 HTTP server 单进程，Web UI 经 SSE 可实时感知 Agent 操作（旧 MCP 模式跨进程事件不可达的问题消失）。
 
+### 一致性修复（2026-08-17）
+- 新增 `version` 子命令，版本信息由 `-ldflags` 注入（修复 `Makefile` `version` 目标报错）。
+- `boot.sh` 改用 `FLOWX_STUDIO_DATA_DIR` 环境变量传递数据目录（不再传二进制不支持的 `--data-dir` flag）；`config.Load` 中 `data.db_path` 未显式配置时自动归入数据目录。
+- Mock 测试环境变量统一为 `FLOWX_PARAM_` 前缀（保留裸大写名兼容别名），Mock 与运行时展开行为一致。
+- `opencode.json` 移除已删除的 `flowx-studio mcp` 配置。
+
 ---
 
 ## 近期重要变更（2026-07-12）
@@ -74,7 +80,7 @@
 - [x] 统一 API 响应格式 (`{code, data, message}`)
 - [x] `go:embed` 嵌入前端资源
 - [x] SPA fallback 到 `index.html`
-- [x] Cobra CLI（`server` 子命令；客户端子命令 `pipeline`/`node`/`ask`/`info` 规划中；**无 `version` 子命令**。已知问题：`Makefile` 的 `version` 目标调用 `./flowx-studio version` 会失败）
+- [x] Cobra CLI（`server` / `version` 子命令 + 客户端子命令 `pipeline`/`node`/`ask`/`info`；版本信息由 `-ldflags` 注入）
 - [x] Makefile (`build`, `run`, `clean`)
 
 #### 2. 数据模型

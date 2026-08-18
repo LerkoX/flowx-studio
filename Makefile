@@ -18,13 +18,18 @@ copy-web: build-web
 	rm -rf internal/server/web/dist
 	cp -r $(WEB_DIR)/dist internal/server/web/dist
 
+GIT_VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+GIT_COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+BUILD_DATE=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS=-ldflags "-X main.version=$(GIT_VERSION) -X main.commit=$(GIT_COMMIT) -X main.buildDate=$(BUILD_DATE)"
+
 # 构建后端（开发模式，不嵌入前端）
 build-dev:
-	go build -o $(BINARY_NAME) cmd/flowx-studio/main.go
+	go build $(LDFLAGS) -o $(BINARY_NAME) cmd/flowx-studio/main.go
 
 # 构建完整二进制（嵌入前端）
 build: copy-web
-	go build -ldflags "-s -w" -o $(BINARY_NAME) cmd/flowx-studio/main.go
+	go build -ldflags "-s -w -X main.version=$(GIT_VERSION) -X main.commit=$(GIT_COMMIT) -X main.buildDate=$(BUILD_DATE)" -o $(BINARY_NAME) cmd/flowx-studio/main.go
 	@echo "Build complete: $(BINARY_NAME)"
 
 # 运行开发服务器

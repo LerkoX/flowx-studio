@@ -572,7 +572,7 @@ export TIMEOUT="&lt;求值后的 Param.timeout&gt;"</code></pre>
 <pre><code class="language-bash">export FLOWX_PARAM_URL="&lt;值&gt;"
 export FLOWX_PARAM_TIMEOUT="&lt;值&gt;"</code></pre>
 
-<p>注意：<code>NodeService.MockTest</code>（<code>internal/service/node.go:243-251</code>）使用<strong>裸大写参数名</strong>作为环境变量（如 <code>URL</code>），而节点包展开器使用 <code>FLOWX_PARAM_</code> 前缀（如 <code>FLOWX_PARAM_URL</code>），两处命名目前不一致（已知问题）。</p>
+<p>注意：<code>NodeService.MockTest</code>（<code>internal/service/node.go</code>）同样以 <code>FLOWX_PARAM_</code> 前缀注入环境变量，并额外保留裸大写参数名（如 <code>URL</code>）作为兼容别名——Mock 与运行时展开的变量名已统一（2026-08-17 修复）。</p>
 
 <h3 id="规则-4默认-run-命令">规则 4：默认 run 命令</h3>
 

@@ -387,7 +387,7 @@ func main() {
         Use:   "flowx-studio",
         Short: "FlowX Studio - FlowX runtime viewer with CLI client",
     }
-    rootCmd.PersistentFlags().String("server", "http://127.0.0.1:8080", "HTTP server address (env: FLOWX_STUDIO_SERVER_URL)")
+    rootCmd.PersistentFlags().String("server", "", "HTTP server address (env: FLOWX_STUDIO_SERVER_URL, default http://127.0.0.1:8080)")
 
     serverCmd := &cobra.Command{
         Use:   "server",
@@ -413,6 +413,6 @@ func main() {
 - `flowx-studio server [--port 8080] [--host 0.0.0.0]`：启动 HTTP server（Web UI + RESTful API）
 - `flowx-studio pipeline ...` / `flowx-studio node ...`：HTTP 客户端子命令，供 AI Agent（经 SKILL）与终端用户调用
 - `flowx-studio ask` / `flowx-studio info`：终端交互命令，承接原 FAP 动作语义
-- 裸运行 `flowx-studio`（不带子命令）仅打印帮助信息；无 `version` 子命令
+- 裸运行 `flowx-studio`（不带子命令）仅打印帮助信息；`version` 子命令输出版本信息（由 `-ldflags` 注入）
 
 **注意**：FlowX 核心库（`github.com/LerkoX/flowx`）为纯库，不包含 `cmd/` 目录与 CLI 入口。

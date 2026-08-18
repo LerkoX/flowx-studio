@@ -335,7 +335,7 @@ export FLOWX_PARAM_URL="<值>"
 export FLOWX_PARAM_TIMEOUT="<值>"
 ```
 
-注意：`NodeService.MockTest`（`internal/service/node.go:243-251`）使用**裸大写参数名**作为环境变量（如 `URL`），而节点包展开器使用 `FLOWX_PARAM_` 前缀（如 `FLOWX_PARAM_URL`），两处命名目前不一致（已知问题）。
+注意：`NodeService.MockTest`（`internal/service/node.go`）同样以 `FLOWX_PARAM_` 前缀注入环境变量，并额外保留裸大写参数名（如 `URL`）作为兼容别名——Mock 与运行时展开的变量名已统一（2026-08-17 修复）。
 
 ### 规则 4：默认 run 命令
 

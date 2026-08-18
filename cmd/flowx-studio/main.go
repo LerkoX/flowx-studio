@@ -24,6 +24,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// 构建信息，由 -ldflags "-X main.version=..." 注入
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildDate = "unknown"
+)
+
 type appServices struct {
 	database      *db.DB
 	bus           *event.Bus
@@ -60,6 +67,15 @@ func main() {
 	serverCmd.Flags().Int("port", 8080, "HTTP server port")
 	serverCmd.Flags().String("host", "0.0.0.0", "HTTP server host")
 	rootCmd.AddCommand(serverCmd)
+
+	versionCmd := &cobra.Command{
+		Use:   "version",
+		Short: "Print version information",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Printf("flowx-studio %s (commit: %s, built: %s)\n", version, commit, buildDate)
+		},
+	}
+	rootCmd.AddCommand(versionCmd)
 
 	// 客户端子命令（HTTP client，实现见 internal/cli）
 	rootCmd.AddCommand(cli.NewPipelineCmd()) // pipeline list/create/update/delete/run

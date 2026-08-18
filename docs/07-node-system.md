@@ -141,11 +141,11 @@ FLOWX_PARAM_URL=https://example.com/image.jpg
 FLOWX_PARAM_TIMEOUT=30
 ```
 
-> **已知不一致**：参数注入存在两条路径，环境变量名不同：
+> **参数注入的两条路径**（环境变量名已统一，2026-08-17 修复）：
 > - **运行时展开路径**（`node_expander.go`）：生成 `export FLOWX_PARAM_{大写参数名}="{{ Param.xxx }}"`，带 `FLOWX_PARAM_` 前缀；若 `flowx.json` 声明了 `env` 字段，则直接使用 `env` 配置。
-> - **Mock 测试路径**（`service/node.go` MockTest）：直接以**大写参数名**（无 `FLOWX_PARAM_` 前缀）注入环境变量，如 `URL=...`。
+> - **Mock 测试路径**（`service/node.go` MockTest）：同样注入 `FLOWX_PARAM_{大写参数名}`；同时保留**裸大写参数名**（如 `URL=...`）作为兼容别名，存量节点代码无需修改。
 >
-> 编写节点代码时如需兼容 Mock 测试，建议同时读取两种变量名。
+> 新节点代码一律使用 `FLOWX_PARAM_` 前缀变量名即可，Mock 与真实执行行为一致。
 
 不同语言的读取示例（以运行时展开路径为例）：
 
@@ -246,7 +246,7 @@ exit 1
 
 在生成节点的 Prompt 中，必须明确要求 AI：
 
-1. 使用环境变量读取参数（运行时展开路径为 `FLOWX_PARAM_*` 格式；注意 Mock 测试路径无前缀，见 7.2.1）
+1. 使用环境变量读取参数（`FLOWX_PARAM_*` 格式，Mock 与运行时一致，见 7.2.1）
 2. 使用 `flowx-yaml` 代码块输出结果到 stdout，以便下游节点通过 Metadata 引用
 3. 错误时输出 JSON 到 stderr 并 exit 1
 4. 包含基本的错误处理

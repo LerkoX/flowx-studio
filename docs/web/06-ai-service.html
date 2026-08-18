@@ -251,7 +251,9 @@
 </tbody>
 </table>
 
-<p>退出码约定：<code>0</code> 成功；<code>1</code> 业务/校验失败（stderr 含错误详情与重试指引）；<code>2</code> 用法错误（参数解析失败，由 Cobra 输出用法）。</p>
+<p>退出码约定：<code>0</code> 成功；<code>1</code> 业务/校验失败（stderr 含错误详情与重试指引）或缺少必填参数（错误信息会提示查看 <code>--schema</code>）；<code>2</code> flag 解析错误（由 Cobra 输出用法）。</p>
+
+<p><code>pipeline</code> 命令组注册了别名 <code>workflow</code>，两者等价。</p>
 
 <h3 id="641-流水线命令pipeline">6.4.1 流水线命令（pipeline）</h3>
 
@@ -362,7 +364,7 @@
 </tr>
 <tr>
 <td><code>[[ACTION:ask_input]]</code></td>
-<td><code>flowx-studio ask --key name --prompt "请输入环境" [--type string] [--options a,b,c] [--default v]</code></td>
+<td><code>flowx-studio ask --key name --prompt "请输入环境" [--options a,b,c] [--default v]</code></td>
 <td>在终端向用户发起一次交互式提问，把用户回答以 <code>&lt;key&gt;=&lt;value&gt;</code> 输出到 stdout，供 Agent 捕获后继续</td>
 </tr>
 <tr>

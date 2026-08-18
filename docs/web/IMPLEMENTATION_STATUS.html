@@ -77,6 +77,13 @@
 <li>约定：查询类子命令支持 <code>--json</code>；校验失败退出码 1、stderr 含重试指引；flag 用法错误退出码 2；<code>--server</code> flag / <code>FLOWX_STUDIO_SERVER_URL</code> 指定 server 地址。</li>
 <li>收益：所有写操作收敛到 HTTP server 单进程，Web UI 经 SSE 可实时感知 Agent 操作（旧 MCP 模式跨进程事件不可达的问题消失）。</li>
 </ul>
+<h3 id="一致性修复2026-08-17">一致性修复（2026-08-17）</h3>
+<ul>
+<li>新增 <code>version</code> 子命令，版本信息由 <code>-ldflags</code> 注入（修复 <code>Makefile</code> <code>version</code> 目标报错）。</li>
+<li><code>boot.sh</code> 改用 <code>FLOWX_STUDIO_DATA_DIR</code> 环境变量传递数据目录（不再传二进制不支持的 <code>--data-dir</code> flag）；<code>config.Load</code> 中 <code>data.db_path</code> 未显式配置时自动归入数据目录。</li>
+<li>Mock 测试环境变量统一为 <code>FLOWX_PARAM_</code> 前缀（保留裸大写名兼容别名），Mock 与运行时展开行为一致。</li>
+<li><code>opencode.json</code> 移除已删除的 <code>flowx-studio mcp</code> 配置。</li>
+</ul>
 <hr>
 
 <h2 id="近期重要变更2026-07-12">近期重要变更（2026-07-12）</h2>
@@ -215,7 +222,7 @@
 <li>[x] 统一 API 响应格式 (<code>{code, data, message}</code>)</li>
 <li>[x] <code>go:embed</code> 嵌入前端资源</li>
 <li>[x] SPA fallback 到 <code>index.html</code></li>
-<li>[x] Cobra CLI（<code>server</code> 子命令；客户端子命令 <code>pipeline</code>/<code>node</code>/<code>ask</code>/<code>info</code> 规划中；<strong>无 <code>version</code> 子命令</strong>。已知问题：<code>Makefile</code> 的 <code>version</code> 目标调用 <code>./flowx-studio version</code> 会失败）</li>
+<li>[x] Cobra CLI（<code>server</code> / <code>version</code> 子命令 + 客户端子命令 <code>pipeline</code>/<code>node</code>/<code>ask</code>/<code>info</code>；版本信息由 <code>-ldflags</code> 注入）</li>
 <li>[x] Makefile (<code>build</code>, <code>run</code>, <code>clean</code>)</li>
 </ul>
 <h4 id="2-数据模型">2. 数据模型</h4>

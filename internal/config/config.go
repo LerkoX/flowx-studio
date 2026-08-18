@@ -43,7 +43,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("server.no_open", false)
 	viper.SetDefault("server.auto_open_browser", true)
 	viper.SetDefault("data.dir", filepath.Join(home, ".flowx-studio"))
-	viper.SetDefault("data.db_path", filepath.Join(home, ".flowx-studio", "studio.db"))
+	// db_path 不设默认值：未显式配置时由 data.dir 推导（见下方）
 
 	// 配置文件
 	viper.SetConfigName("config")
@@ -61,6 +61,11 @@ func Load() (*Config, error) {
 	// 展开 ~
 	cfg.Data.Dir = expandPath(cfg.Data.Dir, home)
 	cfg.Data.DBPath = expandPath(cfg.Data.DBPath, home)
+
+	// 未显式配置 db_path 时，放在数据目录下
+	if cfg.Data.DBPath == "" {
+		cfg.Data.DBPath = filepath.Join(cfg.Data.Dir, "studio.db")
+	}
 
 	return &cfg, nil
 }

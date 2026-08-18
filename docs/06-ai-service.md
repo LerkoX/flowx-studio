@@ -109,7 +109,9 @@ CLI 客户端子命令覆盖原 MCP 8 个工具的全部能力，并新增原 FA
 | `--json` | 以 JSON 输出结果 | false |
 | `--schema` | 输出该命令参数的 JSON Schema 后退出 | false |
 
-退出码约定：`0` 成功；`1` 业务/校验失败（stderr 含错误详情与重试指引）；`2` 用法错误（参数解析失败，由 Cobra 输出用法）。
+退出码约定：`0` 成功；`1` 业务/校验失败（stderr 含错误详情与重试指引）或缺少必填参数（错误信息会提示查看 `--schema`）；`2` flag 解析错误（由 Cobra 输出用法）。
+
+`pipeline` 命令组注册了别名 `workflow`，两者等价。
 
 ### 6.4.1 流水线命令（pipeline）
 
@@ -144,7 +146,7 @@ CLI 客户端子命令覆盖原 MCP 8 个工具的全部能力，并新增原 FA
 | --- | --- | --- |
 | `[[ACTION:create_node]]` | `flowx-studio node create --file node.yaml` | 创建节点，输出新节点摘要 |
 | `[[ACTION:update_workflow]]` | `flowx-studio pipeline update --id N --file wf.yaml` | 更新流水线，非法 YAML 拒绝并给出重试指引 |
-| `[[ACTION:ask_input]]` | `flowx-studio ask --key name --prompt "请输入环境" [--type string] [--options a,b,c] [--default v]` | 在终端向用户发起一次交互式提问，把用户回答以 `<key>=<value>` 输出到 stdout，供 Agent 捕获后继续 |
+| `[[ACTION:ask_input]]` | `flowx-studio ask --key name --prompt "请输入环境" [--options a,b,c] [--default v]` | 在终端向用户发起一次交互式提问，把用户回答以 `<key>=<value>` 输出到 stdout，供 Agent 捕获后继续 |
 | `[[ACTION:show_info]]` | `flowx-studio info --title "构建完成" --message "..." [--level info\|warn\|error]` | 在终端渲染一张信息卡片（标题 + 正文 + 级别着色），用于向用户汇报阶段性结果 |
 
 `ask` 与 `info` 不访问 HTTP server，是纯粹的终端交互命令：Agent 在 Shell 会话中执行它们即可与用户完成「提问 / 展示」闭环，替代了原 FAP 需要前端配合渲染表单与卡片的能力。

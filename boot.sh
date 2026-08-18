@@ -151,10 +151,9 @@ start_foreground() {
     info "Press Ctrl+C to stop"
     echo ""
     
-    "${SCRIPT_DIR}/${BINARY_NAME}" server \
+    FLOWX_STUDIO_DATA_DIR="${DATA_DIR}" "${SCRIPT_DIR}/${BINARY_NAME}" server \
         --port "${PORT}" \
-        --host "${HOST}" \
-        --data-dir "${DATA_DIR}"
+        --host "${HOST}"
 }
 
 # 启动服务（后台）
@@ -164,10 +163,9 @@ start_daemon() {
     info "Server: http://${HOST}:${PORT}"
     info "Log file: ${LOG_FILE}"
     
-    nohup "${SCRIPT_DIR}/${BINARY_NAME}" server \
+    nohup env FLOWX_STUDIO_DATA_DIR="${DATA_DIR}" "${SCRIPT_DIR}/${BINARY_NAME}" server \
         --port "${PORT}" \
         --host "${HOST}" \
-        --data-dir "${DATA_DIR}" \
         > "${LOG_FILE}" 2>&1 &
     
     local pid=$!

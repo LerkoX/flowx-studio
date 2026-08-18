@@ -138,13 +138,16 @@ flowx-studio
 flowx-studio --help
 flowx-studio pipeline create --help
 flowx-studio pipeline create --schema   # 输出参数 JSON Schema
+
+# 查看版本（由 -ldflags 注入 git 版本/commit/构建时间）
+flowx-studio version
 ```
 
 **注意**：
 - 裸运行 `flowx-studio` 不带子命令时只打印帮助，不会启动 server。
 - 客户端子命令默认连接 `http://127.0.0.1:8080`，可用 `--server` flag 或 `FLOWX_STUDIO_SERVER_URL` 环境变量覆盖；使用前需先运行 `flowx-studio server`。
 - `ask` / `info` 为纯终端交互命令，不访问 HTTP server。
-- 目前没有 `version` 命令（规划中，未实现）。
+- `pipeline` 命令组有别名 `workflow`。
 - 运行 YAML 工作流的 CLI 功能保留在 FlowX 核心库中（`flowx run workflow.yaml`），不在 flowx-studio 中提供。
 
 ### 8.2.3 启动参数
@@ -157,15 +160,14 @@ Flags:
       --host string   监听地址 (默认 "0.0.0.0")
 ```
 
-**说明**（见 `cmd/flowx-studio/main.go:47-48`）：
-- 仅有 `--port`、`--host` 两个 flag，没有 `-p`/`-H` 短选项。
+**说明**：
+- `server` 仅有 `--port`、`--host` 两个 flag，没有 `-p`/`-H` 短选项。
 - 没有 `--no-open`、`--debug` flag（规划中，未实现）。
-- 没有 `--data-dir` flag。数据目录只能通过环境变量 `FLOWX_STUDIO_DATA_DIR` 或配置文件设置。
-  ⚠️ 已知问题：`boot.sh` 启动时会向二进制传递 `--data-dir` 参数，但二进制不支持该 flag，会报 `unknown flag` 错误；boot.sh 与二进制存在此不一致。
+- 没有 `--data-dir` flag。数据目录通过环境变量 `FLOWX_STUDIO_DATA_DIR` 或配置文件设置；`boot.sh` 启动时也是通过该环境变量传递数据目录。未显式配置 `data.db_path` 时，数据库文件自动放在数据目录下的 `studio.db`。
 
 ### 8.2.4 Cobra 实现示例
 
-实际实现（简化自 `cmd/flowx-studio/main.go`）。注意：没有 `versionCmd`、`--config` flag，也没有 `viper.BindPFlag`；flag 仅在显式传参时手动覆盖配置，配置加载统一由 `config.Load()` 完成。
+实际实现（简化自 `cmd/flowx-studio/main.go`）。注意：没有 `--config` flag，也没有 `viper.BindPFlag`；flag 仅在显式传参时手动覆盖配置，配置加载统一由 `config.Load()` 完成。
 
 ```go
 package main
@@ -179,7 +181,7 @@ func main() {
         Use:   "flowx-studio",
         Short: "FlowX Studio - FlowX runtime viewer with CLI client",
     }
-    rootCmd.PersistentFlags().String("server", "http://127.0.0.1:8080", "HTTP server address (env: FLOWX_STUDIO_SERVER_URL)")
+    rootCmd.PersistentFlags().String("server", "", "HTTP server address (env: FLOWX_STUDIO_SERVER_URL, default http://127.0.0.1:8080)")
 
     serverCmd := &cobra.Command{
         Use:   "server",
