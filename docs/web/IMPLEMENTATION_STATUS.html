@@ -102,6 +102,12 @@
 <li><strong>备份与恢复</strong>：<code>POST/GET /api/v1/backups</code> + 下载（<code>VACUUM INTO</code>，运行中安全）；CLI <code>backup create/list/download/restore</code>，restore 要求 server 停止并自动保留 <code>.pre-restore</code> 回滚副本。</li>
 <li>E2E 脚本扩充至 89 个用例（新增审计、输入验证、备份恢复分组）。</li>
 </ul>
+<h3 id="自动备份与健康检查2026-08-21">自动备份与健康检查（2026-08-21）</h3>
+<ul>
+<li><strong>自动备份</strong>：<code>backup.on_startup</code>（默认开）启动时 <code>VACUUM INTO</code> 备份；<code>backup.keep</code>（默认 3）自动清理旧备份；失败只记日志不阻断启动。</li>
+<li><strong>健康检查</strong>：<code>GET /api/v1/health</code> 免认证，返回 status/version/uptime/DB 计数与文件大小/goroutine/堆内存；daemon 探测改用此端点。</li>
+<li>E2E 增至 92 个用例（新增健康检查与自动备份分组）。</li>
+</ul>
 <h3 id="安全与功能补全2026-08-18">安全与功能补全（2026-08-18）</h3>
 <ul>
 <li><strong>本地 token 认证</strong>：<code>/api/v1</code> 全部路由要求 <code>Authorization: Bearer &lt;token&gt;</code> 或 <code>flowx_token</code> cookie；token 存放于 <code>&lt;data-dir&gt;/auth.token</code>（0600，首次启动自动生成），可用 <code>FLOWX_STUDIO_SERVER_AUTH_TOKEN</code> 覆盖；返回 <code>index.html</code> 时自动种 cookie，Web UI 零改动；CLI 自动读取 token（<code>FLOWX_STUDIO_AUTH_TOKEN</code> &gt; token 文件）。</li>
@@ -439,8 +445,8 @@
 </ul>
 <h4 id="5-部署与运维">5. 部署与运维</h4>
 <ul>
-<li>[ ] 自动备份机制</li>
-<li>[ ] 健康检查详细指标</li>
+<li>[x] 自动备份机制（启动时备份，<code>backup.on_startup</code> 默认开；<code>backup.keep</code> 默认保留最近 3 个）</li>
+<li>[x] 健康检查详细指标（<code>GET /api/v1/health</code> 免认证：status/version/uptime/db 计数/DB 文件大小/goroutine/堆内存）</li>
 <li>[ ] Prometheus 指标暴露</li>
 </ul>
 <hr>
@@ -531,7 +537,6 @@ web/src/pages/
 
 <ol>
 <li><strong>中优先级</strong>：Docker 沙箱（只读 rootfs + 网络隔离 + 资源限制）、受限进程回退（seccomp/cgroup）</li>
-<li><strong>中优先级</strong>：自动备份机制（启动时备份、保留最近 3 个）、健康检查详细指标</li>
 <li><strong>低优先级</strong>：Prometheus 指标暴露、前端增强（React Query / Monaco / 日志虚拟滚动）</li>
 </ol>
             </article>

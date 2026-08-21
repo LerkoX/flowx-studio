@@ -36,6 +36,11 @@
 - **备份与恢复**：`POST/GET /api/v1/backups` + 下载（`VACUUM INTO`，运行中安全）；CLI `backup create/list/download/restore`，restore 要求 server 停止并自动保留 `.pre-restore` 回滚副本。
 - E2E 脚本扩充至 89 个用例（新增审计、输入验证、备份恢复分组）。
 
+### 自动备份与健康检查（2026-08-21）
+- **自动备份**：`backup.on_startup`（默认开）启动时 `VACUUM INTO` 备份；`backup.keep`（默认 3）自动清理旧备份；失败只记日志不阻断启动。
+- **健康检查**：`GET /api/v1/health` 免认证，返回 status/version/uptime/DB 计数与文件大小/goroutine/堆内存；daemon 探测改用此端点。
+- E2E 增至 92 个用例（新增健康检查与自动备份分组）。
+
 ### 安全与功能补全（2026-08-18）
 - **本地 token 认证**：`/api/v1` 全部路由要求 `Authorization: Bearer <token>` 或 `flowx_token` cookie；token 存放于 `<data-dir>/auth.token`（0600，首次启动自动生成），可用 `FLOWX_STUDIO_SERVER_AUTH_TOKEN` 覆盖；返回 `index.html` 时自动种 cookie，Web UI 零改动；CLI 自动读取 token（`FLOWX_STUDIO_AUTH_TOKEN` > token 文件）。
 - **请求限流**：`x/time/rate` 每 IP 100 请求/分钟（突发 50），超限返回 429。
@@ -258,8 +263,8 @@ FAP 标签协议不再实现（2026-08-17 架构调整）。其动作语义由 C
 - [ ] 执行日志导出 (JSON/TXT/Markdown)
 
 #### 5. 部署与运维
-- [ ] 自动备份机制
-- [ ] 健康检查详细指标
+- [x] 自动备份机制（启动时备份，`backup.on_startup` 默认开；`backup.keep` 默认保留最近 3 个）
+- [x] 健康检查详细指标（`GET /api/v1/health` 免认证：status/version/uptime/db 计数/DB 文件大小/goroutine/堆内存）
 - [ ] Prometheus 指标暴露
 
 ---
@@ -353,5 +358,4 @@ web/src/pages/
 ## 下一步建议（按优先级）
 
 1. **中优先级**：Docker 沙箱（只读 rootfs + 网络隔离 + 资源限制）、受限进程回退（seccomp/cgroup）
-2. **中优先级**：自动备份机制（启动时备份、保留最近 3 个）、健康检查详细指标
-3. **低优先级**：Prometheus 指标暴露、前端增强（React Query / Monaco / 日志虚拟滚动）
+2. **低优先级**：Prometheus 指标暴露、前端增强（React Query / Monaco / 日志虚拟滚动）

@@ -13,6 +13,7 @@ type Config struct {
 	Server    ServerConfig    `mapstructure:"server"`
 	Data      DataConfig      `mapstructure:"data"`
 	Retention RetentionConfig `mapstructure:"retention"`
+	Backup    BackupConfig    `mapstructure:"backup"`
 }
 
 // ServerConfig 服务器配置
@@ -35,6 +36,12 @@ type RetentionConfig struct {
 	AuditDays int `mapstructure:"audit_days"` // audit_logs 保留天数，0 表示不清理
 }
 
+// BackupConfig 自动备份配置
+type BackupConfig struct {
+	OnStartup bool `mapstructure:"on_startup"` // server 启动时自动备份
+	Keep      int  `mapstructure:"keep"`       // 保留最近 N 个备份，0 表示不清理
+}
+
 // Load 加载配置
 func Load() (*Config, error) {
 	viper.SetEnvPrefix("FLOWX_STUDIO")
@@ -52,6 +59,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("data.dir", filepath.Join(home, ".flowx-studio"))
 	viper.SetDefault("retention.log_days", 30)
 	viper.SetDefault("retention.audit_days", 90)
+	viper.SetDefault("backup.on_startup", true)
+	viper.SetDefault("backup.keep", 3)
 	// db_path 不设默认值：未显式配置时由 data.dir 推导（见下方）
 
 	// 配置文件

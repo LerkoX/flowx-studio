@@ -581,12 +581,10 @@ apiClient.interceptors.response.use(
 flowx-studio backup restore --file ~/.flowx-studio/backups/studio-20260821-034808.db
 flowx-studio server start</code></pre>
 
-<h3 id="943-自动备份规划中未实现">9.4.3 自动备份（规划中，未实现）</h3>
+<h3 id="943-自动备份">9.4.3 自动备份</h3>
 
-<ul>
-<li>每次启动时自动创建数据库备份（保留最近 3 个）</li>
-<li>数据库文件变化超过 10% 时触发增量备份</li>
-</ul>
+<p>已实现：<code>backup.on_startup</code>（默认开）在 server 启动时自动创建备份；<code>backup.keep</code>（默认 3）自动清理最旧的备份。备份失败只记日志，不阻断启动。</p>
+
 <h2 id="95-安全审计">9.5 安全审计</h2>
 
 <h3 id="951-操作审计日志">9.5.1 操作审计日志</h3>

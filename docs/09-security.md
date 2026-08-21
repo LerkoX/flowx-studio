@@ -409,10 +409,9 @@ flowx-studio backup restore --file ~/.flowx-studio/backups/studio-20260821-03480
 flowx-studio server start
 ```
 
-### 9.4.3 自动备份（规划中，未实现）
+### 9.4.3 自动备份
 
-- 每次启动时自动创建数据库备份（保留最近 3 个）
-- 数据库文件变化超过 10% 时触发增量备份
+已实现：`backup.on_startup`（默认开）在 server 启动时自动创建备份；`backup.keep`（默认 3）自动清理最旧的备份。备份失败只记日志，不阻断启动。
 
 ## 9.5 安全审计
 

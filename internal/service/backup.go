@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -90,6 +91,44 @@ func (s *BackupService) List() ([]BackupInfo, error) {
 		backups = []BackupInfo{}
 	}
 	return backups, nil
+}
+
+// Prune 删除最旧的备份，只保留最近 keep 个。keep<=0 时不清理。
+// 返回删除的文件数。
+func (s *BackupService) Prune(keep int) (int, error) {
+	if keep <= 0 {
+		return 0, nil
+	}
+	backups, err := s.List()
+	if err != nil {
+		return 0, err
+	}
+	if len(backups) <= keep {
+		return 0, nil
+	}
+	removed := 0
+	for _, b := range backups[keep:] {
+		if err := os.Remove(b.Path); err == nil {
+			removed++
+		}
+	}
+	return removed, nil
+}
+
+// AutoOnStartup 启动时自动备份 + 按 keep 清理旧备份。备份失败只记日志不阻断启动。
+func (s *BackupService) AutoOnStartup(keep int) {
+	if _, err := os.Stat(s.dbPath); err != nil {
+		return // 数据库尚未创建，跳过
+	}
+	info, err := s.Create()
+	if err != nil {
+		log.Printf("auto backup failed: %v", err)
+		return
+	}
+	log.Printf("auto backup created: %s (%d bytes)", info.Name, info.Size)
+	if removed, err := s.Prune(keep); err == nil && removed > 0 {
+		log.Printf("auto backup pruned %d old backups (keep %d)", removed, keep)
+	}
 }
 
 // BackupPath 按文件名解析备份完整路径（防目录穿越）。

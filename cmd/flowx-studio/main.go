@@ -194,6 +194,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// 按保留天数自动清理历史日志（retention.log_days / retention.audit_days，0 表示不清理）
 	service.NewCleanupService(svcs.database, cfg.Retention.LogDays, cfg.Retention.AuditDays).Start(ctx)
 
+	// 启动时自动备份（backup.on_startup，backup.keep 控制保留个数）
+	if cfg.Backup.OnStartup {
+		svcs.backupSvc.AutoOnStartup(cfg.Backup.Keep)
+	}
+
 	// 本地 token 认证：CLI 与 Web UI 均需提供；可用 FLOWX_STUDIO_SERVER_AUTH_TOKEN 覆盖
 	token, err := server.LoadOrCreateToken(cfg.Data.Dir, os.Getenv("FLOWX_STUDIO_SERVER_AUTH_TOKEN"))
 	if err != nil {
@@ -208,6 +213,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	api := srv.Router().Group("/api/v1")
 	api.Use(server.AuthMiddleware(token))
 	api.Use(server.RateLimitMiddleware(100, 50)) // 每 IP 100 请求/分钟，突发 50
+
+	// 健康检查免认证（监控探针 / server status 探测用），不含敏感数据
+	handler.NewHealthHandler(svcs.database, cfg.Data.DBPath, version).RegisterRoutes(srv.Router())
 	configHandler := handler.NewConfigHandler(svcs.database)
 	configHandler.SetAudit(svcs.auditSvc)
 	configHandler.RegisterRoutes(api)

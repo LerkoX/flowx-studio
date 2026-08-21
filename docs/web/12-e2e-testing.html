@@ -481,6 +481,33 @@
 </tbody>
 </table>
 
+<h3 id="12310-健康检查与自动备份">12.3.10 健康检查与自动备份</h3>
+
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>目的</th>
+<th>命令</th>
+<th>预期</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>10.1</td>
+<td>免认证健康检查</td>
+<td><code>curl $BASE/api/v1/health</code>（不带 token）</td>
+<td>HTTP 200，<code>status</code> 为 <code>ok</code>，含 db 计数指标</td>
+</tr>
+<tr>
+<td>10.2</td>
+<td>启动自动备份</td>
+<td><code>server start</code> 后检查 <code>&lt;data.dir&gt;/backups/</code></td>
+<td>存在至少一个 <code>.db</code> 备份文件</td>
+</tr>
+</tbody>
+</table>
+
 <h2 id="124-ai-驱动方式">12.4 AI 驱动方式</h2>
 
 <p><strong>方式一：直接运行脚本（推荐）</strong></p>

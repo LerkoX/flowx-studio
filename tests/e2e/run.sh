@@ -243,6 +243,14 @@ assert_exit "9.3 backup download" 0 FXS backup download --name "${BACKUP_NAME}" 
 assert_exit "9.4 restore while running refused" 1 FXS backup restore --file "${WORK_DIR}/dl.db"
 assert_contains "9.4 refuse message" "server stop"
 
+# ---------- 10. 健康检查与自动备份 ----------
+say "== 10. health & auto backup =="
+HEALTH=$(curl -s "${BASE_URL}/api/v1/health")   # 免认证，不带 token
+printf '%s' "${HEALTH}" | grep -q '"status":"ok"' && ok "10.1 health ok (no auth)" || bad "10.1 health ok (no auth): ${HEALTH}"
+printf '%s' "${HEALTH}" | grep -q '"nodes"' && ok "10.1 health has db metrics" || bad "10.1 health has db metrics"
+[ -d "${DATA_DIR}/backups" ] && [ "$(ls "${DATA_DIR}/backups" | grep -c '\.db$')" -ge 1 ] \
+    && ok "10.2 auto backup on startup" || bad "10.2 auto backup on startup"
+
 # ---------- 5. 交互命令 ----------
 say "== 5. interaction commands =="
 OUT=$(echo "" | FXS ask --key env --prompt "pick env" --default prod 2>/dev/null)

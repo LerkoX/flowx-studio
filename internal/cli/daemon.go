@@ -189,7 +189,7 @@ func serverURL(cfg *config.Config) string {
 // 只要求拿到任意 HTTP 响应即视为存活（认证开启时端点会返回 401，同样说明进程已就绪）。
 func probeServer(url string) bool {
 	client := &http.Client{Timeout: time.Second}
-	resp, err := client.Get(url + "/api/v1/config/system")
+	resp, err := client.Get(url + "/api/v1/health")
 	if err != nil {
 		return false
 	}

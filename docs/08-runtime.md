@@ -231,7 +231,7 @@ Cobra + Viper 的配置优先级（高到低）：
 
 ```yaml
 # ~/.flowx-studio/config.yaml 示例
-# 注意：Config 结构仅有 server 和 data 两段（internal/config/config.go:12-15）
+# 注意：Config 结构含 server / data / retention / backup 四段（internal/config/config.go）
 server:
   port: 8080
   host: "0.0.0.0"
@@ -240,7 +240,15 @@ server:
 
 data:
   dir: "~/.flowx-studio"
-  db_path: "~/.flowx-studio/studio.db"
+  db_path: "~/.flowx-studio/studio.db"  # 可选；不设置时自动归入 data.dir
+
+retention:
+  log_days: 30    # execution_logs 保留天数，0 表示不清理
+  audit_days: 90  # audit_logs 保留天数，0 表示不清理
+
+backup:
+  on_startup: true  # server 启动时自动备份数据库
+  keep: 3           # 保留最近 N 个备份，0 表示不清理
 ```
 
 ### 8.2.6 环境变量
@@ -254,6 +262,11 @@ viper 使用前缀 `FLOWX_STUDIO`，且键中的 `.` 映射为 `_`（`internal/c
 | `FLOWX_STUDIO_SERVER_NO_OPEN` | 不自动打开浏览器 | false |
 | `FLOWX_STUDIO_DATA_DB_PATH` | 数据库文件路径 | ~/.flowx-studio/studio.db |
 | `FLOWX_STUDIO_DATA_DIR` | 数据目录 | ~/.flowx-studio |
+| `FLOWX_STUDIO_RETENTION_LOG_DAYS` | 执行日志保留天数 | 30 |
+| `FLOWX_STUDIO_RETENTION_AUDIT_DAYS` | 审计日志保留天数 | 90 |
+| `FLOWX_STUDIO_BACKUP_ON_STARTUP` | 启动时自动备份 | true |
+| `FLOWX_STUDIO_BACKUP_KEEP` | 保留备份个数 | 3 |
+| `FLOWX_STUDIO_SERVER_AUTH_TOKEN` | 覆盖自动生成的认证 token | （自动生成） |
 
 ## 8.3 进程管理
 
@@ -337,14 +350,18 @@ defer lock.Release()
 ~/.flowx-studio/
 ├── studio.db              # SQLite 数据库
 ├── flowx-studio.pid       # 进程 ID 文件（单例锁，cmd/flowx-studio/main.go:108）
+├── server.json            # 运行中 server 的实际监听地址（pid/host/port）
+├── auth.token             # 本地认证 token（0600，自动生成）
+├── server.log             # daemon 模式（server start）的日志
+├── backups/               # 自动/手动备份（VACUUM INTO，默认保留最近 3 个）
 └── config.yaml            # 可选：外部配置文件
 ```
 
 **说明**：
-- 没有自动备份逻辑（无 `studio.db.backup`）。
-- 没有 `logs/` 目录，日志仅输出到控制台。
+- 启动时自动备份数据库到 `backups/`（`backup.on_startup`），并按 `backup.keep` 清理旧备份。
+- `server.log` 仅在 `server start`（daemon）模式下产生；前台模式日志输出到控制台。
 - 没有 `nodes/` 节点代码缓存目录。
-- Mock 测试的临时目录创建在系统临时目录下（`$TMPDIR/flowx_mock_*`，见 `internal/sandbox/executor.go:42,79`），执行完成后立即清理，不在数据目录中。
+- Mock 测试的临时目录创建在系统临时目录下（`$TMPDIR/flowx_mock_*`，见 `internal/sandbox/executor.go`），执行完成后立即清理，不在数据目录中。
 
 ## 8.5 自动浏览器打开（已实现）
 

@@ -108,6 +108,13 @@
 | 9.4 | 运行中拒绝恢复 | server 运行中执行 `backup restore --file dl.db` | 退出 1，stderr 提示先 `server stop` |
 | 9.5 | 停止后恢复 | `server stop` 后 `backup restore --file dl.db` | 退出 0，输出含 `Restored database`，自动生成 `.pre-restore` 回滚副本 |
 
+### 12.3.10 健康检查与自动备份
+
+| # | 目的 | 命令 | 预期 |
+|---|------|------|------|
+| 10.1 | 免认证健康检查 | `curl $BASE/api/v1/health`（不带 token） | HTTP 200，`status` 为 `ok`，含 db 计数指标 |
+| 10.2 | 启动自动备份 | `server start` 后检查 `<data.dir>/backups/` | 存在至少一个 `.db` 备份文件 |
+
 ## 12.4 AI 驱动方式
 
 **方式一：直接运行脚本（推荐）**
