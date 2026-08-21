@@ -90,6 +90,15 @@ var schemas = map[string]string{
   },
   "required": ["id"]
 }`,
+	"server start": `{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "flowx-studio server start",
+  "type": "object",
+  "properties": {
+    "port": {"type": "integer", "default": 8080, "description": "HTTP 服务端口"},
+    "host": {"type": "string", "default": "0.0.0.0", "description": "监听地址"}
+  }
+}`,
 	"ask": `{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "flowx-studio ask",

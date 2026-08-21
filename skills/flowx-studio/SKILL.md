@@ -1,6 +1,6 @@
 ---
 name: flowx-studio
-description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修改/运行工作流（pipeline）、导入或创建节点、Mock 测试节点时使用。前置条件：`flowx-studio server` 已在运行（默认 http://127.0.0.1:8080）。
+description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修改/运行工作流（pipeline）、导入或创建节点、Mock 测试节点时使用。server 未运行时先执行 `flowx-studio server start` 启动（见「Server 生命周期」）。
 ---
 
 # FlowX Studio
@@ -12,10 +12,20 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 - `--schema`：输出参数的 JSON Schema 后退出（L3 契约层，用于精确构造参数）
 - `--json`：以 JSON 输出结果（查询类命令）
 
+## Server 生命周期（先读这里）
+
+调用任何 pipeline/node 命令前，先确保 server 在运行：
+1. `flowx-studio server status` → 输出 `stopped` 则执行第 2 步
+2. `flowx-studio server start` → 后台启动并阻塞到就绪，输出 `Server started pid=N url=...`
+3. 启动失败时查看 `~/.flowx-studio/server.log`
+
+（`server stop` 用于显式停止；通常无需停止，server 单例常驻即可。）
+
 ## 命令速查
 
 | 任务 | 命令 |
 | --- | --- |
+| 检查/启动/停止 server | `flowx-studio server status` / `server start` / `server stop` |
 | 列出节点（查 nodeRef 名称） | `flowx-studio node list --json` |
 | 创建节点 | `flowx-studio node create --file node.yaml` |
 | 导入节点包（flowx.json） | `flowx-studio node import --type git --url <repo>` 或 `--type folder --path <dir>` |
@@ -41,6 +51,7 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 
 ## 典型流程
 
+0. `server status` 确认 server 运行中；若 `stopped` 则 `server start`
 1. `node list --json` 查询可用节点 → 生成 YAML 写入临时文件
 2. `pipeline create --name ... --file wf.yaml`（失败则按 stderr 修正重试）
 3. 需要新节点时：编写 `flowx.json` + 代码 → `node import --type folder --path <dir>` → 回到第 2 步

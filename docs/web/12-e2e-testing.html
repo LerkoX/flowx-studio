@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>12. E2E 测试计划 - FlowX Studio</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            themeVariables: {
+                primaryColor: '#1e1e3a',
+                primaryTextColor: '#e2e8f0',
+                primaryBorderColor: '#6366f1',
+                lineColor: '#a855f7',
+                secondaryColor: '#16162a',
+                tertiaryColor: '#0f0f1a',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                fontSize: '14px'
+            },
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            },
+            sequence: {
+                useMaxWidth: true
+            },
+            gantt: {
+                useMaxWidth: true
+            }
+        });
+    </script>
+</head>
+<body>
+    <div class="layout">
+        <nav class="sidebar">
+<div class="nav-header">
+<h2>FlowX Studio</h2>
+<p>技术设计文档</p>
+</div>
+<ul class="nav-links">
+<li><a href="README.html">FlowX Studio 技术设计文档</a></li>
+<li><a href="01-overview.html">1. 项目概述与愿景</a></li>
+<li><a href="02-architecture.html">2. 系统架构设计</a></li>
+<li><a href="03-database.html">3. 数据库设计</a></li>
+<li><a href="04-api.html">4. API 设计</a></li>
+<li><a href="05-frontend.html">5. 前端设计</a></li>
+<li><a href="06-ai-service.html">6. AI 集成（SKILL + CLI）</a></li>
+<li><a href="07-node-system.html">7. 节点系统与执行引擎</a></li>
+<li><a href="08-runtime.html">8. 运行时与部署设计</a></li>
+<li><a href="09-security.html">9. 安全与错误处理设计</a></li>
+<li><a href="10-core-deps.html">10. FlowX 核心库依赖评估</a></li>
+<li><a href="11-node-package.html">11. 节点包规范</a></li>
+<li><a href="12-e2e-testing.html" class="active">12. E2E 测试计划</a></li>
+<li><a href="IMPLEMENTATION_STATUS.html">实现状态</a></li>
+</ul>
+</nav>
+        <main class="content">
+            <article>
+                <h1 id="12-e2e-测试计划">12. E2E 测试计划</h1>
+
+<blockquote>本文档描述 FlowX Studio 的端到端（E2E）测试计划，供 AI Agent 自动驱动验证 CLI 与服务端全链路功能。</blockquote>
+<blockquote>配套可执行脚本：<a href="https://github.com/LerkoX/flowx-studio/blob/main/tests/e2e/run.sh" target="_blank"><code>tests/e2e/run.sh</code></a>。</blockquote>
+
+<h2 id="121-目标与原则">12.1 目标与原则</h2>
+
+<ul>
+<li><strong>AI 可自动驱动</strong>：每个用例都有明确的命令、预期输出与退出码，Agent 可逐步执行并比对；也可以直接运行 <code>bash tests/e2e/run.sh</code> 看汇总结果。</li>
+<li><strong>环境隔离</strong>：测试使用独立的 <code>FLOWX_STUDIO_DATA_DIR</code>（临时目录）与专用端口，<strong>不触碰用户真实数据</strong>；结束后自动清理。</li>
+<li><strong>无外部依赖</strong>：不依赖网络、Docker 或第三方服务；Mock 节点使用 bash。</li>
+<li><strong>黑盒验证</strong>：只通过 CLI 与 HTTP API 验证，不调用内部 Go 接口。</li>
+</ul>
+<h2 id="122-环境隔离约定">12.2 环境隔离约定</h2>
+
+<table>
+<thead>
+<tr>
+<th>项目</th>
+<th>约定</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>数据目录</td>
+<td><code>FLOWX_STUDIO_DATA_DIR=$(mktemp -d)</code>，测试结束删除</td>
+</tr>
+<tr>
+<td>端口</td>
+<td>默认 <code>18099</code>，被占用时用 <code>E2E_PORT</code> 环境变量覆盖</td>
+</tr>
+<tr>
+<td>二进制</td>
+<td>测试前 <code>go build</code> 到临时路径（可用 <code>E2E_BINARY</code> 覆盖）</td>
+</tr>
+<tr>
+<td>清理</td>
+<td><code>trap EXIT</code> 中 <code>server stop</code> + 删除临时目录</td>
+</tr>
+</tbody>
+</table>
+
+<h2 id="123-用例">12.3 用例</h2>
+
+<h3 id="1231-cli-基础">12.3.1 CLI 基础</h3>
+
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>目的</th>
+<th>命令</th>
+<th>预期</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1.1</td>
+<td>命令树可用</td>
+<td><code>flowx-studio --help</code></td>
+<td>退出 0，输出含 <code>server</code>、<code>pipeline</code>、<code>node</code>、<code>ask</code>、<code>info</code>、<code>version</code></td>
+</tr>
+<tr>
+<td>1.2</td>
+<td>参数契约可解析</td>
+<td><code>flowx-studio pipeline create --schema</code></td>
+<td>退出 0，stdout 是合法 JSON 且含 <code>"required"</code></td>
+</tr>
+<tr>
+<td>1.3</td>
+<td>版本输出</td>
+<td><code>flowx-studio version</code></td>
+<td>退出 0，输出含 <code>flowx-studio</code></td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="1232-server-生命周期">12.3.2 server 生命周期</h3>
+
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>目的</th>
+<th>命令</th>
+<th>预期</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2.1</td>
+<td>初始状态</td>
+<td><code>flowx-studio server status</code></td>
+<td>退出 0，输出 <code>stopped</code></td>
+</tr>
+<tr>
+<td>2.2</td>
+<td>后台启动</td>
+<td><code>flowx-studio server start --port $E2E_PORT</code></td>
+<td>退出 0，输出含 <code>Server started</code> 与 <code>url=http://127.0.0.1:$E2E_PORT</code></td>
+</tr>
+<tr>
+<td>2.3</td>
+<td>运行状态</td>
+<td><code>flowx-studio server status</code></td>
+<td>退出 0，输出含 <code>running</code></td>
+</tr>
+<tr>
+<td>2.4</td>
+<td>启动幂等</td>
+<td>再次 <code>server start --port $E2E_PORT</code></td>
+<td>退出 0，输出含 <code>already running</code></td>
+</tr>
+<tr>
+<td>2.5</td>
+<td>优雅停止</td>
+<td><code>flowx-studio server stop</code></td>
+<td>退出 0，输出含 <code>Server stopped</code></td>
+</tr>
+<tr>
+<td>2.6</td>
+<td>停止后状态</td>
+<td><code>flowx-studio server status</code></td>
+<td>输出 <code>stopped</code></td>
+</tr>
+<tr>
+<td>2.7</td>
+<td>重复停止</td>
+<td>再次 <code>server stop</code></td>
+<td>退出 0，输出含 <code>not running</code></td>
+</tr>
+</tbody>
+</table>
+
+<blockquote>生命周期用例通过后，重新 <code>server start</code> 供后续用例使用。</blockquote>
+
+<h3 id="1233-节点管理">12.3.3 节点管理</h3>
+
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>目的</th>
+<th>命令</th>
+<th>预期</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3.1</td>
+<td>创建节点</td>
+<td><code>node create --file node.yaml</code>（bash 节点，参数 <code>greeting</code>）</td>
+<td>退出 0，输出含 <code>Created node id=</code></td>
+</tr>
+<tr>
+<td>3.2</td>
+<td>非法定义报错</td>
+<td><code>node create --file bad.yaml</code>（非 YAML 内容）</td>
+<td>退出 1，stderr 含 <code>invalid node definition</code></td>
+</tr>
+<tr>
+<td>3.3</td>
+<td>列表（表格）</td>
+<td><code>node list</code></td>
+<td>退出 0，输出含节点名</td>
+</tr>
+<tr>
+<td>3.4</td>
+<td>列表（JSON）</td>
+<td><code>node list --json</code></td>
+<td>退出 0，stdout 可 JSON 解析且含节点名</td>
+</tr>
+<tr>
+<td>3.5</td>
+<td>Mock 测试</td>
+<td><code>node mock --id &lt;N&gt; --params '{"greeting":"e2e"}'</code></td>
+<td>退出 0，输出含 <code>status=success</code>；<code>FLOWX_PARAM_GREETING</code> 与裸名 <code>GREETING</code> 均可读</td>
+</tr>
+<tr>
+<td>3.6</td>
+<td>节点包导入</td>
+<td><code>node import --type folder --path &lt;pkg&gt;</code>（临时构造含 <code>flowx.json</code> 的目录）</td>
+<td>退出 0，输出含 <code>Imported node id=</code></td>
+</tr>
+<tr>
+<td>3.7</td>
+<td>删除节点</td>
+<td><code>node delete --id &lt;N&gt;</code></td>
+<td>退出 0，输出含 <code>Deleted node id=</code></td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="1234-流水线管理">12.3.4 流水线管理</h3>
+
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>目的</th>
+<th>命令</th>
+<th>预期</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>4.1</td>
+<td>创建流水线</td>
+<td><code>pipeline create --name e2e-wf --file wf.yaml</code>（单节点 echo 工作流）</td>
+<td>退出 0，输出含 <code>Created pipeline id=</code></td>
+</tr>
+<tr>
+<td>4.2</td>
+<td>非法 YAML 重试指引</td>
+<td><code>pipeline create --name bad --file bad.yaml</code>（缺 <code>Nodes</code>）</td>
+<td>退出 1，stderr 含 <code>Please regenerate the YAML and retry.</code></td>
+</tr>
+<tr>
+<td>4.3</td>
+<td>更新合并语义</td>
+<td><code>pipeline update --id &lt;N&gt; --status active</code>（不传 <code>--file</code>）</td>
+<td>退出 0；随后 <code>GET /workflows/&lt;N&gt;</code> 的 <code>yamlConfig</code> 保持不变</td>
+</tr>
+<tr>
+<td>4.4</td>
+<td>列表</td>
+<td><code>pipeline list --json</code></td>
+<td>退出 0，含 <code>e2e-wf</code></td>
+</tr>
+<tr>
+<td>4.5</td>
+<td>执行并跟随日志</td>
+<td><code>pipeline run --id &lt;N&gt; --follow</code></td>
+<td>退出 0，输出含节点名与 <code>Execution finished: SUCCESS</code></td>
+</tr>
+<tr>
+<td>4.6</td>
+<td>失败执行退出码</td>
+<td>创建必失败工作流（<code>run: exit 1</code>）后 <code>pipeline run --id &lt;M&gt; --follow</code></td>
+<td>退出 1，输出含 <code>FAILED</code></td>
+</tr>
+<tr>
+<td>4.7</td>
+<td>删除流水线</td>
+<td><code>pipeline delete --id &lt;N&gt;</code></td>
+<td>退出 0，输出含 <code>Deleted pipeline id=</code></td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="1235-交互命令">12.3.5 交互命令</h3>
+
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>目的</th>
+<th>命令</th>
+<th>预期</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>5.1</td>
+<td>ask 默认值</td>
+<td>`echo "" \</td>
+<td>ask --key env --prompt "?" --default prod`</td>
+</tr>
+<tr>
+<td>5.2</td>
+<td>ask 选项校验</td>
+<td>`printf "bad\nstaging\n" \</td>
+<td>ask --key env --prompt "?" --options prod,staging`</td>
+</tr>
+<tr>
+<td>5.3</td>
+<td>ask EOF</td>
+<td><code>ask --key k --prompt "?" &lt;/dev/null</code></td>
+<td>退出非 0 或输出默认值</td>
+</tr>
+<tr>
+<td>5.4</td>
+<td>info 卡片</td>
+<td><code>info --title T --message M --level warn</code></td>
+<td>退出 0，输出含 <code>T</code>、<code>M</code>、<code>WARN</code></td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="1236-错误路径">12.3.6 错误路径</h3>
+
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>目的</th>
+<th>命令</th>
+<th>预期</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>6.1</td>
+<td>server 未启动</td>
+<td>停掉 server 后 <code>pipeline list</code></td>
+<td>退出 1，stderr 含 <code>cannot connect to server</code> 和 `<code> </code>flowx-studio server<code> </code>` 提示</td>
+</tr>
+<tr>
+<td>6.2</td>
+<td>未知 flag</td>
+<td><code>pipeline list --nope</code></td>
+<td>退出 2，stderr 含 <code>unknown flag</code></td>
+</tr>
+<tr>
+<td>6.3</td>
+<td>缺必填参数</td>
+<td><code>pipeline create</code>（无 flag）</td>
+<td>退出 1，stderr 提示 <code>--schema</code></td>
+</tr>
+</tbody>
+</table>
+
+<h2 id="124-ai-驱动方式">12.4 AI 驱动方式</h2>
+
+<p><strong>方式一：直接运行脚本（推荐）</strong></p>
+
+<pre><code class="language-bash">bash tests/e2e/run.sh
+# 可选覆盖：
+E2E_PORT=19099 E2E_BINARY=/path/to/flowx-studio bash tests/e2e/run.sh</code></pre>
+
+<p>脚本输出每个用例的 <code>PASS</code>/<code>FAIL</code>，结尾打印汇总；任一失败则以退出码 1 结束。</p>
+
+<p><strong>方式二：逐步执行</strong></p>
+
+<p>按 12.3 的表格逐条执行命令，比对「预期」列。适合脚本失败后定位具体用例，或 Agent 需要在步骤间插入额外检查（如查询数据库、查看 server.log）时使用。</p>
+
+<h2 id="125-维护约定">12.5 维护约定</h2>
+
+<ul>
+<li>新增 CLI 命令或改变输出格式时，必须同步更新本文档表格与 <code>tests/e2e/run.sh</code>。</li>
+<li>用例的预期文本尽量断言<strong>稳定片段</strong>（如 <code>Created pipeline id=</code>），不断言易变部分（时间戳、绝对路径）。</li>
+</ul>
+            </article>
+        </main>
+    </div>
+    <div id="mermaid-overlay" class="mermaid-overlay" onclick="closeMermaidFullscreen(event)">
+        <div class="mermaid-overlay-content">
+            <button class="mermaid-close-btn" onclick="closeMermaidFullscreen(event)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+                关闭
+            </button>
+            <div id="mermaid-overlay-diagram"></div>
+            <div class="mermaid-zoom-controls">
+                <button onclick="zoomOut()" title="缩小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <button onclick="zoomIn()" title="放大">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <div class="zoom-separator"></div>
+                <span id="mermaid-scale-display" class="zoom-scale">100%</span>
+                <div class="zoom-separator"></div>
+                <button onclick="zoomFit()" title="适应屏幕">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path>
+                    </svg>
+                </button>
+                <button onclick="zoomReset()" title="原始大小">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="1 4 1 10 7 10"></polyline>
+                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>

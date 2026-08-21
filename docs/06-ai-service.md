@@ -115,7 +115,19 @@ CLI 客户端子命令覆盖原 MCP 8 个工具的全部能力，并新增原 FA
 
 `pipeline` 命令组注册了别名 `workflow`，两者等价。
 
-### 6.4.1 流水线命令（pipeline）
+### 6.4.1 server 生命周期命令（daemon 管理）
+
+CLI 调用前可用以下命令探测与启动 server；`status` 退出码恒为 0，状态由 stdout（或 `--json`）表达：
+
+| 命令 | 说明 |
+| --- | --- |
+| `flowx-studio server status` | 输出 `running (pid=N, url=...)` 或 `stopped`；`--json` 输出 `{"status":"running","pid":N,"url":"..."}` |
+| `flowx-studio server start [--port 8080] [--host 0.0.0.0]` | 后台守护启动（Setsid 脱离终端，日志写入 `<data.dir>/server.log`），阻塞轮询就绪（复用 `GET /api/v1/config/system` 探测，任意 HTTP 响应即就绪，超时 10s）；已在运行时幂等输出 `Server already running` 并退出 0 |
+| `flowx-studio server stop` | SIGTERM 优雅停止，最多等待 5s；未运行时输出 `Server not running` 并清理陈旧 pid 文件 |
+
+实现要点：`runServer` 启动后将实际监听地址写入 `<data.dir>/server.json`（`{pid, host, port}`），`status`/`stop` 读取它探测真实端口；`stop`/`status` 通过 `singleton.FindRunning`（`/proc/<pid>/exe` 比对 + cmdline 子命令匹配）确认进程身份。
+
+### 6.4.2 流水线命令（pipeline）
 
 | 命令 | 说明 | 对应原 MCP 工具 |
 | --- | --- | --- |
@@ -130,7 +142,7 @@ CLI 客户端子命令覆盖原 MCP 8 个工具的全部能力，并新增原 FA
 - YAML 通过 `--file` 从文件读入（`-` 表示 stdin），避免超长命令行转义问题。
 - `pipeline run` 默认输出 `Started execution id=<execID> streamUrl=/api/v1/executions/<execID>/stream`；加 `--follow` 后 CLI 订阅该 SSE 流并把日志打印到终端，直到执行结束。
 
-### 6.4.2 节点命令（node）
+### 6.4.3 节点命令（node）
 
 | 命令 | 说明 | 对应原 MCP 工具 |
 | --- | --- | --- |
@@ -140,7 +152,7 @@ CLI 客户端子命令覆盖原 MCP 8 个工具的全部能力，并新增原 FA
 | `flowx-studio node delete --id N` | 删除节点 | `delete_node` |
 | `flowx-studio node mock --id N [--params '{...}']` | 触发节点 Mock 测试并输出结果 | 无（新增，便于 Agent 自验） |
 
-### 6.4.3 交互命令（原 FAP 动作的 CLI 等价物）
+### 6.4.4 交互命令（原 FAP 动作的 CLI 等价物）
 
 原 FAP（FlowX Action Protocol）定义了 `create_node` / `update_workflow` / `ask_input` / `show_info` 四种动作标签。FAP 协议本身已移除，其语义由以下 CLI 命令承接：
 

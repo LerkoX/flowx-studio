@@ -21,6 +21,13 @@
 - Mock 测试环境变量统一为 `FLOWX_PARAM_` 前缀（保留裸大写名兼容别名），Mock 与运行时展开行为一致。
 - `opencode.json` 移除已删除的 `flowx-studio mcp` 配置。
 
+### server daemon 管理与 E2E 测试（2026-08-21）
+- 新增 `server start / stop / status` 守护管理子命令：`start` 后台启动（Setsid）并阻塞轮询就绪（超时 10s），幂等；`status` 输出 running/stopped（退出码恒 0，支持 `--json`）；`stop` SIGTERM 优雅停止。
+- `runServer` 启动后写入 `<data.dir>/server.json`（pid/host/port），`status`/`stop` 据此探测真实端口。
+- `singleton` 抽出 `FindRunning`，进程身份校验改为 `/proc/<pid>/exe` 与当前可执行文件比对（对二进制重命名健壮）+ cmdline 子命令匹配。
+- `skills/flowx-studio/SKILL.md` 新增「Server 生命周期」段落：Agent 调用 CLI 前先 `server status`，未运行则 `server start` 自动拉起。
+- 新增 E2E 测试计划文档 `docs/12-e2e-testing.md` 与可执行断言脚本 `tests/e2e/run.sh`（69 个用例：CLI 基础 / server 生命周期 / 节点 / 流水线 / 交互命令 / 错误路径）。
+
 ### 安全与功能补全（2026-08-18）
 - **本地 token 认证**：`/api/v1` 全部路由要求 `Authorization: Bearer <token>` 或 `flowx_token` cookie；token 存放于 `<data-dir>/auth.token`（0600，首次启动自动生成），可用 `FLOWX_STUDIO_SERVER_AUTH_TOKEN` 覆盖；返回 `index.html` 时自动种 cookie，Web UI 零改动；CLI 自动读取 token（`FLOWX_STUDIO_AUTH_TOKEN` > token 文件）。
 - **请求限流**：`x/time/rate` 每 IP 100 请求/分钟（突发 50），超限返回 429。
@@ -268,6 +275,7 @@ flowx-studio/
 │   │   ├── pipeline.go               # pipeline list/create/update/delete/run
 │   │   ├── node.go                   # node list/create/delete/import/mock
 │   │   ├── interact.go               # ask / info 终端交互命令
+│   │   ├── daemon.go                 # server start/stop/status 守护管理
 │   │   └── schema.go                 # --schema 参数 JSON Schema 输出
 │   ├── runtime/
 │   │   ├── adapter.go                # FlowX RuntimeAdapter + EventBridge + LogPusher
@@ -288,7 +296,8 @@ flowx-studio/
 │   │   └── migrations/               # 迁移脚本 001-006
 │   ├── model/model.go                # 所有数据模型
 │   └── config/config.go              # 应用配置
-├── skills/flowx-studio/SKILL.md      # AI Agent 技能速查表
+├── skills/flowx-studio/SKILL.md      # AI Agent 技能速查表（含 server 生命周期）
+├── tests/e2e/run.sh                  # E2E 断言脚本（见 docs/12-e2e-testing.md）
 ├── go.mod / go.sum                   # Go 模块（replace => ../flowx）
 └── Makefile                          # 构建脚本
 ```

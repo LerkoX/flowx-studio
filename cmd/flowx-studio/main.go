@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -67,6 +68,13 @@ func main() {
 	serverCmd.Flags().Int("port", 8080, "HTTP server port")
 	serverCmd.Flags().String("host", "0.0.0.0", "HTTP server host")
 	serverCmd.Flags().Bool("no-open", false, "do not open browser on start")
+	// 隐藏 flag：标识 daemon 子进程（由 server start 内部使用）
+	serverCmd.Flags().Bool("daemon-child", false, "mark the process as a daemon child (internal use)")
+	_ = serverCmd.Flags().MarkHidden("daemon-child")
+	// daemon 管理子命令
+	serverCmd.AddCommand(cli.NewServerStartCmd())
+	serverCmd.AddCommand(cli.NewServerStopCmd())
+	serverCmd.AddCommand(cli.NewServerStatusCmd())
 	rootCmd.AddCommand(serverCmd)
 
 	versionCmd := &cobra.Command{
@@ -153,6 +161,14 @@ func runServer(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to acquire singleton lock: %w", err)
 	}
 	defer lock.Release()
+
+	// 记录实际监听地址，供 server status/stop 探测（进程可能以非默认端口启动）
+	statePath := filepath.Join(cfg.Data.Dir, "server.json")
+	state, _ := json.Marshal(map[string]interface{}{
+		"pid": os.Getpid(), "host": cfg.Server.Host, "port": cfg.Server.Port,
+	})
+	_ = os.WriteFile(statePath, state, 0644)
+	defer os.Remove(statePath)
 
 	svcs, cleanup, err := newAppServices(cfg)
 	if err != nil {

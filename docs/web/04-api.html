@@ -54,6 +54,7 @@
 <li><a href="09-security.html">9. 安全与错误处理设计</a></li>
 <li><a href="10-core-deps.html">10. FlowX 核心库依赖评估</a></li>
 <li><a href="11-node-package.html">11. 节点包规范</a></li>
+<li><a href="12-e2e-testing.html">12. E2E 测试计划</a></li>
 <li><a href="IMPLEMENTATION_STATUS.html">实现状态</a></li>
 </ul>
 </nav>
@@ -741,6 +742,11 @@ data: {"execution_id": 42, "status": "success", "duration_ms": 135000, "timestam
 </tr>
 </thead>
 <tbody>
+<tr>
+<td><code>server status</code> / <code>server start</code> / <code>server stop</code></td>
+<td>server 生命周期管理（探测/后台启动/优雅停止），供 Agent 在调用其他命令前自动拉起 server</td>
+<td><code>GET /config/system</code>（就绪探测）</td>
+</tr>
 <tr>
 <td><code>pipeline list</code></td>
 <td>列出流水线/工作流</td>

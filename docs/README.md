@@ -23,6 +23,7 @@
 | 9 | [09-security.md](./09-security.md) | 安全设计、错误处理与日志规范 |
 | 10 | [10-core-deps.md](./10-core-deps.md) | FlowX 核心库依赖评估与增强建议 |
 | 11 | [11-node-package.md](./11-node-package.md) | 节点包规范（flowx.json）与导入执行映射 |
+| 12 | [12-e2e-testing.md](./12-e2e-testing.md) | E2E 测试计划：AI 驱动的 CLI 与服务端全链路验证 |
 | 📋 | [IMPLEMENTATION_STATUS.md](./IMPLEMENTATION_STATUS.md) | **实现状态跟踪：已完成功能 vs 待实现功能** |
 
 ## 设计原则

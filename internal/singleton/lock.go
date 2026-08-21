@@ -10,6 +10,13 @@ import (
 	"time"
 )
 
+// FindRunning 读取 pidFile 并校验对应进程是否为匹配 commandName 的存活进程。
+// 供 daemon 管理命令（server stop/status）复用，不改变锁状态。
+func FindRunning(pidFile, commandName string) (pid int, running bool) {
+	l := &Lock{pidFile: pidFile, commandName: commandName}
+	return l.readExisting()
+}
+
 // Lock 进程级单例锁，通过 PID 文件实现
 type Lock struct {
 	pidFile     string
@@ -58,14 +65,19 @@ func (l *Lock) readExisting() (int, bool) {
 }
 
 func (l *Lock) isRunning(pid int) bool {
+	// 优先通过 /proc/<pid>/exe 与当前可执行文件比对，对二进制重命名（如测试构建）健壮
+	if self, err := os.Executable(); err == nil {
+		if exe, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid)); err == nil {
+			if exe != self {
+				return false
+			}
+		}
+	}
 	cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
 	if err != nil {
 		return false
 	}
 	cmd := strings.ReplaceAll(string(cmdline), "\x00", " ")
-	if !strings.Contains(cmd, "flowx-studio") {
-		return false
-	}
 	if l.commandName != "" && !strings.Contains(cmd, l.commandName) {
 		return false
 	}

@@ -591,6 +591,7 @@ PUT /api/v1/config/system
 
 | 命令 | 说明 | 底层 API |
 |------|------|----------|
+| `server status` / `server start` / `server stop` | server 生命周期管理（探测/后台启动/优雅停止），供 Agent 在调用其他命令前自动拉起 server | `GET /config/system`（就绪探测） |
 | `pipeline list` | 列出流水线/工作流 | `GET /workflows` |
 | `pipeline create --file wf.yaml` | 创建流水线/工作流（YAML 非法时退出码 1，stderr 含校验错误） | `POST /workflows` |
 | `pipeline update --id N --file wf.yaml` | 更新流水线/工作流 | `PUT /workflows/:id` |

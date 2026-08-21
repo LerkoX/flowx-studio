@@ -22,6 +22,7 @@ FILES = [
     ("09-security.md", "9. 安全与错误处理设计"),
     ("10-core-deps.md", "10. FlowX 核心库依赖评估"),
     ("11-node-package.md", "11. 节点包规范"),
+    ("12-e2e-testing.md", "12. E2E 测试计划"),
     ("IMPLEMENTATION_STATUS.md", "实现状态"),
 ]
 

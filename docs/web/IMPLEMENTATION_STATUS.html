@@ -54,6 +54,7 @@
 <li><a href="09-security.html">9. 安全与错误处理设计</a></li>
 <li><a href="10-core-deps.html">10. FlowX 核心库依赖评估</a></li>
 <li><a href="11-node-package.html">11. 节点包规范</a></li>
+<li><a href="12-e2e-testing.html">12. E2E 测试计划</a></li>
 <li><a href="IMPLEMENTATION_STATUS.html" class="active">实现状态</a></li>
 </ul>
 </nav>
@@ -83,6 +84,14 @@
 <li><code>boot.sh</code> 改用 <code>FLOWX_STUDIO_DATA_DIR</code> 环境变量传递数据目录（不再传二进制不支持的 <code>--data-dir</code> flag）；<code>config.Load</code> 中 <code>data.db_path</code> 未显式配置时自动归入数据目录。</li>
 <li>Mock 测试环境变量统一为 <code>FLOWX_PARAM_</code> 前缀（保留裸大写名兼容别名），Mock 与运行时展开行为一致。</li>
 <li><code>opencode.json</code> 移除已删除的 <code>flowx-studio mcp</code> 配置。</li>
+</ul>
+<h3 id="server-daemon-管理与-e2e-测试2026-08-21">server daemon 管理与 E2E 测试（2026-08-21）</h3>
+<ul>
+<li>新增 <code>server start / stop / status</code> 守护管理子命令：<code>start</code> 后台启动（Setsid）并阻塞轮询就绪（超时 10s），幂等；<code>status</code> 输出 running/stopped（退出码恒 0，支持 <code>--json</code>）；<code>stop</code> SIGTERM 优雅停止。</li>
+<li><code>runServer</code> 启动后写入 <code>&lt;data.dir&gt;/server.json</code>（pid/host/port），<code>status</code>/<code>stop</code> 据此探测真实端口。</li>
+<li><code>singleton</code> 抽出 <code>FindRunning</code>，进程身份校验改为 <code>/proc/&lt;pid&gt;/exe</code> 与当前可执行文件比对（对二进制重命名健壮）+ cmdline 子命令匹配。</li>
+<li><code>skills/flowx-studio/SKILL.md</code> 新增「Server 生命周期」段落：Agent 调用 CLI 前先 <code>server status</code>，未运行则 <code>server start</code> 自动拉起。</li>
+<li>新增 E2E 测试计划文档 <code>docs/12-e2e-testing.md</code> 与可执行断言脚本 <code>tests/e2e/run.sh</code>（69 个用例：CLI 基础 / server 生命周期 / 节点 / 流水线 / 交互命令 / 错误路径）。</li>
 </ul>
 <h3 id="安全与功能补全2026-08-18">安全与功能补全（2026-08-18）</h3>
 <ul>
@@ -445,6 +454,7 @@
 │   │   ├── pipeline.go               # pipeline list/create/update/delete/run
 │   │   ├── node.go                   # node list/create/delete/import/mock
 │   │   ├── interact.go               # ask / info 终端交互命令
+│   │   ├── daemon.go                 # server start/stop/status 守护管理
 │   │   └── schema.go                 # --schema 参数 JSON Schema 输出
 │   ├── runtime/
 │   │   ├── adapter.go                # FlowX RuntimeAdapter + EventBridge + LogPusher
@@ -465,7 +475,8 @@
 │   │   └── migrations/               # 迁移脚本 001-006
 │   ├── model/model.go                # 所有数据模型
 │   └── config/config.go              # 应用配置
-├── skills/flowx-studio/SKILL.md      # AI Agent 技能速查表
+├── skills/flowx-studio/SKILL.md      # AI Agent 技能速查表（含 server 生命周期）
+├── tests/e2e/run.sh                  # E2E 断言脚本（见 docs/12-e2e-testing.md）
 ├── go.mod / go.sum                   # Go 模块（replace =&gt; ../flowx）
 └── Makefile                          # 构建脚本</code></pre>
 
