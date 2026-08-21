@@ -11,6 +11,7 @@ import (
 	"github.com/LerkoX/flowx-studio/internal/event"
 	"github.com/LerkoX/flowx-studio/internal/model"
 	"github.com/LerkoX/flowx-studio/internal/sandbox"
+	"github.com/LerkoX/flowx-studio/internal/validator"
 )
 
 // NodeService 节点服务
@@ -18,6 +19,7 @@ type NodeService struct {
 	db       *db.DB
 	executor *sandbox.Executor
 	eventBus *event.Bus
+	audit    *AuditService
 }
 
 // NewNodeService 创建节点服务
@@ -26,6 +28,18 @@ func NewNodeService(database *db.DB, bus *event.Bus) *NodeService {
 		db:       database,
 		executor: sandbox.NewExecutor(),
 		eventBus: bus,
+	}
+}
+
+// SetAudit 注入审计服务（可选）；审计写入失败不影响主流程
+func (s *NodeService) SetAudit(a *AuditService) {
+	s.audit = a
+}
+
+// auditRecord 静默记录审计日志
+func (s *NodeService) auditRecord(action, resourceID, detail string) {
+	if s.audit != nil {
+		_ = s.audit.Record(action, "node", resourceID, detail)
 	}
 }
 
@@ -122,8 +136,8 @@ func (s *NodeService) Get(id int64) (*model.Node, error) {
 
 // Create 创建节点
 func (s *NodeService) Create(req *model.Node) (*model.Node, error) {
-	if strings.TrimSpace(req.Name) == "" {
-		return nil, fmt.Errorf("name is required")
+	if err := validator.ValidateNode(req); err != nil {
+		return nil, err
 	}
 	if req.NodeType == "" {
 		req.NodeType = "code"
@@ -157,6 +171,7 @@ func (s *NodeService) Create(req *model.Node) (*model.Node, error) {
 	id, _ := result.LastInsertId()
 	req.ID = id
 
+	s.auditRecord("create_node", fmt.Sprintf("%d", id), "name="+req.Name)
 	s.eventBus.Publish(event.Event{
 		Type: "node.created",
 		Data: req,
@@ -167,6 +182,9 @@ func (s *NodeService) Create(req *model.Node) (*model.Node, error) {
 
 // Update 更新节点
 func (s *NodeService) Update(id int64, req *model.Node) error {
+	if err := validator.ValidateNode(req); err != nil {
+		return err
+	}
 	paramsJSON, _ := json.Marshal(req.Parameters)
 	outputsJSON, _ := json.Marshal(req.Outputs)
 	reqsJSON, _ := json.Marshal(req.Requirements)
@@ -193,6 +211,7 @@ func (s *NodeService) Update(id int64, req *model.Node) error {
 	}
 
 	req.ID = id
+	s.auditRecord("update_node", fmt.Sprintf("%d", id), "name="+req.Name)
 	s.eventBus.Publish(event.Event{
 		Type: "node.updated",
 		Data: req,
@@ -208,6 +227,7 @@ func (s *NodeService) Delete(id int64) error {
 		return fmt.Errorf("failed to delete node: %w", err)
 	}
 
+	s.auditRecord("delete_node", fmt.Sprintf("%d", id), "")
 	s.eventBus.Publish(event.Event{
 		Type: "node.deleted",
 		Data: map[string]int64{"id": id},
@@ -271,6 +291,7 @@ func (s *NodeService) MockTest(id int64, parameters map[string]string, timeout i
 		Files:    node.Files,
 	})
 
+	s.auditRecord("mock_node", fmt.Sprintf("%d", id), "name="+node.Name+" status="+result.Status)
 	return result, nil
 }
 

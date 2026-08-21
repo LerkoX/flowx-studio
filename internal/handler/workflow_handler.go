@@ -342,6 +342,16 @@ func (h *WorkflowHandler) StreamExecution(c *gin.Context) {
 	events := h.service.SubscribeEvents()
 	defer h.service.UnsubscribeEvents(events)
 
+	// 回放内存环形缓冲区中的近期日志（支持断线重连，事件流为 at-least-once，
+	// 重连可能收到少量重复日志，前端按时间戳去重即可）
+	for _, data := range h.service.RecentExecutionLogs(id) {
+		payload, _ := json.Marshal(data)
+		c.Writer.Write([]byte("event: execution.log\ndata: "))
+		c.Writer.Write(payload)
+		c.Writer.Write([]byte("\n\n"))
+	}
+	flusher.Flush()
+
 	for {
 		select {
 		case evt := <-events:

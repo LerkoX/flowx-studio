@@ -152,7 +152,17 @@ CLI 调用前可用以下命令探测与启动 server；`status` 退出码恒为
 | `flowx-studio node delete --id N` | 删除节点 | `delete_node` |
 | `flowx-studio node mock --id N [--params '{...}']` | 触发节点 Mock 测试并输出结果 | 无（新增，便于 Agent 自验） |
 
-### 6.4.4 交互命令（原 FAP 动作的 CLI 等价物）
+### 6.4.4 运维命令（audit / backup）
+
+| 命令 | 说明 |
+| --- | --- |
+| `flowx-studio audit list [--action a] [--resource-type t] [--json]` | 查询审计日志（写操作审计：节点/流水线/配置的增删改与执行） |
+| `flowx-studio backup create` | 创建数据库备份（服务端 `VACUUM INTO`，运行中可安全执行） |
+| `flowx-studio backup list` | 列出备份文件 |
+| `flowx-studio backup download --name f [-o out]` | 下载备份文件 |
+| `flowx-studio backup restore --file f` | 恢复数据库；要求 server 已停止，恢复前自动保留 `.pre-restore` 回滚副本 |
+
+### 6.4.5 交互命令（原 FAP 动作的 CLI 等价物）
 
 原 FAP（FlowX Action Protocol）定义了 `create_node` / `update_workflow` / `ask_input` / `show_info` 四种动作标签。FAP 协议本身已移除，其语义由以下 CLI 命令承接：
 

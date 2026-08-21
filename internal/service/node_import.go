@@ -93,7 +93,13 @@ func (s *NodeImportService) importFromPath(dir, sourceType, sourceURL, sourcePat
 		return nil, err
 	}
 
-	return s.nodeSvc.Create(node)
+	created, err := s.nodeSvc.Create(node)
+	if err != nil {
+		return nil, err
+	}
+	s.nodeSvc.auditRecord("import_node", fmt.Sprintf("%d", created.ID),
+		fmt.Sprintf("name=%s source=%s", created.Name, sourceType))
+	return created, nil
 }
 
 func (s *NodeImportService) validatePackage(dir string, pkg *model.NodePackage) error {

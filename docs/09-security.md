@@ -381,66 +381,67 @@ GET /api/v1/health
 }
 ```
 
-## 9.4 备份与恢复（规划中，未实现）
+## 9.4 备份与恢复
 
-> ⚠️ 备份、导出 API 均未实现。以下为**目标设计**。
+### 9.4.1 备份 API
 
-### 9.4.1 自动备份（规划中，未实现）
+已实现（`internal/service/backup.go` + `internal/handler/backup_handler.go`）：
+
+| 接口 | 说明 |
+|------|------|
+| `POST /api/v1/backups` | 创建备份。基于 SQLite `VACUUM INTO`，生成一致性紧凑副本，server 运行中可安全执行；备份文件存放在 `<data.dir>/backups/studio-<时间戳>.db` |
+| `GET /api/v1/backups` | 列出备份文件（按时间倒序） |
+| `GET /api/v1/backups/:name/download` | 下载备份文件（带 `Content-Disposition` 下载头） |
+
+CLI 等价物：`flowx-studio backup create / list / download`。
+
+### 9.4.2 恢复
+
+恢复通过 CLI 完成（`flowx-studio backup restore --file <备份文件>`），安全约束：
+
+- **server 必须已停止**（通过 PID 文件 + 进程校验确认，运行中直接拒绝）；
+- 恢复前自动把当前数据库保存为 `studio.db.pre-restore` 回滚副本；
+- 恢复后清理残留的 `-wal`/`-shm` 文件，避免旧 WAL 日志重放到新库。
+
+```bash
+flowx-studio server stop
+flowx-studio backup restore --file ~/.flowx-studio/backups/studio-20260821-034808.db
+flowx-studio server start
+```
+
+### 9.4.3 自动备份（规划中，未实现）
 
 - 每次启动时自动创建数据库备份（保留最近 3 个）
 - 数据库文件变化超过 10% 时触发增量备份
 
-### 9.4.2 手动导出（规划中，未实现）
+## 9.5 安全审计
 
-提供 API 导出所有数据：
+### 9.5.1 操作审计日志
 
-```http
-POST /api/v1/export
-```
-
-**响应**：JSON 文件包含所有节点、工作流、配置。
-
-### 9.4.3 恢复
-
-通过替换数据库文件恢复（手动操作，无自动化备份）：
-
-```bash
-# 停止服务
-pkill flowx-studio
-
-# 恢复备份（需自行提前备份）
-cp ~/.flowx-studio/studio.db.backup ~/.flowx-studio/studio.db
-
-# 启动服务
-flowx-studio server
-```
-
-## 9.5 安全审计（规划中，未实现）
-
-> ⚠️ 未实现，数据库中不存在 `audit_logs` 表。以下为**目标设计**。
-
-### 9.5.1 操作审计日志（规划中，未实现）
-
-记录所有关键操作：
+已实现（迁移 007，`internal/service/audit.go`）。记录所有关键写操作：
 
 ```sql
 CREATE TABLE audit_logs (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    action      TEXT NOT NULL,        -- create_node | delete_node | run_workflow | update_config
-    resource_type TEXT NOT NULL,      -- node | workflow | execution | config
-    resource_id TEXT,
-    details     TEXT,                 -- JSON 格式的操作详情
-    ip_address  TEXT,
-    user_agent  TEXT,
-    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    action        TEXT NOT NULL,        -- create_node | update_node | delete_node | import_node | mock_node | create_workflow | ...
+    resource_type TEXT NOT NULL,        -- node | workflow | config
+    resource_id   TEXT,
+    detail        TEXT,
+    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
-### 9.5.2 审计事件（规划中，未实现）
+查询接口：`GET /api/v1/audit-logs?action=&resource_type=&page=&page_size=`；CLI：`flowx-studio audit list`。
 
-需要审计的操作：
-- 节点创建、删除
-- 工作流创建、删除、执行
-- AI 配置修改
-- 系统配置变更
-- 导出数据操作
+实现要点：
+- `AuditService` 通过 `SetAudit` 可选注入各 Service / Handler，审计写入失败**不影响**主流程。
+- 审计日志随保留策略自动清理（`retention.audit_days`，默认 90 天）。
+
+### 9.5.2 审计事件
+
+当前覆盖的操作：
+- 节点创建、更新、删除、导入、Mock 测试（`create_node` / `update_node` / `delete_node` / `import_node` / `mock_node`）
+- 工作流创建、更新、删除、执行（`create_workflow` / `update_workflow` / `delete_workflow` / `run_workflow`）
+- 系统配置变更（`update_config`）
+
+暂未覆盖（后续迭代）：导出/备份操作的审计、IP/User-Agent 记录（本地单用户场景收益低）。

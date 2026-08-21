@@ -604,6 +604,9 @@ PUT /api/v1/config/system
 | `node mock --id N` | Mock 测试节点 | `POST /nodes/:id/mock` |
 | `ask --key k --prompt ...` | 终端交互式提问（承接原 FAP `ask_input`，纯终端，不访问 server） | 无 |
 | `info --title t --message m` | 终端信息卡片（承接原 FAP `show_info`，纯终端，不访问 server） | 无 |
+| `audit list` | 查询审计日志（`--action`/`--resource-type` 过滤） | `GET /audit-logs` |
+| `backup create` / `backup list` / `backup download` | 数据库备份创建/列表/下载 | `POST /backups`、`GET /backups`、`GET /backups/:name/download` |
+| `backup restore --file f` | 恢复数据库（要求 server 已停止，自动保留 `.pre-restore` 回滚副本） | 无（直接操作数据库文件） |
 
 全局约定：所有查询类子命令支持 `--json` 输出结构化结果；数据写入类子命令支持 `--schema` 输出参数 JSON Schema；校验失败以非零退出码退出并在 stderr 给出重试指引。详见 [06-ai-service.md](./06-ai-service.md)。
 
@@ -639,6 +642,14 @@ PUT /api/v1/config/system
 │
 ├── /events
 │   └── GET    /          全局事件流 (SSE)
+│
+├── /audit-logs
+│   └── GET    /          审计日志查询（action/resource_type 过滤 + 分页）
+│
+├── /backups
+│   ├── GET    /          备份列表
+│   ├── POST   /          创建备份（VACUUM INTO）
+│   └── GET    /:name/download  下载备份文件
 │
 └── /config
     ├── GET    /system    获取系统配置

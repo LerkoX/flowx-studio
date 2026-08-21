@@ -39,6 +39,8 @@ type appServices struct {
 	nodeSvc       *service.NodeService
 	nodeImportSvc *service.NodeImportService
 	workflowSvc   *service.WorkflowService
+	auditSvc      *service.AuditService
+	backupSvc     *service.BackupService
 }
 
 func main() {
@@ -91,6 +93,8 @@ func main() {
 	rootCmd.AddCommand(cli.NewNodeCmd())     // node list/create/delete/import/mock
 	rootCmd.AddCommand(cli.NewAskCmd())      // ask（原 FAP ask_input）
 	rootCmd.AddCommand(cli.NewInfoCmd())     // info（原 FAP show_info）
+	rootCmd.AddCommand(cli.NewAuditCmd())    // audit list（审计日志查询）
+	rootCmd.AddCommand(cli.NewBackupCmd())   // backup create/list/download/restore
 
 	if err := rootCmd.Execute(); err != nil {
 		var uerr *usageError
@@ -119,6 +123,10 @@ func newAppServices(cfg *config.Config) (*appServices, func(), error) {
 	nodeSvc := service.NewNodeService(database, bus)
 	nodeImportSvc := service.NewNodeImportService(nodeSvc)
 	workflowSvc := service.NewWorkflowService(database, rt, bus, nodeSvc)
+	auditSvc := service.NewAuditService(database)
+	nodeSvc.SetAudit(auditSvc)
+	workflowSvc.SetAudit(auditSvc)
+	backupSvc := service.NewBackupService(database, cfg.Data.Dir, cfg.Data.DBPath)
 
 	cleanup := func() {
 		rt.Stop()
@@ -132,6 +140,8 @@ func newAppServices(cfg *config.Config) (*appServices, func(), error) {
 		nodeSvc:       nodeSvc,
 		nodeImportSvc: nodeImportSvc,
 		workflowSvc:   workflowSvc,
+		auditSvc:      auditSvc,
+		backupSvc:     backupSvc,
 	}, cleanup, nil
 }
 
@@ -181,6 +191,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	svcs.workflowSvc.StartEventBridge(ctx)
 
+	// 按保留天数自动清理历史日志（retention.log_days / retention.audit_days，0 表示不清理）
+	service.NewCleanupService(svcs.database, cfg.Retention.LogDays, cfg.Retention.AuditDays).Start(ctx)
+
 	// 本地 token 认证：CLI 与 Web UI 均需提供；可用 FLOWX_STUDIO_SERVER_AUTH_TOKEN 覆盖
 	token, err := server.LoadOrCreateToken(cfg.Data.Dir, os.Getenv("FLOWX_STUDIO_SERVER_AUTH_TOKEN"))
 	if err != nil {
@@ -195,10 +208,14 @@ func runServer(cmd *cobra.Command, args []string) error {
 	api := srv.Router().Group("/api/v1")
 	api.Use(server.AuthMiddleware(token))
 	api.Use(server.RateLimitMiddleware(100, 50)) // 每 IP 100 请求/分钟，突发 50
-	handler.NewConfigHandler(svcs.database).RegisterRoutes(api)
+	configHandler := handler.NewConfigHandler(svcs.database)
+	configHandler.SetAudit(svcs.auditSvc)
+	configHandler.RegisterRoutes(api)
 	handler.NewWorkflowHandler(svcs.workflowSvc).RegisterRoutes(api)
 	handler.NewNodeHandler(svcs.nodeSvc).RegisterRoutes(api)
 	handler.NewEventHandler(svcs.bus).RegisterRoutes(api)
+	handler.NewAuditHandler(svcs.auditSvc).RegisterRoutes(api)
+	handler.NewBackupHandler(svcs.backupSvc).RegisterRoutes(api)
 
 	srv.RegisterStatic()
 

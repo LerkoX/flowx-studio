@@ -177,6 +177,16 @@ type ExecutionLog struct {
 	Timestamp   time.Time `json:"timestamp" db:"timestamp"`
 }
 
+// AuditLog 审计日志
+type AuditLog struct {
+	ID           int64     `json:"id" db:"id"`
+	Action       string    `json:"action" db:"action"`
+	ResourceType string    `json:"resourceType" db:"resource_type"`
+	ResourceID   string    `json:"resourceId,omitempty" db:"resource_id"`
+	Detail       string    `json:"detail,omitempty" db:"detail"`
+	CreatedAt    time.Time `json:"createdAt" db:"created_at"`
+}
+
 // SystemConfig 系统配置
 type SystemConfig struct {
 	Key         string    `json:"key" db:"key"`

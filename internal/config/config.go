@@ -10,8 +10,9 @@ import (
 
 // Config 应用配置
 type Config struct {
-	Server ServerConfig `mapstructure:"server"`
-	Data   DataConfig   `mapstructure:"data"`
+	Server    ServerConfig    `mapstructure:"server"`
+	Data      DataConfig      `mapstructure:"data"`
+	Retention RetentionConfig `mapstructure:"retention"`
 }
 
 // ServerConfig 服务器配置
@@ -26,6 +27,12 @@ type ServerConfig struct {
 type DataConfig struct {
 	Dir    string `mapstructure:"dir"`
 	DBPath string `mapstructure:"db_path"`
+}
+
+// RetentionConfig 数据保留配置
+type RetentionConfig struct {
+	LogDays   int `mapstructure:"log_days"`   // execution_logs 保留天数，0 表示不清理
+	AuditDays int `mapstructure:"audit_days"` // audit_logs 保留天数，0 表示不清理
 }
 
 // Load 加载配置
@@ -43,6 +50,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("server.no_open", false)
 	viper.SetDefault("server.auto_open_browser", true)
 	viper.SetDefault("data.dir", filepath.Join(home, ".flowx-studio"))
+	viper.SetDefault("retention.log_days", 30)
+	viper.SetDefault("retention.audit_days", 90)
 	// db_path 不设默认值：未显式配置时由 data.dir 推导（见下方）
 
 	// 配置文件

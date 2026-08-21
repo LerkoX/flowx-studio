@@ -371,7 +371,40 @@
 </tbody>
 </table>
 
-<h3 id="644-交互命令原-fap-动作的-cli-等价物">6.4.4 交互命令（原 FAP 动作的 CLI 等价物）</h3>
+<h3 id="644-运维命令audit-backup">6.4.4 运维命令（audit / backup）</h3>
+
+<table>
+<thead>
+<tr>
+<th>命令</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>flowx-studio audit list [--action a] [--resource-type t] [--json]</code></td>
+<td>查询审计日志（写操作审计：节点/流水线/配置的增删改与执行）</td>
+</tr>
+<tr>
+<td><code>flowx-studio backup create</code></td>
+<td>创建数据库备份（服务端 <code>VACUUM INTO</code>，运行中可安全执行）</td>
+</tr>
+<tr>
+<td><code>flowx-studio backup list</code></td>
+<td>列出备份文件</td>
+</tr>
+<tr>
+<td><code>flowx-studio backup download --name f [-o out]</code></td>
+<td>下载备份文件</td>
+</tr>
+<tr>
+<td><code>flowx-studio backup restore --file f</code></td>
+<td>恢复数据库；要求 server 已停止，恢复前自动保留 <code>.pre-restore</code> 回滚副本</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="645-交互命令原-fap-动作的-cli-等价物">6.4.5 交互命令（原 FAP 动作的 CLI 等价物）</h3>
 
 <p>原 FAP（FlowX Action Protocol）定义了 <code>create_node</code> / <code>update_workflow</code> / <code>ask_input</code> / <code>show_info</code> 四种动作标签。FAP 协议本身已移除，其语义由以下 CLI 命令承接：</p>
 

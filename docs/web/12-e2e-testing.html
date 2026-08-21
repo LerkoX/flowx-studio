@@ -382,6 +382,105 @@
 </tbody>
 </table>
 
+<h3 id="1237-审计日志">12.3.7 审计日志</h3>
+
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>目的</th>
+<th>命令</th>
+<th>预期</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>7.1</td>
+<td>审计记录生成</td>
+<td><code>audit list</code></td>
+<td>退出 0，含此前用例产生的 <code>create_node</code>、<code>run_workflow</code> 记录</td>
+</tr>
+<tr>
+<td>7.2</td>
+<td>按动作过滤</td>
+<td><code>audit list --action create_node --json</code></td>
+<td>退出 0，结果均为 <code>create_node</code></td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="1238-输入验证">12.3.8 输入验证</h3>
+
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>目的</th>
+<th>命令</th>
+<th>预期</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>8.1</td>
+<td>非法节点名</td>
+<td><code>node create</code>（name 以数字开头含特殊字符）</td>
+<td>退出 1，stderr 含 <code>name must start with a letter</code></td>
+</tr>
+<tr>
+<td>8.2</td>
+<td>不支持的语言</td>
+<td><code>node create</code>（language: cobol）</td>
+<td>退出 1，stderr 含 <code>unsupported language</code></td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="1239-备份与恢复">12.3.9 备份与恢复</h3>
+
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>目的</th>
+<th>命令</th>
+<th>预期</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>9.1</td>
+<td>创建备份</td>
+<td><code>backup create</code></td>
+<td>退出 0，输出含 <code>Created backup</code></td>
+</tr>
+<tr>
+<td>9.2</td>
+<td>备份列表</td>
+<td><code>backup list</code></td>
+<td>退出 0，含 <code>.db</code> 文件</td>
+</tr>
+<tr>
+<td>9.3</td>
+<td>下载备份</td>
+<td><code>backup download --name &lt;f&gt; -o dl.db</code></td>
+<td>退出 0，本地文件非空</td>
+</tr>
+<tr>
+<td>9.4</td>
+<td>运行中拒绝恢复</td>
+<td>server 运行中执行 <code>backup restore --file dl.db</code></td>
+<td>退出 1，stderr 提示先 <code>server stop</code></td>
+</tr>
+<tr>
+<td>9.5</td>
+<td>停止后恢复</td>
+<td><code>server stop</code> 后 <code>backup restore --file dl.db</code></td>
+<td>退出 0，输出含 <code>Restored database</code>，自动生成 <code>.pre-restore</code> 回滚副本</td>
+</tr>
+</tbody>
+</table>
+
 <h2 id="124-ai-驱动方式">12.4 AI 驱动方式</h2>
 
 <p><strong>方式一：直接运行脚本（推荐）</strong></p>

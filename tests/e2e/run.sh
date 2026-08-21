@@ -214,6 +214,35 @@ assert_contains "4.6 failed status" "FAILED"
 assert_exit "4.7 pipeline delete" 0 FXS pipeline delete --id "${WF_ID}"
 assert_contains "4.7 deleted message" "Deleted pipeline id="
 
+# ---------- 7. 审计日志 ----------
+say "== 7. audit logs =="
+assert_exit "7.1 audit list" 0 FXS audit list
+assert_contains "7.1 has create_node" "create_node"
+assert_contains "7.1 has run_workflow" "run_workflow"
+assert_exit "7.2 audit filter by action" 0 FXS audit list --action create_node --json
+assert_contains "7.2 filtered" "create_node"
+
+# ---------- 8. 输入验证 ----------
+say "== 8. input validation =="
+printf 'name: "1bad name!"\nlanguage: bash\ncode: echo hi\n' > "${WORK_DIR}/badname-node.yaml"
+assert_exit "8.1 invalid node name" 1 FXS node create --file "${WORK_DIR}/badname-node.yaml"
+assert_contains "8.1 name error" "name must start with a letter"
+printf 'name: badlang\nlanguage: cobol\ncode: echo hi\n' > "${WORK_DIR}/badlang-node.yaml"
+assert_exit "8.2 unsupported language" 1 FXS node create --file "${WORK_DIR}/badlang-node.yaml"
+assert_contains "8.2 language error" "unsupported language"
+
+# ---------- 9. 备份与恢复 ----------
+say "== 9. backup & restore =="
+assert_exit "9.1 backup create" 0 FXS backup create
+assert_contains "9.1 created message" "Created backup"
+assert_exit "9.2 backup list" 0 FXS backup list
+assert_contains "9.2 list has .db" ".db"
+BACKUP_NAME=$(printf '%s' "${LAST_OUT}" | awk '{print $1}' | grep '\.db$' | head -1)
+assert_exit "9.3 backup download" 0 FXS backup download --name "${BACKUP_NAME}" -o "${WORK_DIR}/dl.db"
+[ -s "${WORK_DIR}/dl.db" ] && ok "9.3 downloaded file non-empty" || bad "9.3 downloaded file non-empty"
+assert_exit "9.4 restore while running refused" 1 FXS backup restore --file "${WORK_DIR}/dl.db"
+assert_contains "9.4 refuse message" "server stop"
+
 # ---------- 5. 交互命令 ----------
 say "== 5. interaction commands =="
 OUT=$(echo "" | FXS ask --key env --prompt "pick env" --default prod 2>/dev/null)
@@ -235,10 +264,18 @@ assert_contains "6.2 unknown flag message" "unknown flag"
 say "== 2. lifecycle teardown =="
 assert_exit "2.5 server stop" 0 FXS_LOCAL server stop
 assert_contains "2.5 stopped message" "Server stopped"
-assert_exit "2.6 status after stop" 0 FXS_LOCAL server status
-assert_contains "2.6 says stopped" "stopped"
-assert_exit "2.7 stop again" 0 FXS_LOCAL server stop
-assert_contains "2.7 not running" "not running"
+
+# 停止后验证 restore（9.5）
+assert_exit "9.5 restore after stop" 0 FXS_LOCAL backup restore --file "${WORK_DIR}/dl.db"
+assert_contains "9.5 restored message" "Restored database"
+
+# 恢复后重新拉起，验证 2.6/2.7
+FXS_LOCAL server start --port "${PORT}" >/dev/null 2>&1 || true
+assert_exit "2.6 status after restart" 0 FXS_LOCAL server status
+assert_contains "2.6 says running" "running"
+assert_exit "2.7 final stop" 0 FXS_LOCAL server stop
+assert_contains "2.7 stopped message" "Server stopped"
+FXS_LOCAL server status | grep -q stopped && ok "2.8 status stopped after final stop" || bad "2.8 status stopped after final stop"
 
 # ---------- 汇总 ----------
 say ""

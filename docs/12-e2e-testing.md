@@ -84,6 +84,30 @@
 | 6.2 | 未知 flag | `pipeline list --nope` | 退出 2，stderr 含 `unknown flag` |
 | 6.3 | 缺必填参数 | `pipeline create`（无 flag） | 退出 1，stderr 提示 `--schema` |
 
+### 12.3.7 审计日志
+
+| # | 目的 | 命令 | 预期 |
+|---|------|------|------|
+| 7.1 | 审计记录生成 | `audit list` | 退出 0，含此前用例产生的 `create_node`、`run_workflow` 记录 |
+| 7.2 | 按动作过滤 | `audit list --action create_node --json` | 退出 0，结果均为 `create_node` |
+
+### 12.3.8 输入验证
+
+| # | 目的 | 命令 | 预期 |
+|---|------|------|------|
+| 8.1 | 非法节点名 | `node create`（name 以数字开头含特殊字符） | 退出 1，stderr 含 `name must start with a letter` |
+| 8.2 | 不支持的语言 | `node create`（language: cobol） | 退出 1，stderr 含 `unsupported language` |
+
+### 12.3.9 备份与恢复
+
+| # | 目的 | 命令 | 预期 |
+|---|------|------|------|
+| 9.1 | 创建备份 | `backup create` | 退出 0，输出含 `Created backup` |
+| 9.2 | 备份列表 | `backup list` | 退出 0，含 `.db` 文件 |
+| 9.3 | 下载备份 | `backup download --name <f> -o dl.db` | 退出 0，本地文件非空 |
+| 9.4 | 运行中拒绝恢复 | server 运行中执行 `backup restore --file dl.db` | 退出 1，stderr 提示先 `server stop` |
+| 9.5 | 停止后恢复 | `server stop` 后 `backup restore --file dl.db` | 退出 0，输出含 `Restored database`，自动生成 `.pre-restore` 回滚副本 |
+
 ## 12.4 AI 驱动方式
 
 **方式一：直接运行脚本（推荐）**

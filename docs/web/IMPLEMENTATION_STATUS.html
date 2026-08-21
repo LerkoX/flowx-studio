@@ -91,7 +91,16 @@
 <li><code>runServer</code> 启动后写入 <code>&lt;data.dir&gt;/server.json</code>（pid/host/port），<code>status</code>/<code>stop</code> 据此探测真实端口。</li>
 <li><code>singleton</code> 抽出 <code>FindRunning</code>，进程身份校验改为 <code>/proc/&lt;pid&gt;/exe</code> 与当前可执行文件比对（对二进制重命名健壮）+ cmdline 子命令匹配。</li>
 <li><code>skills/flowx-studio/SKILL.md</code> 新增「Server 生命周期」段落：Agent 调用 CLI 前先 <code>server status</code>，未运行则 <code>server start</code> 自动拉起。</li>
-<li>新增 E2E 测试计划文档 <code>docs/12-e2e-testing.md</code> 与可执行断言脚本 <code>tests/e2e/run.sh</code>（69 个用例：CLI 基础 / server 生命周期 / 节点 / 流水线 / 交互命令 / 错误路径）。</li>
+<li>新增 E2E 测试计划文档 <code>docs/12-e2e-testing.md</code> 与可执行断言脚本 <code>tests/e2e/run.sh</code>。</li>
+</ul>
+<h3 id="安全与运维增强2026-08-21">安全与运维增强（2026-08-21）</h3>
+<ul>
+<li><strong>审计日志</strong>：迁移 007 新增 <code>audit_logs</code> 表；<code>AuditService</code> 以 <code>SetAudit</code> 可选注入 NodeService/WorkflowService/ConfigHandler，覆盖节点增删改/导入/Mock、工作流增删改/执行、配置变更；审计失败不影响主流程。新增 <code>GET /api/v1/audit-logs</code> 与 <code>flowx-studio audit list</code>。</li>
+<li><strong>参数输入验证</strong>：<code>internal/validator/node.go</code>（名称格式/长度、nodeType 枚举、语言白名单、参数类型与重名、tag 长度），接入节点创建/更新。</li>
+<li><strong>日志自动清理</strong>：<code>internal/service/cleanup.go</code>，按 <code>retention.log_days</code>（默认 30）/ <code>retention.audit_days</code>（默认 90）清理，每 24h 一轮。</li>
+<li><strong>内存环形缓冲区</strong>：<code>internal/service/ringbuffer.go</code>，每个执行保留最近 1000 条日志；SSE 连接时先回放缓冲区，支持断线重连。</li>
+<li><strong>备份与恢复</strong>：<code>POST/GET /api/v1/backups</code> + 下载（<code>VACUUM INTO</code>，运行中安全）；CLI <code>backup create/list/download/restore</code>，restore 要求 server 停止并自动保留 <code>.pre-restore</code> 回滚副本。</li>
+<li>E2E 脚本扩充至 89 个用例（新增审计、输入验证、备份恢复分组）。</li>
 </ul>
 <h3 id="安全与功能补全2026-08-18">安全与功能补全（2026-08-18）</h3>
 <ul>
@@ -198,8 +207,8 @@
 <tr>
 <td>10</td>
 <td>安全设计</td>
-<td>🟡 部分实现</td>
-<td>CORS + token 认证 + 请求限流 + Mock 代码安全校验已实现，参数验证/审计日志/Docker 沙箱待实现</td>
+<td>✅ 已完成</td>
+<td>CORS + token 认证 + 请求限流 + 参数验证 + 审计日志 + Mock 代码安全校验已实现；Docker 沙箱为 V2 目标</td>
 </tr>
 <tr>
 <td>11</td>
@@ -331,23 +340,23 @@
 <li>[x] 日志查询 API</li>
 <li>[x] <strong>真实 SSE 日志流</strong>（FlowX Runtime 事件桥接，<code>adapter.go</code> EventBridge → SSE）</li>
 <li>[x] <strong>真实日志收集</strong> (FlowX <code>logger.Pusher</code> 桥接，<code>adapter.go</code> LogPusher)</li>
-<li>[ ] <strong>内存环形缓冲区</strong> (每个执行 1000 条)</li>
-<li>[ ] <strong>日志自动清理</strong> (按保留天数)</li>
+<li>[x] <strong>内存环形缓冲区</strong> (每个执行 1000 条，<code>internal/service/ringbuffer.go</code>；SSE 连接时回放，支持断线重连)</li>
+<li>[x] <strong>日志自动清理</strong> (按保留天数，<code>internal/service/cleanup.go</code>；<code>retention.log_days</code> 默认 30 天、<code>retention.audit_days</code> 默认 90 天，每 24h 执行)</li>
 </ul>
 <h4 id="6-安全增强">6. 安全增强</h4>
 <ul>
 <li>[x] CORS 本地来源限制</li>
 <li>[x] <strong>本地 token 认证</strong>（Bearer / cookie，2026-08-18）</li>
 <li>[x] <strong>请求限流</strong>（每 IP 100/min，突发 50；原 AI API 10/min 已随 AI 层移除而废止）</li>
-<li>[ ] <strong>参数输入验证</strong> (类型/长度/范围检查)</li>
+<li>[x] <strong>参数输入验证</strong> (类型/长度/范围检查，<code>internal/validator/node.go</code>：名称格式/长度、语言白名单、参数类型与重名、tag 长度)</li>
 <li>[ ] <strong>Docker 沙箱</strong> (只读 rootfs + 网络隔离 + 资源限制)</li>
-<li>[ ] <strong>审计日志</strong> (<code>audit_logs</code> 表)</li>
+<li>[x] <strong>审计日志</strong> (<code>audit_logs</code> 表，迁移 007；<code>AuditService</code> 可选注入，审计失败不影响主流程；<code>GET /api/v1/audit-logs</code> + <code>flowx-studio audit list</code>)</li>
 </ul>
 <h4 id="7-其他-v1-占位">7. 其他 V1 占位</h4>
 <ul>
 <li>[x] 自动打开浏览器（2026-08-18 接线：<code>auto_open_browser</code> / <code>no_open</code> / <code>--no-open</code>）</li>
 <li>[x] 单实例 PID 文件锁（<code>internal/singleton/lock.go</code>，<code>main.go</code> 中 server 启动时获取）</li>
-<li>[ ] 数据备份与恢复 API</li>
+<li>[x] 数据备份与恢复（<code>POST/GET /api/v1/backups</code> + 下载；CLI <code>backup create/list/download/restore</code>，restore 要求 server 停止且自动保留 <code>.pre-restore</code> 回滚副本）</li>
 <li>[x] 日志导出 (<code>GET /api/v1/executions/:id/logs/export?format=json|txt|markdown</code>)</li>
 <li>[x] 工作流 Mock 执行 (<code>POST /api/v1/workflows/:id/mock</code>，校验 + 展开，不真实运行)</li>
 </ul>
@@ -363,7 +372,7 @@
 <li>[x] ~~<code>flowx-studio mcp</code> stdio MCP 服务~~（2026-08-17 移除，<code>internal/mcpserver</code> 已删除，测试用例由 <code>internal/service/node_import_test.go</code> 承接）</li>
 <li>[x] <code>flowx-studio server</code> 仅启动 HTTP 服务，保留 PID 单例锁且只杀 <code>server</code> 进程</li>
 <li>[x] SQLite 启用 WAL + busy timeout（保留，支撑 CLI 高频调用下的并发读写）</li>
-<li>[ ] CLI 调用认证（如本地 token）与 server 侧请求限流</li>
+<li>[x] CLI 调用认证（本地 token，<code>auth.token</code> 文件自动解析）与 server 侧请求限流（2026-08-18 落地）</li>
 </ul>
 <hr>
 
@@ -455,6 +464,8 @@
 │   │   ├── node.go                   # node list/create/delete/import/mock
 │   │   ├── interact.go               # ask / info 终端交互命令
 │   │   ├── daemon.go                 # server start/stop/status 守护管理
+│   │   ├── audit.go                  # audit list 审计日志查询
+│   │   ├── backup.go                 # backup create/list/download/restore
 │   │   └── schema.go                 # --schema 参数 JSON Schema 输出
 │   ├── runtime/
 │   │   ├── adapter.go                # FlowX RuntimeAdapter + EventBridge + LogPusher
@@ -466,7 +477,11 @@
 │   │   ├── node_import.go            # flowx.json 节点包导入
 │   │   ├── node_import_test.go
 │   │   ├── node_list_test.go
-│   │   └── workflow.go               # 工作流执行 + ExpandWorkflowConfig 调用
+│   │   ├── workflow.go               # 工作流执行 + ExpandWorkflowConfig 调用
+│   │   ├── audit.go                  # 审计日志记录与查询
+│   │   ├── backup.go                 # SQLite 备份（VACUUM INTO）
+│   │   ├── cleanup.go                # 按保留天数自动清理日志
+│   │   └── ringbuffer.go             # 执行日志内存环形缓冲区
 │   ├── event/bus.go                  # 进程内事件总线
 │   ├── singleton/lock.go             # 单实例 PID 文件锁
 │   ├── validator/workflow.go         # 工作流 YAML 校验
@@ -515,10 +530,9 @@ web/src/pages/
 <h2 id="下一步建议按优先级">下一步建议（按优先级）</h2>
 
 <ol>
-<li><strong>🔥 高优先级</strong>：实现安全增强（参数验证、审计日志）</li>
-<li><strong>中优先级</strong>：内存环形缓冲区、日志自动清理</li>
-<li><strong>中优先级</strong>：数据备份与恢复 API</li>
-<li><strong>低优先级</strong>：Docker 沙箱、Prometheus 指标暴露</li>
+<li><strong>中优先级</strong>：Docker 沙箱（只读 rootfs + 网络隔离 + 资源限制）、受限进程回退（seccomp/cgroup）</li>
+<li><strong>中优先级</strong>：自动备份机制（启动时备份、保留最近 3 个）、健康检查详细指标</li>
+<li><strong>低优先级</strong>：Prometheus 指标暴露、前端增强（React Query / Monaco / 日志虚拟滚动）</li>
 </ol>
             </article>
         </main>

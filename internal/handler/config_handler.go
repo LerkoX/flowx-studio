@@ -2,20 +2,28 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/LerkoX/flowx-studio/internal/db"
 	"github.com/LerkoX/flowx-studio/internal/model"
+	"github.com/LerkoX/flowx-studio/internal/service"
 	"github.com/gin-gonic/gin"
 )
 
 // ConfigHandler 配置处理器
 type ConfigHandler struct {
-	db *db.DB
+	db    *db.DB
+	audit *service.AuditService
 }
 
 // NewConfigHandler 创建配置处理器
 func NewConfigHandler(database *db.DB) *ConfigHandler {
 	return &ConfigHandler{db: database}
+}
+
+// SetAudit 注入审计服务（可选）
+func (h *ConfigHandler) SetAudit(a *service.AuditService) {
+	h.audit = a
 }
 
 // RegisterRoutes 注册路由
@@ -59,6 +67,14 @@ func (h *ConfigHandler) UpdateSystemConfig(c *gin.Context) {
 			Error(c, http.StatusInternalServerError, "failed to update system config: "+err.Error())
 			return
 		}
+	}
+
+	if h.audit != nil {
+		keys := make([]string, 0, len(req))
+		for k := range req {
+			keys = append(keys, k)
+		}
+		_ = h.audit.Record("update_config", "config", "", "keys="+strings.Join(keys, ","))
 	}
 
 	Success(c, gin.H{"message": "system config updated"})

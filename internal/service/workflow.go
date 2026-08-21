@@ -25,6 +25,8 @@ type WorkflowService struct {
 	eventBus  *event.Bus
 	validator *validator.WorkflowValidator
 	nodeSvc   *NodeService
+	audit     *AuditService
+	logRing   *LogRingBuffer
 	metaMu    sync.Mutex
 	metaCache map[int64]map[string]interface{}
 }
@@ -37,10 +39,23 @@ func NewWorkflowService(database *db.DB, rt *runtime.Adapter, bus *event.Bus, no
 		eventBus:  bus,
 		validator: validator.NewWorkflowValidator(),
 		nodeSvc:   nodeSvc,
+		logRing:   NewLogRingBuffer(1000),
 		metaCache: make(map[int64]map[string]interface{}),
 	}
 	rt.OnLog(svc.handleLogEntry)
 	return svc
+}
+
+// SetAudit 注入审计服务（可选）；审计写入失败不影响主流程
+func (s *WorkflowService) SetAudit(a *AuditService) {
+	s.audit = a
+}
+
+// auditRecord 静默记录审计日志
+func (s *WorkflowService) auditRecord(action, resourceID, detail string) {
+	if s.audit != nil {
+		_ = s.audit.Record(action, "workflow", resourceID, detail)
+	}
 }
 
 // List 获取工作流列表
@@ -123,6 +138,7 @@ func (s *WorkflowService) Create(req *model.Workflow) (*model.Workflow, error) {
 	id, _ := result.LastInsertId()
 	req.ID = id
 
+	s.auditRecord("create_workflow", fmt.Sprintf("%d", id), "name="+req.Name)
 	s.eventBus.Publish(event.Event{
 		Type: "workflow.created",
 		Data: req,
@@ -148,6 +164,7 @@ func (s *WorkflowService) Update(id int64, req *model.Workflow) error {
 	}
 
 	req.ID = id
+	s.auditRecord("update_workflow", fmt.Sprintf("%d", id), "name="+req.Name)
 	s.eventBus.Publish(event.Event{
 		Type: "workflow.updated",
 		Data: req,
@@ -163,6 +180,7 @@ func (s *WorkflowService) Delete(id int64) error {
 		return fmt.Errorf("failed to delete workflow: %w", err)
 	}
 
+	s.auditRecord("delete_workflow", fmt.Sprintf("%d", id), "")
 	s.eventBus.Publish(event.Event{
 		Type: "workflow.deleted",
 		Data: map[string]int64{"id": id},
@@ -192,6 +210,7 @@ func (s *WorkflowService) Run(id int64, params map[string]interface{}, dryRun bo
 
 	execID, _ := result.LastInsertId()
 
+	s.auditRecord("run_workflow", fmt.Sprintf("%d", id), fmt.Sprintf("name=%s execution=%d", wf.Name, execID))
 	s.setExecutionMetadata(execID, "running", "manual", nil, nil, "")
 
 	go s.runWorkflow(execID, wf)
@@ -494,6 +513,11 @@ func (s *WorkflowService) GetAllExecutionLogs(executionID int64) ([]model.Execut
 	return logs, nil
 }
 
+// RecentExecutionLogs 返回执行日志内存环形缓冲区中的最近条目（SSE 重连回放用）。
+func (s *WorkflowService) RecentExecutionLogs(executionID int64) []map[string]interface{} {
+	return s.logRing.Recent(executionID)
+}
+
 // SubscribeEvents 订阅事件
 func (s *WorkflowService) SubscribeEvents() chan event.Event {
 	ch, _ := s.eventBus.Subscribe()
@@ -532,18 +556,20 @@ func (s *WorkflowService) handleLogEntry(entry logger.Entry) {
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`, execID, entry.Node, entry.Node, entry.Step, strings.ToLower(string(entry.Level)), entry.Message, entry.Output, ts)
 
+	logData := map[string]interface{}{
+		"execution_id": execID,
+		"node_id":      entry.Node,
+		"node_name":    entry.Node,
+		"step_name":    entry.Step,
+		"level":        strings.ToLower(string(entry.Level)),
+		"message":      entry.Message,
+		"output":       entry.Output,
+		"timestamp":    entry.Timestamp,
+	}
+	s.logRing.Append(execID, logData)
 	s.eventBus.Publish(event.Event{
 		Type: "execution.log",
-		Data: map[string]interface{}{
-			"execution_id": execID,
-			"node_id":      entry.Node,
-			"node_name":    entry.Node,
-			"step_name":    entry.Step,
-			"level":        strings.ToLower(string(entry.Level)),
-			"message":      entry.Message,
-			"output":       entry.Output,
-			"timestamp":    entry.Timestamp,
-		},
+		Data: logData,
 	})
 }
 
