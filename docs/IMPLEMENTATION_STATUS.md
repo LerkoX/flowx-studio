@@ -64,11 +64,11 @@
 - **日志节点过滤**：日志查看器支持按节点过滤，并提供清除过滤按钮。
 - **画布方向切换**：顶部状态面板增加横向/竖向布局切换按钮，节点和终端节点的连接点会随方向自适应。
 - **终端节点渲染**：Mermaid `stateDiagram-v2` 中的 `[*]` 不再显示为星号节点，而是渲染为圆形 `Start` / `End` 节点，并移除断线。
+- **官方 mermaid 解析器**：画布图结构解析从手写 `stateDiagram-v2` 解析器切换为官方 `mermaid` npm 库（`mermaidAPI.getDiagramFromText` + stateDb），动态 import 按需加载；新增 5 个 vitest 单测（含节点命名为 start/end 的边界用例）。
 - **移动端适配**：修复左侧 48px 空白边框；底部 Tab 栏再次点击当前 Tab 可关闭抽屉；节点添加弹窗等全屏弹窗关闭后不再因透明容器遮挡主界面。
 - **单例锁与优雅重启**：`flowx-studio server` 通过 PID 文件保证单例，HTTP 与 FlowX Runtime 均支持优雅关闭。
 
 ### 仍在完善 / V2 目标
-- 真正的 `mermaid` npm 库渲染（当前为手写 `stateDiagram-v2` 解析器）。
 - Docker 沙箱与请求限流等安全增强。
 
 ---

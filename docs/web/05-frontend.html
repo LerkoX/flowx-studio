@@ -511,6 +511,8 @@
 <ul>
 <li><strong>数据初始化</strong>：从 <code>workflowStore</code> 获取当前工作流的 YAML 配置，调用 <code>parseWorkflowGraph</code>（<code>utils/mermaidParser.ts</code>）解析：</li>
 <li>内部使用 <code>js-yaml</code> 解析 YAML，提取 <code>Graph</code> 字段中的 <code>stateDiagram-v2</code> 语法</li>
+<li>图结构解析使用<strong>官方 <code>mermaid</code> npm 库</strong>（<code>mermaidAPI.getDiagramFromText</code> + stateDb 的 <code>getStates()/getRelations()</code>），完整支持 stateDiagram-v2 语法；<code>[*]</code> 伪状态由官方解析器表示为 <code>root_start</code>/<code>root_end</code>，转换为 <code>__start__</code> / <code>__end__</code></li>
+<li>mermaid 体积较大，通过动态 <code>import()</code> 按需加载（独立 chunk，不拖慢首屏）</li>
 <li>转换为 React Flow 的 nodes/edges 格式；<code>__start__</code> / <code>__end__</code> 渲染为 <code>terminalNode</code>，其余为 <code>glowNode</code></li>
 <li>节点状态从 <code>nodeStatuses</code> 注入到每个节点的 <code>data</code> 中，运行时入参/返回从 <code>nodeRuntimeData</code> 注入</li>
 <li><strong>自动布局</strong>：使用 <code>dagre</code> 算法进行 DAG 自动布局（默认 TB 垂直方向，可切换 LR），将计算后的坐标应用到节点</li>

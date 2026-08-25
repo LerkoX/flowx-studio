@@ -1,4 +1,5 @@
 import yaml from 'js-yaml'
+import type mermaidType from 'mermaid'
 
 export interface ParsedNode {
   id: string
@@ -15,11 +16,24 @@ export interface ParsedGraph {
   edges: ParsedEdge[]
 }
 
+// mermaid 体积较大（~600KB），动态导入按需加载，避免拖慢首屏
+let mermaidInstance: typeof mermaidType | null = null
+
+async function getMermaid() {
+  if (!mermaidInstance) {
+    mermaidInstance = (await import('mermaid')).default
+    mermaidInstance.initialize({ startOnLoad: false })
+  }
+  return mermaidInstance
+}
+
 /**
  * 解析 FlowX YAML 中的 stateDiagram-v2 图定义。
  *
- * 由于环境限制无法完整引入 mermaid 渲染引擎，这里使用 mermaid 兼容的
- * stateDiagram-v2 语法解析器，提取状态和转移关系。如果解析失败，直接抛出错误。
+ * 使用官方 mermaid 解析器（getDiagramFromText + stateDb）提取状态与转移关系，
+ * 完整支持 stateDiagram-v2 语法（嵌套 state、描述、direction 等）。
+ * 渲染仍由 ReactFlow 画布完成（保留执行状态高亮等交互），此处只做结构解析。
+ * 解析失败时抛出错误。
  */
 export async function parseWorkflowGraph(yamlConfig: string): Promise<ParsedGraph> {
   const doc = yaml.load(yamlConfig) as Record<string, unknown> | undefined
@@ -35,76 +49,91 @@ export async function parseWorkflowGraph(yamlConfig: string): Promise<ParsedGrap
   return parseStateDiagram(graph)
 }
 
-function parseStateDiagram(graph: string): ParsedGraph {
-  const nodesSet = new Set<string>()
+async function parseStateDiagram(graph: string): Promise<ParsedGraph> {
+  const mermaid = await getMermaid()
+
+  const diagram = await mermaid.mermaidAPI.getDiagramFromText(graph)
+  if (diagram.type !== 'stateDiagram' && diagram.type !== 'state') {
+    throw new Error(`Graph must be a stateDiagram-v2, got: ${diagram.type}`)
+  }
+
+  // stateDiagram 的 db 提供 getStates()/getRelations()
+  const db = diagram.db as {
+    getStates(): Map<string, { id: string; type?: string; descriptions?: string[] }>
+    getRelations(): Array<{ id1: string; id2: string }>
+  }
+
+  const states = db.getStates()
+  const relations = db.getRelations()
+
+  const nodesMap = new Map<string, ParsedNode>()
   const edges: ParsedEdge[] = []
-  let startNode: string | null = null
-  let endNode: string | null = null
 
-  const lines = graph
-    .split('\n')
-    .map((line) => line.split('%%')[0].trim())
-    .filter(Boolean)
+  // 注册普通状态节点；mermaid 官方解析器将 [*] 起止伪状态表示为
+  // id 形如 root_start / root_end 的节点（type 为 default）。
+  // 注意只匹配 root_ 前缀，节点本身可以合法命名为 start/end
+  const startIds: string[] = []
+  const endIds: string[] = []
+  for (const [id, stmt] of states) {
+    if (/(^|_)root_start\d*$/.test(id)) {
+      startIds.push(id)
+      continue
+    }
+    if (/(^|_)root_end\d*$/.test(id)) {
+      endIds.push(id)
+      continue
+    }
+    const label = stmt.descriptions?.[0] || id
+    nodesMap.set(id, { id, label })
+  }
 
-  for (const line of lines) {
-    if (line.includes('-->')) {
-      const [rawSource, rawTargetAndRest] = line.split('-->')
-      if (!rawSource || !rawTargetAndRest) continue
+  const isStart = (id: string) => startIds.includes(id)
+  const isEnd = (id: string) => endIds.includes(id)
+  let hasStartEdge = false
+  let hasEndEdge = false
 
-      const source = cleanState(rawSource)
-      const target = cleanState(rawTargetAndRest.split(':')[0])
-      if (!source || !target) continue
+  for (const rel of relations) {
+    const { id1, id2 } = rel
+    if (isStart(id1) && isStart(id2)) continue
+    if (isEnd(id1) && isEnd(id2)) continue
 
-      if (source === '*' && target !== '*') {
-        startNode = target
-        continue
+    if (isStart(id1)) {
+      // [*] --> X  ⇒  __start__ --> X
+      if (nodesMap.has(id2)) {
+        hasStartEdge = true
+        edges.push({ source: '__start__', target: id2 })
       }
-      if (target === '*' && source !== '*') {
-        endNode = source
-        continue
+      continue
+    }
+    if (isEnd(id2)) {
+      // X --> [*]  ⇒  X --> __end__
+      if (nodesMap.has(id1)) {
+        hasEndEdge = true
+        edges.push({ source: id1, target: '__end__' })
       }
-      if (source === '*' || target === '*') {
-        continue
-      }
-
-      nodesSet.add(source)
-      nodesSet.add(target)
-      edges.push({ source, target })
-    } else if (line.startsWith('state ')) {
-      const declared = line.replace('state ', '').split('{')[0].trim()
-      const id = cleanState(declared)
-      if (id && id !== '*') {
-        nodesSet.add(id)
-      }
-    } else {
-      const simple = line.match(/^\[?([A-Za-z0-9_][A-Za-z0-9_\s]*)\]?$/)
-      if (simple) {
-        const id = cleanState(simple[1])
-        if (id && id !== '*') {
-          nodesSet.add(id)
-        }
-      }
+      continue
+    }
+    if (nodesMap.has(id1) && nodesMap.has(id2)) {
+      edges.push({ source: id1, target: id2 })
     }
   }
 
-  const nodes: ParsedNode[] = Array.from(nodesSet).map((id) => ({ id, label: id }))
+  if (hasStartEdge) {
+    nodesMap.set('__start__', { id: '__start__', label: 'Start' })
+  }
+  if (hasEndEdge) {
+    nodesMap.set('__end__', { id: '__end__', label: 'End' })
+  }
 
-  if (startNode && nodesSet.has(startNode)) {
-    nodes.push({ id: '__start__', label: 'Start' })
-    edges.unshift({ source: '__start__', target: startNode })
+  // 起始/终止节点排在首尾，保持画布上稳定的阅读顺序
+  const nodes: ParsedNode[] = []
+  const start = nodesMap.get('__start__')
+  const end = nodesMap.get('__end__')
+  if (start) nodes.push(start)
+  for (const [id, node] of nodesMap) {
+    if (id !== '__start__' && id !== '__end__') nodes.push(node)
   }
-  if (endNode && nodesSet.has(endNode)) {
-    nodes.push({ id: '__end__', label: 'End' })
-    edges.push({ source: endNode, target: '__end__' })
-  }
+  if (end) nodes.push(end)
 
   return { nodes, edges }
-}
-
-function cleanState(raw: string): string {
-  return raw
-    .trim()
-    .replace(/^\[\*\]$/, '*')
-    .replace(/^\[|\]$/g, '')
-    .trim()
 }

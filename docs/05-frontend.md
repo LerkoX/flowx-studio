@@ -352,6 +352,8 @@ Mermaid `stateDiagram-v2` 中的 `[*]` 渲染为圆形 Start / End 节点（`com
 
 - **数据初始化**：从 `workflowStore` 获取当前工作流的 YAML 配置，调用 `parseWorkflowGraph`（`utils/mermaidParser.ts`）解析：
   - 内部使用 `js-yaml` 解析 YAML，提取 `Graph` 字段中的 `stateDiagram-v2` 语法
+  - 图结构解析使用**官方 `mermaid` npm 库**（`mermaidAPI.getDiagramFromText` + stateDb 的 `getStates()/getRelations()`），完整支持 stateDiagram-v2 语法；`[*]` 伪状态由官方解析器表示为 `root_start`/`root_end`，转换为 `__start__` / `__end__`
+  - mermaid 体积较大，通过动态 `import()` 按需加载（独立 chunk，不拖慢首屏）
   - 转换为 React Flow 的 nodes/edges 格式；`__start__` / `__end__` 渲染为 `terminalNode`，其余为 `glowNode`
   - 节点状态从 `nodeStatuses` 注入到每个节点的 `data` 中，运行时入参/返回从 `nodeRuntimeData` 注入
 - **自动布局**：使用 `dagre` 算法进行 DAG 自动布局（默认 TB 垂直方向，可切换 LR），将计算后的坐标应用到节点
