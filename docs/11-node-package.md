@@ -26,6 +26,7 @@
 3. **可映射到现有模型**：导入后可直接生成 `model.Node`（`internal/model/model.go:71-111`）
 4. **可展开到 FlowX 核心**：运行时能把节点包展开为 `flowx/core.NodeConfig`（`flowx/core/config.go:113-124`）
 5. **参数注入统一**：优先使用环境变量，兼容命令行模板
+6. **不感知 pipeline 实例**：节点包模板只引用 `{{ Param.* }}`，不引用 pipeline 中的节点实例 ID；上游数据通过参数声明（可附 `source` 推荐来源）+ pipeline 层 `config.params` 接线传入（见 [11.7 节](#117-参数注入规则)）
 
 ## 11.3 文件布局
 
@@ -75,8 +76,13 @@ image-downloader/
     {
       "name": "url",
       "type": "string",
-      "description": "图片 URL",
-      "required": true
+      "description": "图片 URL，支持 http/https 直链",
+      "required": true,
+      "source": {
+        "nodeRef": "resolve-url",
+        "output": "url",
+        "description": "推荐由链接解析节点的 url 输出提供"
+      }
     },
     {
       "name": "timeout",
@@ -124,7 +130,7 @@ image-downloader/
 | `executor.type` | string | 否 | 执行器类型：`local` / `docker` / `k8s`；默认根据 `image` 推断 |
 | `executor.config` | object | 否 | 执行器配置，透传给 FlowX 执行器（`flowx/executor/local/adapter.go:23-32`、`flowx/executor/docker/adapter.go:23-32`） |
 | `requirements` | string[] | 否 | 依赖列表；若不填，可尝试读取 `requirements.txt` |
-| `parameters` | Parameter[] | 是 | 参数定义 |
+| `parameters` | Parameter[] | 是 | 参数定义（`description` 应详细描述所需数据；可用 `source` 标注推荐来源节点包 + 输出字段） |
 | `env` | map<string, string> | 否 | 参数 → 环境变量映射，值支持模板表达式 |
 | `run` | string | 否 | 执行命令模板；不填则按 `language + entry` 生成默认命令 |
 | `outputs` | Output[] | 否 | 输出字段声明 |
@@ -138,17 +144,35 @@ image-downloader/
 {
   "name": "url",
   "type": "string",
-  "description": "图片 URL",
+  "description": "图片 URL，支持 http/https 直链",
   "required": true,
-  "default": "https://example.com/default.jpg"
+  "default": "https://example.com/default.jpg",
+  "source": {
+    "nodeRef": "resolve-url",
+    "output": "url",
+    "description": "推荐由链接解析节点的 url 输出提供"
+  }
 }
 ```
 
 - `name`：参数名，唯一
 - `type`：`string` / `integer` / `float` / `boolean` / `array` / `object`
-- `description`：描述
+- `description`：**应详细描述参数需要的数据**（格式、取值范围、单位等），这是 pipeline 编排时接线的依据
 - `required`：是否必填
 - `default`：默认值
+- `source`（可选）：推荐数据来源，见下
+
+##### ParamSource（推荐数据来源）
+
+节点包**不允许**在模板中引用上游节点实例 ID（见 [11.7 节](#117-参数注入规则)）。为了让外部数据以参数形式接入，参数可声明 `source` 提示编排者（人或 AI）该参数推荐由哪个节点的哪个输出提供：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `source.nodeRef` | string | 是 | 推荐来源**节点包名**（如 `get-weather`），不是 pipeline 中的节点实例 ID |
+| `source.output` | string | 是 | 推荐来源节点的输出字段名（如 `city`） |
+| `source.description` | string | 否 | 补充说明 |
+
+`source` 只是接线建议，不产生任何运行时行为；真正的接线发生在 pipeline YAML 的 `config.params` 中（见 [11.7 规则 5](#规则-5pipeline-层接线configparams)）。
 
 #### Output
 
@@ -280,7 +304,7 @@ DownloadImage:
 
 展开规则：
 
-1. 生成 `export` 环境变量注入行（见 [11.7 节](#117-参数注入规则)）
+1. 生成 `export` 环境变量注入行（见 [11.7 节](#117-参数注入规则)）；若 pipeline YAML 的节点 `config.params` 提供了绑定，先将 env/run 中的 `Param.<name>` 引用替换为绑定值（保留过滤器）
 2. 追加 `run` 命令；若未指定 `run`，则按 `language + entry` 生成默认命令
 3. 将 `entry` 和 `files` 写入执行器工作目录
 4. 透传 `image` 和 `executor.config`
@@ -291,6 +315,13 @@ DownloadImage:
 ## 11.7 参数注入规则
 
 参数注入优先使用 `env`，其次使用 `run` 模板，最后回退到默认 `FLOWX_PARAM_*` 环境变量。
+
+**核心约束：flowx.json 中的 `env`/`run` 模板只允许引用 `{{ Param.* }}` 或常量字面量，禁止引用上游节点实例 ID**（如 `{{ GetWeather.city }}`）。原因：
+
+- 同一节点包（如 `get-weather`）在一条 pipeline 中可能存在多个实例，实例 ID 由 pipeline YAML 的 `Nodes` map 键决定，节点包无法预知
+- 实例 ID 可能随 pipeline 编辑而变化，节点包对其硬编码会造成脆性耦合
+
+外部数据一律通过参数传入：节点包在 `parameters` 中声明所需数据（`description` 详细描述数据要求，可选 `source` 标注推荐来源节点），由 pipeline YAML 完成实际接线（规则 5）。
 
 ### 规则 1：env 优先
 
@@ -310,15 +341,16 @@ export URL="<求值后的 Param.url>"
 export TIMEOUT="<求值后的 Param.timeout>"
 ```
 
-`env` 的值支持 FlowX 模板表达式，包括：
+`env` 的值支持的模板表达式：
 
-- `{{ Param.name }}`：工作流参数
-- `{{ 上游节点ID.输出字段 }}`：上游节点输出。FlowX 会将 metadata 中 `NodeID.key` 格式的键转换为嵌套 map 注入模板上下文（`flowx/dag/eval_context.go:94-115`），因此直接以节点 ID 作为顶层变量访问，例如 `{{ DownloadImage.file_path }}`；**不存在** `{{ Metadata.UpNode.field }}` 语法
-- 常量字符串
+- `{{ Param.name }}`：节点参数（**唯一允许的变量来源**），可接过滤器，如 `{{ Param.forecasts | toYaml }}`
+- 常量字符串 / 数字 / 布尔字面量
+
+**不允许**：`{{ GetWeather.city }}` 等任何节点实例 ID 引用（导入校验会报错）。也不存在 `{{ Metadata.UpNode.field }}` 语法。
 
 ### 规则 2：run 模板
 
-如果定义了 `run`，则追加在 env 注入之后。`run` 中也支持 `{{ Param.name }}` 模板。
+如果定义了 `run`，则追加在 env 注入之后。`run` 中同样只允许 `{{ Param.name }}` 模板。
 
 示例：
 
@@ -347,6 +379,36 @@ export FLOWX_PARAM_TIMEOUT="<值>"
 | `go` | `go run <entry>` |
 | `bash` | `bash <entry>` |
 | `node` | `node <entry>` |
+
+### 规则 5：pipeline 层接线（config.params）
+
+节点包只面向 `Param` 编程，上游节点数据在 pipeline YAML 中通过节点 `config.params` 绑定：
+
+```yaml
+Nodes:
+  GetWeather:                 # 节点实例 ID，pipeline 作者自定义
+    name: 获取天气
+    config:
+      nodeRef: get-weather    # 引用节点包
+      params:
+        city: 深圳             # 常量绑定
+  SendFeishu:
+    name: 发送飞书通知
+    config:
+      nodeRef: send-feishu
+      params:
+        weatherCity: "{{ GetWeather.city }}"          # 引用本 pipeline 中的实例 ID
+        weatherForecasts: "{{ GetWeather.forecasts }}"
+```
+
+展开规则（`internal/runtime/node_expander.go` 的 `applyParamBindings`）：
+
+1. 绑定值是模板（`{{ GetWeather.city }}`）时，取其内部表达式替换 env/run 中的 `Param.<name>` 引用，**保留后续过滤器**：`{{ Param.weatherForecasts | toYaml }}` → `{{ GetWeather.forecasts | toYaml }}`；替换后的模板在节点执行时以完整上下文渲染，上游输出正常解析
+2. 绑定值是常量时，替换为字符串字面量：`{{ Param.title }}` → `{{ "每日播报" }}`
+3. 未在 `config.params` 中绑定的参数保留 `{{ Param.<name> }}` 引用，运行时由 pipeline 级 `Param` / `pipeline run --params` 解析
+4. 绑定未声明的参数名会在展开时报错（`config.params references undeclared parameter ...`）
+
+编排者（人或 AI）可依据参数上的 `source` 提示（`nodeRef` 节点包名 + `output` 输出字段）找到 pipeline 中对应节点包的实例，生成上述 `params` 绑定。
 
 ## 11.8 Mock 测试
 
@@ -397,10 +459,11 @@ Mock 测试入口 API 仍使用 `POST /api/v1/nodes/:id/mock`。
 2. `language` 必填且在支持列表内（`python` / `go` / `bash` / `node` 等）
 3. `entry` 必填且文件存在
 4. `files` 中列出的文件必须存在
-5. `parameters` 中 `name` 唯一，`type` 合法
-6. ~~如果 `image` 为空且 `executor.type` 为 `docker`，导入失败~~（**未在代码中实现**：`node_import.go` 仅校验 `executor.type` 类型名合法性，不检查 `image` 是否配置）
-7. `mock.entry` 若存在，文件必须存在
-8. 节点名称唯一（数据库唯一约束）
+5. `parameters` 中 `name` 唯一，`type` 合法；`source` 若存在，`source.nodeRef` 必须为合法节点包名（正则同上）且 `source.output` 非空
+6. `env` 和 `run` 中的 `{{ ... }}` 模板表达式只允许引用 `{{ Param.* }}` 或字面量，禁止引用节点实例 ID（如 `{{ GetWeather.city }}`），违反时导入失败并提示改用参数 + `config.params` 接线
+7. ~~如果 `image` 为空且 `executor.type` 为 `docker`，导入失败~~（**未在代码中实现**：`node_import.go` 仅校验 `executor.type` 类型名合法性，不检查 `image` 是否配置）
+8. `mock.entry` 若存在，文件必须存在
+9. 节点名称唯一（数据库唯一约束）
 
 ## 11.12 实现任务（已全部完成 ✅）
 

@@ -45,6 +45,7 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 - 退出码：`0` 成功；`1` 业务/校验失败（stderr 含错误详情与重试指引，修正后重试同一命令）；`2` 用法错误。
 - YAML 校验失败时按 stderr 的错误详情修正 YAML 后重试（错误文本即重试指令）。
 - 生成 FlowX YAML 时优先用 `config.nodeRef` 引用 `node list` 查到的已有节点，不要内联节点代码。
+- 节点间传参：flowx.json 模板只允许 `{{ Param.* }}`；上游节点数据在 pipeline YAML 节点 `config.params` 中绑定（如 `weatherCity: "{{ GetWeather.city }}"`，实例 ID 用本 YAML `Nodes` 的键）。节点参数上的 `source` 字段标注了推荐来源节点包和输出字段，可依此接线；未绑定的参数回退到 pipeline 级 `Param`。详见 `docs/11-node-package.md` 11.7 节。
 - YAML 要求：`Name` 非空；`Nodes` 为非空 map；`Graph` 以 `stateDiagram-v2` 开头且至少一条迁移（支持 `[*]` 起止节点）；节点声明的 `executor` 必须在 `Executors` 中定义。
 - `ask` 的回答从 stdout 以 `key=value` 形式输出；`info` 为纯终端卡片，两者都不访问 server。
 - `pipeline update` 省略的字段会保留原值（CLI 自动合并）。

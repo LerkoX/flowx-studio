@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/LerkoX/flowx-studio/internal/model"
@@ -102,13 +103,17 @@ func (s *NodeImportService) importFromPath(dir, sourceType, sourceURL, sourcePat
 	return created, nil
 }
 
+// packageNamePattern 节点包名规则：字母开头，支持 snake_case 或 kebab-case
+var packageNamePattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
+
+// templateExprPattern 提取 {{ ... }} 模板表达式
+var templateExprPattern = regexp.MustCompile(`\{\{-?\s*(.*?)\s*-?\}\}`)
 func (s *NodeImportService) validatePackage(dir string, pkg *model.NodePackage) error {
 	if strings.TrimSpace(pkg.Name) == "" {
 		return fmt.Errorf("name is required")
 	}
 
-	validName := regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
-	if !validName.MatchString(pkg.Name) {
+	if !packageNamePattern.MatchString(pkg.Name) {
 		return fmt.Errorf("name must be snake_case or kebab-case and start with a letter")
 	}
 
@@ -149,6 +154,22 @@ func (s *NodeImportService) validatePackage(dir string, pkg *model.NodePackage) 
 		if !isValidParamType(param.Type) {
 			return fmt.Errorf("invalid parameter type %s for %s", param.Type, param.Name)
 		}
+
+		if param.Source != nil {
+			if err := validateParamSource(param.Name, param.Source); err != nil {
+				return err
+			}
+		}
+	}
+
+	// env/run 模板只允许引用 {{ Param.* }} 或常量，禁止直接引用流水线节点实例 ID
+	for key, tmpl := range pkg.Env {
+		if err := validateParamOnlyTemplate(fmt.Sprintf("env.%s", key), tmpl); err != nil {
+			return err
+		}
+	}
+	if err := validateParamOnlyTemplate("run", pkg.Run); err != nil {
+		return err
 	}
 
 	if pkg.Executor.Type != "" {
@@ -181,6 +202,62 @@ func isValidExecutorType(t string) bool {
 		return true
 	}
 	return false
+}
+
+// validateParamSource 校验参数的推荐数据来源
+func validateParamSource(paramName string, src *model.ParamSource) error {
+	if strings.TrimSpace(src.NodeRef) == "" {
+		return fmt.Errorf("parameter %s: source.nodeRef is required when source is set", paramName)
+	}
+	if !packageNamePattern.MatchString(src.NodeRef) {
+		return fmt.Errorf("parameter %s: source.nodeRef must be a node package name (snake_case or kebab-case, start with a letter)", paramName)
+	}
+	if strings.TrimSpace(src.Output) == "" {
+		return fmt.Errorf("parameter %s: source.output is required when source is set", paramName)
+	}
+	return nil
+}
+
+// validateParamOnlyTemplate 校验模板只引用 {{ Param.* }} 或常量字面量。
+// 节点包（flowx.json）不允许引用流水线中的节点实例 ID（如 {{ GetWeather.city }}），
+// 因为实例 ID 由 pipeline YAML 决定且可能变化/存在多个实例。外部数据一律通过参数传入，
+// 并在 pipeline YAML 的 config.params 中完成实际接线。
+func validateParamOnlyTemplate(field, value string) error {
+	for _, m := range templateExprPattern.FindAllStringSubmatch(value, -1) {
+		expr := strings.TrimSpace(m[1])
+		if expr == "" {
+			return fmt.Errorf("%s contains an empty template expression", field)
+		}
+		if isTemplateLiteral(expr) {
+			continue
+		}
+		root := expr
+		if i := strings.IndexAny(root, ". |("); i >= 0 {
+			root = root[:i]
+		}
+		if root != "Param" {
+			return fmt.Errorf(
+				"%s references %q: flowx.json templates may only reference {{ Param.<name> }} or literals, "+
+					"pipeline node instance IDs are not allowed; declare a parameter (optionally with a 'source' hint) "+
+					"and wire it in the pipeline YAML via config.params",
+				field, root)
+		}
+	}
+	return nil
+}
+
+// isTemplateLiteral 判断模板表达式是否为字面量（引号字符串/数字/布尔）
+func isTemplateLiteral(expr string) bool {
+	if len(expr) >= 2 {
+		if (expr[0] == '"' && expr[len(expr)-1] == '"') ||
+			(expr[0] == '\'' && expr[len(expr)-1] == '\'') {
+			return true
+		}
+	}
+	if _, err := strconv.ParseFloat(expr, 64); err == nil {
+		return true
+	}
+	return expr == "true" || expr == "false"
 }
 
 func (s *NodeImportService) buildNode(dir string, pkg *model.NodePackage, sourceType, sourceURL, sourcePath string) (*model.Node, error) {

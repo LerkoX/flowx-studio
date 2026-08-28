@@ -2,13 +2,23 @@ package model
 
 import "time"
 
+// ParamSource 参数数据来源建议
+// 指向推荐的上游节点包（nodeRef 为节点包名，非流水线中的节点实例 ID）及其输出字段，
+// 供 pipeline 编排者（人或 AI）在 pipeline YAML 中完成实际接线。
+type ParamSource struct {
+	NodeRef     string `json:"nodeRef" db:"node_ref"`
+	Output      string `json:"output" db:"output"`
+	Description string `json:"description,omitempty" db:"description"`
+}
+
 // NodeParameter 节点参数定义
 type NodeParameter struct {
-	Name        string      `json:"name" db:"name"`
-	Type        string      `json:"type" db:"type"`
-	Description string      `json:"description" db:"description"`
-	Required    bool        `json:"required" db:"required"`
-	Default     interface{} `json:"default,omitempty" db:"default"`
+	Name        string       `json:"name" db:"name"`
+	Type        string       `json:"type" db:"type"`
+	Description string       `json:"description" db:"description"`
+	Required    bool         `json:"required" db:"required"`
+	Default     interface{}  `json:"default,omitempty" db:"default"`
+	Source      *ParamSource `json:"source,omitempty" db:"source"`
 }
 
 // NodeOutput 节点输出定义

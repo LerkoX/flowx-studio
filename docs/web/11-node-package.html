@@ -91,6 +91,7 @@
 <li><strong>可映射到现有模型</strong>：导入后可直接生成 <code>model.Node</code>（<code>internal/model/model.go:71-111</code>）</li>
 <li><strong>可展开到 FlowX 核心</strong>：运行时能把节点包展开为 <code>flowx/core.NodeConfig</code>（<code>flowx/core/config.go:113-124</code>）</li>
 <li><strong>参数注入统一</strong>：优先使用环境变量，兼容命令行模板</li>
+<li><strong>不感知 pipeline 实例</strong>：节点包模板只引用 <code>{{ Param.* }}</code>，不引用 pipeline 中的节点实例 ID；上游数据通过参数声明（可附 <code>source</code> 推荐来源）+ pipeline 层 <code>config.params</code> 接线传入（见 <a href="#117-参数注入规则" target="_blank">11.7 节</a>）</li>
 </ol>
 <h2 id="113-文件布局">11.3 文件布局</h2>
 
@@ -138,8 +139,13 @@
     {
       "name": "url",
       "type": "string",
-      "description": "图片 URL",
-      "required": true
+      "description": "图片 URL，支持 http/https 直链",
+      "required": true,
+      "source": {
+        "nodeRef": "resolve-url",
+        "output": "url",
+        "description": "推荐由链接解析节点的 url 输出提供"
+      }
     },
     {
       "name": "timeout",
@@ -268,7 +274,7 @@
 <td><code>parameters</code></td>
 <td>Parameter[]</td>
 <td>是</td>
-<td>参数定义</td>
+<td>参数定义（<code>description</code> 应详细描述所需数据；可用 <code>source</code> 标注推荐来源节点包 + 输出字段）</td>
 </tr>
 <tr>
 <td><code>env</code></td>
@@ -314,18 +320,61 @@
 <pre><code class="language-json">{
   "name": "url",
   "type": "string",
-  "description": "图片 URL",
+  "description": "图片 URL，支持 http/https 直链",
   "required": true,
-  "default": "https://example.com/default.jpg"
+  "default": "https://example.com/default.jpg",
+  "source": {
+    "nodeRef": "resolve-url",
+    "output": "url",
+    "description": "推荐由链接解析节点的 url 输出提供"
+  }
 }</code></pre>
 
 <ul>
 <li><code>name</code>：参数名，唯一</li>
 <li><code>type</code>：<code>string</code> / <code>integer</code> / <code>float</code> / <code>boolean</code> / <code>array</code> / <code>object</code></li>
-<li><code>description</code>：描述</li>
+<li><code>description</code>：<strong>应详细描述参数需要的数据</strong>（格式、取值范围、单位等），这是 pipeline 编排时接线的依据</li>
 <li><code>required</code>：是否必填</li>
 <li><code>default</code>：默认值</li>
+<li><code>source</code>（可选）：推荐数据来源，见下</li>
 </ul>
+<h5 id="paramsource推荐数据来源">ParamSource（推荐数据来源）</h5>
+
+<p>节点包<strong>不允许</strong>在模板中引用上游节点实例 ID（见 <a href="#117-参数注入规则" target="_blank">11.7 节</a>）。为了让外部数据以参数形式接入，参数可声明 <code>source</code> 提示编排者（人或 AI）该参数推荐由哪个节点的哪个输出提供：</p>
+
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>类型</th>
+<th>必填</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>source.nodeRef</code></td>
+<td>string</td>
+<td>是</td>
+<td>推荐来源<strong>节点包名</strong>（如 <code>get-weather</code>），不是 pipeline 中的节点实例 ID</td>
+</tr>
+<tr>
+<td><code>source.output</code></td>
+<td>string</td>
+<td>是</td>
+<td>推荐来源节点的输出字段名（如 <code>city</code>）</td>
+</tr>
+<tr>
+<td><code>source.description</code></td>
+<td>string</td>
+<td>否</td>
+<td>补充说明</td>
+</tr>
+</tbody>
+</table>
+
+<p><code>source</code> 只是接线建议，不产生任何运行时行为；真正的接线发生在 pipeline YAML 的 <code>config.params</code> 中（见 <a href="#规则-5pipeline-层接线configparams" target="_blank">11.7 规则 5</a>）。</p>
+
 <h4 id="output">Output</h4>
 
 <pre><code class="language-json">{
@@ -525,7 +574,7 @@ Content-Type: application/json
 <p>展开规则：</p>
 
 <ol>
-<li>生成 <code>export</code> 环境变量注入行（见 <a href="#117-参数注入规则" target="_blank">11.7 节</a>）</li>
+<li>生成 <code>export</code> 环境变量注入行（见 <a href="#117-参数注入规则" target="_blank">11.7 节</a>）；若 pipeline YAML 的节点 <code>config.params</code> 提供了绑定，先将 env/run 中的 <code>Param.&lt;name&gt;</code> 引用替换为绑定值（保留过滤器）</li>
 <li>追加 <code>run</code> 命令；若未指定 <code>run</code>，则按 <code>language + entry</code> 生成默认命令</li>
 <li>将 <code>entry</code> 和 <code>files</code> 写入执行器工作目录</li>
 <li>透传 <code>image</code> 和 <code>executor.config</code></li>
@@ -536,6 +585,14 @@ Content-Type: application/json
 <h2 id="117-参数注入规则">11.7 参数注入规则</h2>
 
 <p>参数注入优先使用 <code>env</code>，其次使用 <code>run</code> 模板，最后回退到默认 <code>FLOWX_PARAM_*</code> 环境变量。</p>
+
+<p>*<em>核心约束：flowx.json 中的 <code>env</code>/<code>run</code> 模板只允许引用 <code>{{ Param.</em> }}</code> 或常量字面量，禁止引用上游节点实例 ID**（如 <code>{{ GetWeather.city }}</code>）。原因：</p>
+
+<ul>
+<li>同一节点包（如 <code>get-weather</code>）在一条 pipeline 中可能存在多个实例，实例 ID 由 pipeline YAML 的 <code>Nodes</code> map 键决定，节点包无法预知</li>
+<li>实例 ID 可能随 pipeline 编辑而变化，节点包对其硬编码会造成脆性耦合</li>
+</ul>
+<p>外部数据一律通过参数传入：节点包在 <code>parameters</code> 中声明所需数据（<code>description</code> 详细描述数据要求，可选 <code>source</code> 标注推荐来源节点），由 pipeline YAML 完成实际接线（规则 5）。</p>
 
 <h3 id="规则-1env-优先">规则 1：env 优先</h3>
 
@@ -551,16 +608,17 @@ Content-Type: application/json
 <pre><code class="language-bash">export URL="&lt;求值后的 Param.url&gt;"
 export TIMEOUT="&lt;求值后的 Param.timeout&gt;"</code></pre>
 
-<p><code>env</code> 的值支持 FlowX 模板表达式，包括：</p>
+<p><code>env</code> 的值支持的模板表达式：</p>
 
 <ul>
-<li><code>{{ Param.name }}</code>：工作流参数</li>
-<li><code>{{ 上游节点ID.输出字段 }}</code>：上游节点输出。FlowX 会将 metadata 中 <code>NodeID.key</code> 格式的键转换为嵌套 map 注入模板上下文（<code>flowx/dag/eval_context.go:94-115</code>），因此直接以节点 ID 作为顶层变量访问，例如 <code>{{ DownloadImage.file_path }}</code>；<strong>不存在</strong> <code>{{ Metadata.UpNode.field }}</code> 语法</li>
-<li>常量字符串</li>
+<li><code>{{ Param.name }}</code>：节点参数（<strong>唯一允许的变量来源</strong>），可接过滤器，如 <code>{{ Param.forecasts | toYaml }}</code></li>
+<li>常量字符串 / 数字 / 布尔字面量</li>
 </ul>
+<p><strong>不允许</strong>：<code>{{ GetWeather.city }}</code> 等任何节点实例 ID 引用（导入校验会报错）。也不存在 <code>{{ Metadata.UpNode.field }}</code> 语法。</p>
+
 <h3 id="规则-2run-模板">规则 2：run 模板</h3>
 
-<p>如果定义了 <code>run</code>，则追加在 env 注入之后。<code>run</code> 中也支持 <code>{{ Param.name }}</code> 模板。</p>
+<p>如果定义了 <code>run</code>，则追加在 env 注入之后。<code>run</code> 中同样只允许 <code>{{ Param.name }}</code> 模板。</p>
 
 <p>示例：</p>
 
@@ -605,6 +663,35 @@ export FLOWX_PARAM_TIMEOUT="&lt;值&gt;"</code></pre>
 </tr>
 </tbody>
 </table>
+
+<h3 id="规则-5pipeline-层接线configparams">规则 5：pipeline 层接线（config.params）</h3>
+
+<p>节点包只面向 <code>Param</code> 编程，上游节点数据在 pipeline YAML 中通过节点 <code>config.params</code> 绑定：</p>
+
+<pre><code class="language-yaml">Nodes:
+  GetWeather:                 # 节点实例 ID，pipeline 作者自定义
+    name: 获取天气
+    config:
+      nodeRef: get-weather    # 引用节点包
+      params:
+        city: 深圳             # 常量绑定
+  SendFeishu:
+    name: 发送飞书通知
+    config:
+      nodeRef: send-feishu
+      params:
+        weatherCity: "{{ GetWeather.city }}"          # 引用本 pipeline 中的实例 ID
+        weatherForecasts: "{{ GetWeather.forecasts }}"</code></pre>
+
+<p>展开规则（<code>internal/runtime/node_expander.go</code> 的 <code>applyParamBindings</code>）：</p>
+
+<ol>
+<li>绑定值是模板（<code>{{ GetWeather.city }}</code>）时，取其内部表达式替换 env/run 中的 <code>Param.&lt;name&gt;</code> 引用，<strong>保留后续过滤器</strong>：<code>{{ Param.weatherForecasts | toYaml }}</code> → <code>{{ GetWeather.forecasts | toYaml }}</code>；替换后的模板在节点执行时以完整上下文渲染，上游输出正常解析</li>
+<li>绑定值是常量时，替换为字符串字面量：<code>{{ Param.title }}</code> → <code>{{ "每日播报" }}</code></li>
+<li>未在 <code>config.params</code> 中绑定的参数保留 <code>{{ Param.&lt;name&gt; }}</code> 引用，运行时由 pipeline 级 <code>Param</code> / <code>pipeline run --params</code> 解析</li>
+<li>绑定未声明的参数名会在展开时报错（<code>config.params references undeclared parameter ...</code>）</li>
+</ol>
+<p>编排者（人或 AI）可依据参数上的 <code>source</code> 提示（<code>nodeRef</code> 节点包名 + <code>output</code> 输出字段）找到 pipeline 中对应节点包的实例，生成上述 <code>params</code> 绑定。</p>
 
 <h2 id="118-mock-测试">11.8 Mock 测试</h2>
 
@@ -688,7 +775,8 @@ export FLOWX_PARAM_TIMEOUT="&lt;值&gt;"</code></pre>
 <li><code>language</code> 必填且在支持列表内（<code>python</code> / <code>go</code> / <code>bash</code> / <code>node</code> 等）</li>
 <li><code>entry</code> 必填且文件存在</li>
 <li><code>files</code> 中列出的文件必须存在</li>
-<li><code>parameters</code> 中 <code>name</code> 唯一，<code>type</code> 合法</li>
+<li><code>parameters</code> 中 <code>name</code> 唯一，<code>type</code> 合法；<code>source</code> 若存在，<code>source.nodeRef</code> 必须为合法节点包名（正则同上）且 <code>source.output</code> 非空</li>
+<li><code>env</code> 和 <code>run</code> 中的 <code>{{ ... }}</code> 模板表达式只允许引用 <code>{{ Param.* }}</code> 或字面量，禁止引用节点实例 ID（如 <code>{{ GetWeather.city }}</code>），违反时导入失败并提示改用参数 + <code>config.params</code> 接线</li>
 <li>~~如果 <code>image</code> 为空且 <code>executor.type</code> 为 <code>docker</code>，导入失败~~（<strong>未在代码中实现</strong>：<code>node_import.go</code> 仅校验 <code>executor.type</code> 类型名合法性，不检查 <code>image</code> 是否配置）</li>
 <li><code>mock.entry</code> 若存在，文件必须存在</li>
 <li>节点名称唯一（数据库唯一约束）</li>

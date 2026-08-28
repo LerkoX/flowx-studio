@@ -68,6 +68,17 @@ func ValidateNode(n *model.Node) error {
 		if p.Type != "" && !paramTypes[p.Type] {
 			return fmt.Errorf("parameters[%d]: unsupported type %q (string/integer/float/boolean/array/object)", i, p.Type)
 		}
+		if p.Source != nil {
+			if strings.TrimSpace(p.Source.NodeRef) == "" {
+				return fmt.Errorf("parameters[%d]: source.nodeRef is required when source is set", i)
+			}
+			if !nodeNamePattern.MatchString(p.Source.NodeRef) {
+				return fmt.Errorf("parameters[%d]: source.nodeRef must be a node package name, not a pipeline node instance ID", i)
+			}
+			if strings.TrimSpace(p.Source.Output) == "" {
+				return fmt.Errorf("parameters[%d]: source.output is required when source is set", i)
+			}
+		}
 	}
 
 	for i, t := range n.Tags {
