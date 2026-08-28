@@ -235,3 +235,174 @@ func TestNodeImportService_RejectsInvalidParamSource(t *testing.T) {
 		t.Errorf("expected source.output required error, got: %v", err)
 	}
 }
+
+// ---------- UI 组件（module 模式）导入测试 ----------
+
+// writeUITestPackage 构造一个带 UI 组件 bundle 的临时节点包目录
+func writeUITestPackage(t *testing.T, flowxJSON string, widgetContent []byte) (string, func()) {
+	t.Helper()
+	tmpDir, cleanup := writeTestPackage(t, flowxJSON)
+	if widgetContent != nil {
+		if err := os.MkdirAll(filepath.Join(tmpDir, "ui"), 0755); err != nil {
+			t.Fatalf("failed to create ui dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(tmpDir, "ui", "node-widget.js"), widgetContent, 0644); err != nil {
+			t.Fatalf("failed to write widget bundle: %v", err)
+		}
+	}
+	return tmpDir, cleanup
+}
+
+func TestNodeImportService_ImportWithUI(t *testing.T) {
+	widget := `export default function mount(el, props) {
+  el.textContent = 'status: ' + props.status
+  return { update(p) { el.textContent = 'status: ' + p.status }, unmount() { el.textContent = '' } }
+}
+`
+	tmpDir, cleanup := writeUITestPackage(t, `{
+  "name": "ui-demo-node",
+  "language": "python",
+  "entry": "main.py",
+  "parameters": [],
+  "ui": {
+    "entry": "ui/node-widget.js",
+    "width": 280,
+    "height": 140,
+    "collapsed": false,
+    "apiVersion": 1
+  }
+}`, []byte(widget))
+	defer cleanup()
+
+	database, err := db.New(filepath.Join(tmpDir, "test.db"))
+	if err != nil {
+		t.Fatalf("failed to open db: %v", err)
+	}
+	defer database.Close()
+
+	nodeSvc := NewNodeService(database, event.NewBus())
+	importSvc := NewNodeImportService(nodeSvc)
+
+	node, err := importSvc.ImportFromFolder(tmpDir)
+	if err != nil {
+		t.Fatalf("import failed: %v", err)
+	}
+
+	// 导入响应即携带 UI 配置
+	if node.UI == nil {
+		t.Fatal("expected node.UI to be set")
+	}
+	if node.UI.Entry != "ui/node-widget.js" || node.UI.Width != 280 || node.UI.Height != 140 {
+		t.Errorf("unexpected ui config: %+v", node.UI)
+	}
+	if node.UI.Collapsed == nil || *node.UI.Collapsed != false {
+		t.Errorf("unexpected collapsed: %+v", node.UI.Collapsed)
+	}
+	if node.Files["ui/node-widget.js"] != widget {
+		t.Errorf("widget bundle not stored in Files")
+	}
+
+	// 重新读取（走 scanNode）后 UI 仍可用
+	got, err := nodeSvc.Get(node.ID)
+	if err != nil {
+		t.Fatalf("get node failed: %v", err)
+	}
+	if got.UI == nil || got.UI.Entry != "ui/node-widget.js" {
+		t.Errorf("expected UI from scanNode, got: %+v", got.UI)
+	}
+	if got.Files["ui/node-widget.js"] != widget {
+		t.Errorf("widget bundle not persisted")
+	}
+}
+
+func TestNodeImportService_RejectsInvalidUI(t *testing.T) {
+	cases := []struct {
+		name        string
+		flowxJSON   string
+		withWidget  bool
+		errContains string
+	}{
+		{
+			name:        "missing entry",
+			flowxJSON:   `{"name":"ui-bad-1","language":"python","entry":"main.py","parameters":[],"ui":{"width":100}}`,
+			withWidget:  true,
+			errContains: "ui.entry is required",
+		},
+		{
+			name:        "non-js entry",
+			flowxJSON:   `{"name":"ui-bad-2","language":"python","entry":"main.py","parameters":[],"ui":{"entry":"ui/node-widget.html"}}`,
+			withWidget:  true,
+			errContains: "single-file .js",
+		},
+		{
+			name:        "path traversal",
+			flowxJSON:   `{"name":"ui-bad-3","language":"python","entry":"main.py","parameters":[],"ui":{"entry":"../node-widget.js"}}`,
+			withWidget:  true,
+			errContains: "relative path",
+		},
+		{
+			name:        "entry file not found",
+			flowxJSON:   `{"name":"ui-bad-4","language":"python","entry":"main.py","parameters":[],"ui":{"entry":"ui/node-widget.js"}}`,
+			withWidget:  false,
+			errContains: "not found",
+		},
+		{
+			name:        "unsupported apiVersion",
+			flowxJSON:   `{"name":"ui-bad-5","language":"python","entry":"main.py","parameters":[],"ui":{"entry":"ui/node-widget.js","apiVersion":2}}`,
+			withWidget:  true,
+			errContains: "ui.apiVersion",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var tmpDir string
+			var cleanup func()
+			if tc.withWidget {
+				tmpDir, cleanup = writeUITestPackage(t, tc.flowxJSON, []byte("export default () => {}"))
+			} else {
+				tmpDir, cleanup = writeTestPackage(t, tc.flowxJSON)
+			}
+			defer cleanup()
+
+			database, err := db.New(filepath.Join(tmpDir, "test.db"))
+			if err != nil {
+				t.Fatalf("failed to open db: %v", err)
+			}
+			defer database.Close()
+
+			importSvc := NewNodeImportService(NewNodeService(database, event.NewBus()))
+			_, err = importSvc.ImportFromFolder(tmpDir)
+			if err == nil || !strings.Contains(err.Error(), tc.errContains) {
+				t.Errorf("expected error containing %q, got: %v", tc.errContains, err)
+			}
+		})
+	}
+}
+
+func TestNodeImportService_RejectsOversizedUI(t *testing.T) {
+	oversized := make([]byte, (10<<20)+1)
+	for i := range oversized {
+		oversized[i] = 'a'
+	}
+	tmpDir, cleanup := writeUITestPackage(t, `{
+  "name": "ui-oversized-node",
+  "language": "python",
+  "entry": "main.py",
+  "parameters": [],
+  "ui": {"entry": "ui/node-widget.js"}
+}`, oversized)
+	defer cleanup()
+
+	database, err := db.New(filepath.Join(tmpDir, "test.db"))
+	if err != nil {
+		t.Fatalf("failed to open db: %v", err)
+	}
+	defer database.Close()
+
+	importSvc := NewNodeImportService(NewNodeService(database, event.NewBus()))
+	_, err = importSvc.ImportFromFolder(tmpDir)
+	if err == nil || !strings.Contains(err.Error(), "10MB") {
+		t.Errorf("expected 10MB size limit error, got: %v", err)
+	}
+}

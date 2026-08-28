@@ -48,6 +48,13 @@ export default function NodeDetailModal({ node, isOpen, onClose }: NodeDetailMod
                   <div>
                     <h2 className="text-white/90 font-semibold">{node.displayName || node.name}</h2>
                     <p className="text-white/40 text-xs">{node.description}</p>
+                    {node.ui?.entry && (
+                      <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-full
+                                       bg-purple-500/10 text-purple-300 border border-purple-500/20 text-[10px]"
+                            title={`该节点包含自定义 UI 组件（${node.ui.entry}），组件代码将在 FlowX Studio 前端上下文中执行，请确保节点来源可信`}>
+                        自定义 UI 组件
+                      </span>
+                    )}
                   </div>
                 </div>
                 <button

@@ -18,8 +18,9 @@ import GradientEdge from '@/components/GradientEdge'
 import { autoLayout } from './AutoLayout'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { useExecutionStore } from '@/stores/executionStore'
+import { useNodeStore } from '@/stores/nodeStore'
 import { useIsMobile } from '@/hooks/useMediaQuery'
-import { parseWorkflowGraph } from '@/utils/mermaidParser'
+import { parseWorkflowGraph, parseNodeRefs } from '@/utils/mermaidParser'
 import { useEventStream } from '@/services/eventService'
 import type { ExecutionLog, ExecutionStatus } from '@/types/execution'
 import { ArrowUpDown, ArrowLeftRight } from 'lucide-react'
@@ -45,6 +46,13 @@ function WorkflowCanvasInner() {
     updateNodeStatus,
     setNodeStatuses,
   } = useWorkflowStore()
+  const { nodes: nodeDefs, loadNodes } = useNodeStore()
+
+  // 节点包列表用于按 nodeRef 匹配 ui 配置；画布页可能直接刷新进入，需确保已加载
+  useEffect(() => {
+    if (nodeDefs.length === 0) loadNodes()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // 解析 YAML Graph 并渲染工作流
   useEffect(() => {
@@ -54,22 +62,37 @@ function WorkflowCanvasInner() {
       return
     }
 
+    // 节点实例 ID → 节点包名 → 节点包定义（含 ui 配置）
+    const nodeRefs = parseNodeRefs(currentWorkflow.yamlConfig)
+    const matchNodeDef = (instanceId: string) => {
+      const ref = nodeRefs[instanceId]
+      if (!ref) return undefined
+      return nodeDefs.find((n) => n.name === ref)
+    }
+
     parseWorkflowGraph(currentWorkflow.yamlConfig)
       .then(({ nodes: parsedNodes, edges: parsedEdges }) => {
-        const rawNodes: Node[] = parsedNodes.map((n) => ({
-          id: n.id,
-          type: n.id === '__start__' || n.id === '__end__' ? 'terminalNode' : 'glowNode',
-          position: { x: 0, y: 0 },
-          data: {
+        const rawNodes: Node[] = parsedNodes.map((n) => {
+          const nodeDef = n.id === '__start__' || n.id === '__end__' ? undefined : matchNodeDef(n.id)
+          return {
             id: n.id,
-            name: n.label,
-            status: nodeStatuses[n.id] || 'idle',
-            accentColor: '#6366f1',
-            inputs: nodeRuntimeData[n.id]?.inputs,
-            outputs: nodeRuntimeData[n.id]?.outputs,
-            direction,
-          },
-        }))
+            type: n.id === '__start__' || n.id === '__end__' ? 'terminalNode' : 'glowNode',
+            position: { x: 0, y: 0 },
+            data: {
+              id: n.id,
+              name: n.label,
+              status: nodeStatuses[n.id] || 'idle',
+              accentColor: nodeDef?.ui ? '#a855f7' : '#6366f1',
+              inputs: nodeRuntimeData[n.id]?.inputs,
+              outputs: nodeRuntimeData[n.id]?.outputs,
+              direction,
+              nodeRef: nodeDef?.name,
+              nodeDbId: nodeDef?.id,
+              nodeUpdatedAt: nodeDef?.updatedAt ? String(nodeDef.updatedAt) : undefined,
+              ui: nodeDef?.ui,
+            },
+          }
+        })
 
         const rawEdges: Edge[] = parsedEdges.map((e, idx) => ({
           id: `e${idx}`,
@@ -92,7 +115,7 @@ function WorkflowCanvasInner() {
         setNodes([])
         setEdges([])
       })
-  }, [currentWorkflow, direction, setNodes, setEdges])
+  }, [currentWorkflow, direction, nodeDefs, setNodes, setEdges])
 
   // 实时同步执行状态
   useEffect(() => {

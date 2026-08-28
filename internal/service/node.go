@@ -320,6 +320,9 @@ func scanNode(scanner interface {
 	json.Unmarshal([]byte(tagsJSON), &node.Tags)
 	json.Unmarshal([]byte(filesJSON), &node.Files)
 	json.Unmarshal([]byte(pkgJSON), &node.PackageConfig)
+	if node.PackageConfig != nil && node.PackageConfig.UI != nil {
+		node.UI = node.PackageConfig.UI
+	}
 
 	return nil
 }

@@ -35,6 +35,7 @@ func (h *NodeHandler) RegisterRoutes(r *gin.RouterGroup) {
 		nodes.PUT("/:id", h.Update)
 		nodes.DELETE("/:id", h.Delete)
 		nodes.POST("/:id/mock", h.MockTest)
+		nodes.GET("/:id/ui/*filepath", h.ServeUIFile)
 	}
 }
 
@@ -204,4 +205,59 @@ func (h *NodeHandler) MockTest(c *gin.Context) {
 	}
 
 	Success(c, result)
+}
+
+// ServeUIFile 提供节点自定义 UI 组件 bundle（module 模式）。
+// 文件内容来自导入时存入 Node.Files 的 ui.entry，只允许访问已入库的文件，
+// 天然免疫路径穿越。带 ?v=<updatedAt> 查询时响应长缓存（内容随重新导入变化，
+// URL 中的 v 随之更新），否则不缓存。
+func (h *NodeHandler) ServeUIFile(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		Error(c, http.StatusBadRequest, "invalid node id")
+		return
+	}
+
+	rel := strings.TrimPrefix(c.Param("filepath"), "/")
+	if rel == "" {
+		Error(c, http.StatusNotFound, "ui file not found")
+		return
+	}
+
+	node, err := h.service.Get(id)
+	if err != nil {
+		if err.Error() == "node not found" {
+			Error(c, http.StatusNotFound, err.Error())
+			return
+		}
+		Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	content, ok := node.Files[rel]
+	if !ok {
+		Error(c, http.StatusNotFound, "ui file not found")
+		return
+	}
+
+	contentType := "application/octet-stream"
+	switch {
+	case strings.HasSuffix(rel, ".js"):
+		contentType = "text/javascript; charset=utf-8"
+	case strings.HasSuffix(rel, ".mjs"):
+		contentType = "text/javascript; charset=utf-8"
+	case strings.HasSuffix(rel, ".css"):
+		contentType = "text/css; charset=utf-8"
+	case strings.HasSuffix(rel, ".html"):
+		contentType = "text/html; charset=utf-8"
+	case strings.HasSuffix(rel, ".map"):
+		contentType = "application/json"
+	}
+
+	if c.Query("v") != "" {
+		c.Header("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		c.Header("Cache-Control", "no-cache")
+	}
+	c.Data(http.StatusOK, contentType, []byte(content))
 }

@@ -38,7 +38,9 @@ image-downloader/
 ├── main.py
 ├── utils.py
 ├── requirements.txt
-└── mock.py
+├── mock.py
+└── ui/                  # 可选：自定义 UI 组件（见 11.13 节）
+    └── node-widget.js
 ```
 
 - `flowx.json`：节点包清单（必需）
@@ -46,6 +48,7 @@ image-downloader/
 - `utils.py`：其他依赖文件（由 `files` 列出）
 - `requirements.txt`：依赖文件（可选，可被 `requirements` 字段覆盖）
 - `mock.py`：Mock 测试入口（由 `mock.entry` 指定）
+- `ui/node-widget.js`：自定义 UI 组件 bundle（可选，由 `ui.entry` 指定）
 
 ## 11.4 flowx.json Schema
 
@@ -108,6 +111,13 @@ image-downloader/
     "enabled": true,
     "entry": "mock.py"
   },
+  "ui": {
+    "entry": "ui/node-widget.js",
+    "width": 280,
+    "height": 140,
+    "collapsed": false,
+    "apiVersion": 1
+  },
   "timeout": 60
 }
 ```
@@ -136,6 +146,7 @@ image-downloader/
 | `outputs` | Output[] | 否 | 输出字段声明 |
 | `extract` | ExtractConfig | 否 | 输出提取方式：`codec-block` 或 `regex` |
 | `mock` | MockConfig | 否 | Mock 测试配置 |
+| `ui` | UIConfig | 否 | 节点自定义 UI 组件（module 模式），见 [11.13 节](#1113-节点自定义-ui-组件module-模式) |
 | `timeout` | int | 否 | 默认超时秒数 |
 
 #### Parameter
@@ -212,6 +223,25 @@ image-downloader/
 }
 ```
 
+#### UIConfig
+
+```json
+{
+  "entry": "ui/node-widget.js",
+  "width": 280,
+  "height": 140,
+  "collapsed": false,
+  "apiVersion": 1
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `ui.entry` | string | 是 | 组件 bundle 文件（包内相对路径的单文件 `.js`），导入时随节点入库 |
+| `ui.width` / `ui.height` | int | 否 | 内嵌区域尺寸（px），供画布布局占位，默认 260×120 |
+| `ui.collapsed` | bool | 否 | 移动端是否默认收起，缺省视为 true |
+| `ui.apiVersion` | int | 否 | 组件契约版本，当前固定为 1 |
+
 ## 11.5 导入流程
 
 ```mermaid
@@ -236,8 +266,9 @@ flowchart TD
 6. 读取 `files` 列表 → `Node.Files`（新增 JSON 字段）
 7. 若 `requirements` 为空且存在 `requirements.txt`，读取其内容
 8. 若 `mock.enabled` 为真，读取 `mock.entry` 内容 → `MockConfig`
-9. 生成 `model.Node` 并调用 `NodeService.Create`
-10. 清理临时目录
+9. 若声明了 `ui.entry`，校验并读取组件 bundle 内容存入 `Files`（见 [11.13 节](#1113-节点自定义-ui-组件module-模式)）
+10. 生成 `model.Node` 并调用 `NodeService.Create`
+11. 清理临时目录
 
 新增 API 接口：
 
@@ -249,6 +280,12 @@ Content-Type: application/json
   "source_type": "git",
   "source_url": "https://github.com/xxx/image-downloader.git"
 }
+```
+
+节点 UI 组件 bundle 静态服务（见 [11.13 节](#1113-节点自定义-ui-组件module-模式)）：
+
+```http
+GET /api/v1/nodes/:id/ui/*filepath
 ```
 
 ## 11.6 字段映射
@@ -275,6 +312,8 @@ Content-Type: application/json
 | `parameters` | `Parameters` |
 | `outputs` | `Outputs` |
 | `mock` | `MockConfig` |
+| `ui` | `PackageConfig.UI`（原样保存；`Node.UI` 透出给 API） |
+| `ui.entry` 文件内容 | `Files`（以 ui.entry 路径为 key） |
 | `source_type` | `SourceType` |
 | `source_url` / `source_path` | `SourceURL` / `SourcePath` |
 
@@ -464,6 +503,7 @@ Mock 测试入口 API 仍使用 `POST /api/v1/nodes/:id/mock`。
 7. ~~如果 `image` 为空且 `executor.type` 为 `docker`，导入失败~~（**未在代码中实现**：`node_import.go` 仅校验 `executor.type` 类型名合法性，不检查 `image` 是否配置）
 8. `mock.entry` 若存在，文件必须存在
 9. 节点名称唯一（数据库唯一约束）
+10. `ui` 若存在：`ui.entry` 必填且为包内相对路径的单文件 `.js`（禁止绝对路径与 `..` 穿越），文件必须存在且大小 ≤ 10MB，`ui.apiVersion` 缺省或为 1
 
 ## 11.12 实现任务（已全部完成 ✅）
 
@@ -474,8 +514,79 @@ Mock 测试入口 API 仍使用 `POST /api/v1/nodes/:id/mock`。
 - [x] 实现节点包 → `flowx/core.NodeConfig` 展开逻辑（`internal/runtime/node_expander.go`）
 - [x] 更新前端 `NodeImportModal` 和 `NodeManagerPage`
 - [x] 为导入流程编写单元测试和端到端测试（`node_import_test.go`、`internal/cli/import_node_test.go`）
+- [x] 节点自定义 UI 组件（module 模式）：`ui` 字段解析与校验、bundle 静态服务、画布内嵌渲染（见 11.13 节）
 
-## 11.13 参考资料
+## 11.13 节点自定义 UI 组件（module 模式）
+
+节点包可携带一个**预编译的单文件 JS bundle**作为自定义 UI 组件，在 FlowX Studio 画布节点卡片中内嵌渲染，替代默认的“入参/返回”摘要展示。
+
+### 11.13.1 工作原理
+
+1. 节点包在 `flowx.json` 中声明 `ui.entry`（包内相对路径的单文件 `.js`）
+2. 导入时校验（见 11.11 规则 10）并将 bundle 内容存入 `Node.Files`
+3. 前端画布解析 pipeline YAML 的 `config.nodeRef`，匹配节点包后发现 `ui` 配置，
+   通过 `GET /api/v1/nodes/:id/ui/<entry>?v=<updatedAt>` 动态加载 bundle
+4. 在节点卡片内嵌容器上调用 bundle 的 `mount(el, props)`；节点数据变化时调 `update(props)`；卸载时调 `unmount()`
+
+bundle 格式不限制：ESM 默认导出 `mount` 函数，或 IIFE/UMD 加载后调用
+`window.FlowXNodeWidget.define(mount)` 注册。同一 bundle URL 全局只加载一次
+（模块级缓存 + 串行加载队列）；`?v=` 参数做缓存破坏，重新导入后自动生效。
+
+### 11.13.2 组件契约（apiVersion 1）
+
+```ts
+type NodeWidgetMount = (el: HTMLElement, props: NodeWidgetProps) => NodeWidgetHandle | void
+
+interface NodeWidgetHandle {
+  update?: (props: NodeWidgetProps) => void   // 数据变化时调用（整体推送，不做 diff）
+  unmount?: () => void                        // 节点卸载时调用
+}
+
+interface NodeWidgetProps {
+  nodeId: string                // pipeline 中的节点实例 ID
+  nodeRef: string               // 节点包名
+  status: 'idle' | 'running' | 'success' | 'failed' | 'skipped'
+  inputs: string[]              // 节点入参参数名
+  outputs: Record<string, string>  // 节点运行时输出
+  execution: {                  // 流水线执行实例实时 metadata（SSE 驱动）；无运行实例时为 null
+    id: string
+    status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
+    trigger?: string
+    startedAt?: string
+    completedAt?: string
+    durationMs?: number
+    errorMessage?: string
+    errorNodeId?: string
+    metadata?: Record<string, unknown>
+  } | null
+  theme: 'dark'                 // 预留
+  locale: string                // 预留
+}
+```
+
+契约为**只读**：组件不能回调 Studio，不暴露认证 token。未来如需交互能力，以
+`apiVersion: 2` 新增 `actions` 演进。
+
+类型定义与 React 开发模板见 `templates/node-widget/`（Vite 单文件构建）；免构建
+原生 DOM 示例见 `tests/e2e/testdata/ui-demo-node/ui/node-widget.js`。
+
+### 11.13.3 安全说明
+
+module 模式本质是在 Studio 前端上下文执行节点包携带的任意 JS（可访问
+localStorage、auth token、Studio 内部状态），**只应导入可信来源的节点包**。
+节点详情弹窗对含自定义 UI 的节点有明确标记。前端对加载/mount/update/unmount
+各阶段做 try/catch 兜底：失败时内嵌区域显示警示条，不影响节点卡片其余部分。
+
+### 11.13.4 前端渲染细节
+
+- `ModuleNodeWidget`（`web/src/components/ModuleNodeWidget.tsx`）：加载缓存、
+  挂载句柄管理、错误兜底；容器带 `nodrag nowheel` class 防止画布拖拽/滚轮误触
+- `GlowNode`：有 `ui` 的节点按 `ui.width/height` 撑开卡片；桌面端原生“入参/返回”
+  摘要折叠为「查看数据」开关；移动端组件按 `ui.collapsed` 默认收起
+- `AutoLayout`（dagre）：带 ui 节点按组件尺寸动态计算占位
+- `NodeTestPanel`：提供「UI 预览」，用 Mock 测试的真实输出渲染组件
+
+## 11.14 参考资料
 
 - `flowx/core/config.go:113-124` — `NodeConfig` 结构定义
 - `flowx/dag/eval_context.go:80-115` — 模板上下文（`Param` 与 `Metadata`）

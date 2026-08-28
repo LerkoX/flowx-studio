@@ -1,0 +1,43 @@
+{
+  "name": "ui-demo-node",
+  "displayName": "UI 组件示例节点",
+  "description": "演示 flowx.json 的 ui 字段：在画布节点中内嵌自定义前端组件（module 模式）",
+  "version": "1.0.0",
+  "author": "flowx-team",
+  "tags": ["demo", "ui"],
+  "icon": "🧩",
+  "language": "bash",
+  "entry": "main.sh",
+  "parameters": [
+    {
+      "name": "city",
+      "type": "string",
+      "description": "城市名，用于生成问候消息",
+      "required": false,
+      "default": "深圳"
+    }
+  ],
+  "env": {
+    "CITY": "{{ Param.city }}"
+  },
+  "outputs": [
+    { "name": "message", "type": "string", "description": "问候消息" }
+  ],
+  "extract": {
+    "type": "regex",
+    "patterns": {
+      "message": "message=(.*)"
+    }
+  },
+  "mock": {
+    "enabled": true,
+    "entry": "mock.sh"
+  },
+  "ui": {
+    "entry": "ui/node-widget.js",
+    "width": 280,
+    "height": 140,
+    "collapsed": false,
+    "apiVersion": 1
+  }
+}

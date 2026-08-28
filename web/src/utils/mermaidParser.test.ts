@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseWorkflowGraph } from './mermaidParser'
+import { parseWorkflowGraph, parseNodeRefs } from './mermaidParser'
 
 const yamlConfig = `
 Name: demo
@@ -65,5 +65,47 @@ Graph: |
     expect(ids).toContain('__end__')
     expect(edges).toContainEqual({ source: '__start__', target: 'start' })
     expect(edges).toContainEqual({ source: 'start', target: '__end__' })
+  })
+})
+
+describe('parseNodeRefs', () => {
+  it('提取各节点实例的 nodeRef', () => {
+    const yaml = `
+Name: demo
+Graph: |
+  stateDiagram-v2
+    [*] --> GetWeather
+    GetWeather --> Notify
+Nodes:
+  GetWeather:
+    name: 获取天气
+    config:
+      nodeRef: get-weather
+      params:
+        city: 深圳
+  Notify:
+    name: 通知
+    config:
+      nodeRef: send-feishu
+`
+    expect(parseNodeRefs(yaml)).toEqual({
+      GetWeather: 'get-weather',
+      Notify: 'send-feishu',
+    })
+  })
+
+  it('缺少 nodeRef 或 Nodes 时返回空对象', () => {
+    expect(parseNodeRefs('Name: x\nGraph: |\n  stateDiagram-v2\n    [*] --> A\n')).toEqual({})
+    expect(parseNodeRefs('invalid: [yaml')).toEqual({})
+    expect(parseNodeRefs('')).toEqual({})
+  })
+
+  it('兼容节点直挂 nodeRef 的形式', () => {
+    const yaml = `
+Nodes:
+  A:
+    nodeRef: some-node
+`
+    expect(parseNodeRefs(yaml)).toEqual({ A: 'some-node' })
   })
 })

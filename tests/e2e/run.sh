@@ -142,6 +142,26 @@ assert_exit "3.6 node import folder" 0 FXS node import --type folder --path "${W
 assert_contains "3.6 imported message" "Imported node id="
 PKG_NODE_ID=$(printf '%s' "${LAST_OUT}" | sed -n 's/.*id=\([0-9]*\).*/\1/p' | head -1)
 
+# ---------- 3b. 节点自定义 UI 组件（module 模式） ----------
+say "== 3b. node UI widget =="
+assert_exit "3b.1 import ui-demo-node" 0 FXS node import --type folder --path "${SCRIPT_DIR}/testdata/ui-demo-node"
+assert_contains "3b.1 imported message" "Imported node id="
+UI_NODE_ID=$(printf '%s' "${LAST_OUT}" | sed -n 's/.*id=\([0-9]*\).*/\1/p' | head -1)
+
+AUTH_HEADER="Authorization: Bearer $(cat "${DATA_DIR}/auth.token")"
+UI_DETAIL=$(curl -s -H "${AUTH_HEADER}" "${BASE_URL}/api/v1/nodes/${UI_NODE_ID}")
+printf '%s' "${UI_DETAIL}" | python3 -c "import json,sys; d=json.load(sys.stdin)['data']; assert d['ui']['entry']=='ui/node-widget.js' and d['ui']['width']==280" \
+    && ok "3b.2 node detail exposes ui config" || bad "3b.2 node detail exposes ui config"
+
+WIDGET_BODY=$(curl -s -H "${AUTH_HEADER}" "${BASE_URL}/api/v1/nodes/${UI_NODE_ID}/ui/ui/node-widget.js?v=1")
+printf '%s' "${WIDGET_BODY}" | grep -q "export default" \
+    && ok "3b.3 ui bundle served" || bad "3b.3 ui bundle served"
+WIDGET_CT=$(curl -s -o /dev/null -w '%{content_type}' -H "${AUTH_HEADER}" "${BASE_URL}/api/v1/nodes/${UI_NODE_ID}/ui/ui/node-widget.js")
+printf '%s' "${WIDGET_CT}" | grep -q "text/javascript" \
+    && ok "3b.4 ui bundle content-type" || bad "3b.4 ui bundle content-type (${WIDGET_CT})"
+NOT_FOUND=$(curl -s -o /dev/null -w '%{http_code}' -H "${AUTH_HEADER}" "${BASE_URL}/api/v1/nodes/${UI_NODE_ID}/ui/ui/missing.js")
+[ "${NOT_FOUND}" = "404" ] && ok "3b.5 missing ui file is 404" || bad "3b.5 missing ui file is 404 (got ${NOT_FOUND})"
+
 # ---------- 4. 流水线管理 ----------
 say "== 4. pipeline management =="
 cat > "${WORK_DIR}/wf.yaml" <<'EOF'

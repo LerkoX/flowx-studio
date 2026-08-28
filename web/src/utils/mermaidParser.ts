@@ -49,6 +49,30 @@ export async function parseWorkflowGraph(yamlConfig: string): Promise<ParsedGrap
   return parseStateDiagram(graph)
 }
 
+/**
+ * 从 FlowX YAML 中提取各节点实例的 nodeRef（节点包名）。
+ * 返回 { 节点实例ID: 节点包名 }，用于画布将节点实例与节点包（含 ui 配置）关联。
+ * 解析失败或节点未声明 nodeRef 时对应条目缺省。
+ */
+export function parseNodeRefs(yamlConfig: string): Record<string, string> {
+  const result: Record<string, string> = {}
+  try {
+    const doc = yaml.load(yamlConfig) as Record<string, unknown> | undefined
+    if (!doc || typeof doc !== 'object') return result
+    const nodes = (doc.Nodes || doc.nodes) as Record<string, unknown> | undefined
+    if (!nodes || typeof nodes !== 'object') return result
+    for (const [id, def] of Object.entries(nodes)) {
+      if (!def || typeof def !== 'object') continue
+      const config = (def as Record<string, unknown>).config as Record<string, unknown> | undefined
+      const ref = config?.nodeRef ?? (def as Record<string, unknown>).nodeRef
+      if (typeof ref === 'string' && ref) result[id] = ref
+    }
+  } catch {
+    // YAML 解析失败时返回已提取部分
+  }
+  return result
+}
+
 async function parseStateDiagram(graph: string): Promise<ParsedGraph> {
   const mermaid = await getMermaid()
 

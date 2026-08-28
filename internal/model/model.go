@@ -54,6 +54,17 @@ type NodeExecutorConfig struct {
 	Config map[string]interface{} `json:"config,omitempty" db:"config"`
 }
 
+// NodeUIConfig 节点自定义 UI 组件配置（module 模式）。
+// Entry 指向节点包内预编译的单文件 JS bundle，画布节点通过
+// GET /api/v1/nodes/:id/ui/<entry> 加载并以内嵌组件渲染。
+type NodeUIConfig struct {
+	Entry      string `json:"entry"`
+	Width      int    `json:"width,omitempty"`
+	Height     int    `json:"height,omitempty"`
+	Collapsed  *bool  `json:"collapsed,omitempty"`
+	APIVersion int    `json:"apiVersion,omitempty"`
+}
+
 // NodePackage flowx.json 节点包配置
 type NodePackage struct {
 	Name         string             `json:"name"`
@@ -75,6 +86,7 @@ type NodePackage struct {
 	Outputs      []NodeOutput       `json:"outputs,omitempty"`
 	Extract      *NodeExtractConfig `json:"extract,omitempty"`
 	Mock         *NodeMockConfig    `json:"mock,omitempty"`
+	UI           *NodeUIConfig      `json:"ui,omitempty"`
 	Timeout      int                `json:"timeout,omitempty"`
 }
 
@@ -109,6 +121,9 @@ type Node struct {
 
 	// 完整的 flowx.json 包配置（运行时展开使用）
 	PackageConfig *NodePackage `json:"-" db:"package_config"`
+
+	// 节点自定义 UI 组件配置（来自 PackageConfig.UI，API 返回用）
+	UI *NodeUIConfig `json:"ui,omitempty" db:"-"`
 
 	// 来源信息
 	SourceType string `json:"sourceType,omitempty" db:"source_type"` // git | manual

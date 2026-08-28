@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Play, Terminal, Loader2, AlertCircle, CheckCircle, Clock, Code } from 'lucide-react'
+import { X, Play, Terminal, Loader2, AlertCircle, CheckCircle, Clock, Code, LayoutGrid } from 'lucide-react'
 import type { NodeDefinition } from '@/types/node'
+import type { NodeWidgetProps } from '@/types/nodeWidget'
 import { mockTestNode } from '@/services/nodeService'
+import ModuleNodeWidget, { buildWidgetUrl } from '@/components/ModuleNodeWidget'
 import GlassPanel from '@/components/GlassPanel'
 
 interface NodeTestPanelProps {
@@ -29,6 +31,21 @@ export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelPr
   if (!node) return null
 
   const isCodeNode = node.nodeType === 'code'
+  const hasUI = !!(node.ui?.entry && node.id)
+
+  // UI 预览用的合成 props：入参来自表单，输出来自最近一次 Mock 结果
+  const previewProps: NodeWidgetProps = {
+    nodeId: 'mock-preview',
+    nodeRef: node.name,
+    status: !result ? 'idle' : result.status === 'success' ? 'success' : 'failed',
+    inputs: node.parameters.map((p) => p.name),
+    outputs: Object.fromEntries(
+      Object.entries(result?.output || {}).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)])
+    ),
+    execution: null,
+    theme: 'dark',
+    locale: typeof navigator !== 'undefined' ? navigator.language : 'zh-CN',
+  }
 
   const handleRun = async () => {
     if (!node.id) return
@@ -201,6 +218,27 @@ export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelPr
                   </div>
                 </div>
               </GlassPanel>
+
+              {/* 自定义 UI 组件预览（flowx.json ui.entry） */}
+              {hasUI && (
+                <div className="space-y-3">
+                  <h3 className="text-white/70 font-medium text-sm flex items-center gap-2">
+                    <LayoutGrid size={14} />
+                    UI 预览
+                  </h3>
+                  <GlassPanel className="p-3">
+                    <ModuleNodeWidget
+                      url={buildWidgetUrl(String(node.id), node.ui!.entry, node.updatedAt ? String(node.updatedAt) : undefined)}
+                      width={node.ui!.width || 260}
+                      height={node.ui!.height || 120}
+                      widgetProps={previewProps}
+                    />
+                    {!result && (
+                      <p className="text-white/30 text-[10px] mt-2">运行测试后组件将收到真实输出数据</p>
+                    )}
+                  </GlassPanel>
+                </div>
+              )}
 
               {/* 执行按钮 */}
               <button

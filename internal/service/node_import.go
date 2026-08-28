@@ -103,11 +103,15 @@ func (s *NodeImportService) importFromPath(dir, sourceType, sourceURL, sourcePat
 	return created, nil
 }
 
+// maxUIEntrySize 节点 UI 组件 bundle 大小上限（10MB）
+const maxUIEntrySize = 10 << 20
+
 // packageNamePattern 节点包名规则：字母开头，支持 snake_case 或 kebab-case
 var packageNamePattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
 
 // templateExprPattern 提取 {{ ... }} 模板表达式
 var templateExprPattern = regexp.MustCompile(`\{\{-?\s*(.*?)\s*-?\}\}`)
+
 func (s *NodeImportService) validatePackage(dir string, pkg *model.NodePackage) error {
 	if strings.TrimSpace(pkg.Name) == "" {
 		return fmt.Errorf("name is required")
@@ -185,6 +189,40 @@ func (s *NodeImportService) validatePackage(dir string, pkg *model.NodePackage) 
 		}
 	}
 
+	if pkg.UI != nil {
+		if err := validateUIPackage(dir, pkg.UI); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// validateUIPackage 校验节点自定义 UI 组件（module 模式）配置。
+// 要求：entry 必填且为包内相对路径的单文件 .js bundle，大小不超过 10MB，
+// apiVersion 缺省或为 1。
+func validateUIPackage(dir string, ui *model.NodeUIConfig) error {
+	entry := strings.TrimSpace(ui.Entry)
+	if entry == "" {
+		return fmt.Errorf("ui.entry is required when ui is set")
+	}
+	if !strings.HasSuffix(entry, ".js") {
+		return fmt.Errorf("ui.entry must be a single-file .js bundle, got: %s", entry)
+	}
+	clean := filepath.Clean(entry)
+	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("ui.entry must be a relative path inside the node package, got: %s", entry)
+	}
+	info, err := os.Stat(filepath.Join(dir, entry))
+	if err != nil {
+		return fmt.Errorf("ui entry file %s not found: %w", entry, err)
+	}
+	if info.Size() > maxUIEntrySize {
+		return fmt.Errorf("ui entry file %s exceeds the 10MB size limit (%d bytes)", entry, info.Size())
+	}
+	if ui.APIVersion != 0 && ui.APIVersion != 1 {
+		return fmt.Errorf("unsupported ui.apiVersion: %d (supported: 1)", ui.APIVersion)
+	}
 	return nil
 }
 
@@ -277,6 +315,17 @@ func (s *NodeImportService) buildNode(dir string, pkg *model.NodePackage, source
 		files[filename] = string(content)
 	}
 
+	// UI 组件 bundle 一并存入 Files，供 /api/v1/nodes/:id/ui/* 静态服务读取
+	if pkg.UI != nil {
+		if _, ok := files[pkg.UI.Entry]; !ok {
+			content, err := os.ReadFile(filepath.Join(dir, pkg.UI.Entry))
+			if err != nil {
+				return nil, fmt.Errorf("failed to read ui entry file %s: %w", pkg.UI.Entry, err)
+			}
+			files[pkg.UI.Entry] = string(content)
+		}
+	}
+
 	requirements := pkg.Requirements
 	if len(requirements) == 0 {
 		requirements = s.readRequirementsFile(dir)
@@ -338,6 +387,7 @@ func (s *NodeImportService) buildNode(dir string, pkg *model.NodePackage, source
 		SourcePath:    sourcePath,
 		Tags:          pkg.Tags,
 		PackageConfig: pkg,
+		UI:            pkg.UI,
 	}
 
 	return node, nil

@@ -138,6 +138,7 @@ web/
 │   │   ├── GlassPanel.tsx          # 毛玻璃面板容器
 │   │   ├── SpotlightCard.tsx       # 鼠标跟随高光卡片
 │   │   ├── GlowNode.tsx            # 自定义节点（React Flow）
+│   │   ├── ModuleNodeWidget.tsx    # 节点自定义 UI 组件宿主（module 模式）
 │   │   ├── TerminalNode.tsx        # Start / End 圆形终端节点
 │   │   ├── GradientEdge.tsx        # 渐变流动连线
 │   │   └── LogViewer.tsx           # 日志查看器
@@ -270,6 +271,7 @@ React Flow 的自定义节点组件，核心特性：
 - **连接点**：输入 Handle（target）和输出 Handle（source），位置随画布方向（TB/LR）自适应；移动端尺寸更小
 - **入场动画**：spring 动画从 scale 0.85 + 下移 10px 过渡到正常状态
 - **响应式**：移动端节点更窄（min-w 140px / max-w 200px），桌面端 min-w 200px / max-w 280px
+- **内嵌自定义 UI 组件**：节点包在 `flowx.json` 中声明 `ui` 字段时，节点卡片内嵌渲染 `ModuleNodeWidget`（见 5.6.7 节）：卡片按 `ui.width/height` 撑开，桌面端原生“入参/返回”摘要折叠为「查看数据」开关，移动端组件随详情展开（`ui.collapsed` 控制默认收起）
 
 ### 5.6.5 GradientEdge 组件（渐变流动连线）
 
@@ -289,6 +291,19 @@ Mermaid `stateDiagram-v2` 中的 `[*]` 渲染为圆形 Start / End 节点（`com
 - 36px 圆形，半透明背景 + 品牌色微光阴影，内部为 Play（Start）/ Flag（End）图标
 - Start 节点只有输出 Handle，End 节点只有输入 Handle，位置随画布方向自适应
 - 解析层将 `[*] --> A` / `A --> [*]` 转换为 `__start__` / `__end__` 虚拟节点，移除断线
+
+### 5.6.7 ModuleNodeWidget 组件（节点自定义 UI 宿主）
+
+节点包自定义 UI 组件（module 模式）的宿主组件（`components/ModuleNodeWidget.tsx`）。契约详见 `docs/11-node-package.md` 11.13 节。核心机制：
+
+- **加载**：通过 `GET /api/v1/nodes/:id/ui/<entry>?v=<updatedAt>` 获取 bundle；优先动态 `import()`（ESM 默认导出 `mount`），失败回退 script 标签加载（IIFE/UMD 通过 `window.FlowXNodeWidget.define(mount)` 注册）
+- **缓存**：模块级 `Map<url, Promise<mount>>` 缓存，同一节点包多实例只加载一次；串行加载队列避免 IIFE 全局注册并发串扰；加载失败自动清缓存允许重试
+- **生命周期**：`mount(el, props)` 挂载 → props 变化时 `update(props)`（以 JSON 序列化去重）→ 卸载时 `unmount()`，组件未清理 DOM 时兜底清空容器
+- **数据装配**：`GlowNode` 订阅 `executionStore.selectedExecution`，将节点状态/入参/输出与流水线执行实例实时 metadata 组装为 `NodeWidgetProps`（`types/nodeWidget.ts`，apiVersion 1，只读契约）
+- **错误兜底**：加载/mount 失败显示警示条，不影响节点卡片其余部分
+- **画布交互隔离**：容器带 `nodrag nowheel` class 并拦截点击/指针事件，防止误拖画布节点
+- **布局**：`AutoLayout.ts`（dagre）对带 ui 节点按组件尺寸动态计算占位
+- **数据链路**：`WorkflowCanvas` 通过 `parseNodeRefs`（`utils/mermaidParser.ts`）提取 YAML 中各节点实例的 `config.nodeRef`，从 `nodeStore` 匹配节点包并注入 `ui` 配置与节点 DB id
 
 ---
 
@@ -586,6 +601,7 @@ Mermaid `stateDiagram-v2` 中的 `[*]` 渲染为圆形 Start / End 节点（`com
 | **SpotlightCard** | `components/SpotlightCard.tsx` | 鼠标跟随 radial-gradient 高光效果 |
 | **GlassPanel** | `components/GlassPanel.tsx` | 毛玻璃面板容器 |
 | **LogViewer** | `components/LogViewer.tsx` | 日志查看器（级别/节点过滤 + 搜索高亮） |
+| **ModuleNodeWidget** | `components/ModuleNodeWidget.tsx` | 节点自定义 UI 组件宿主（module 模式动态加载/挂载/错误兜底） |
 | **Sidebar** | `components/Sidebar.tsx` | 桌面 hover 展开 / 移动端抽屉导航，带激活指示条动画 |
 
 ---
@@ -618,6 +634,11 @@ Mermaid `stateDiagram-v2` 中的 `[*]` 渲染为圆形 Start / End 节点（`com
 - `executionStore` 新增 `selectedExecution` 完整对象，`selectExecution` 会调用 `getExecution(id)` 加载详情。
 - 新增 `updateExecutionMetadata`，根据 SSE 的 `execution_start` / `execution_complete` 实时合并运行时参数和元数据。
 - 运行时事件到达时自动选中当前执行，保证元数据面板切换到运行视图。
+
+### 5.16.6 节点自定义 UI 组件（module 模式）
+- 节点包可在 `flowx.json` 中声明 `ui.entry` 携带预编译单文件 JS bundle，画布节点内嵌渲染（见 5.6.7 节与 `docs/11-node-package.md` 11.13 节）。
+- `NodeTestPanel` 新增「UI 预览」区域：Mock 测试后以真实输出驱动组件，供节点作者验证。
+- `NodeDetailModal` 对含自定义 UI 的节点显示「自定义 UI 组件」标记（安全提示）。
 
 ---
 *主要变更: 从"AI 对话驱动"设计稿修订为与代码一致的现状文档——5 页面架构（工作流列表/画布/节点管理/执行器/设置），Zustand + axios service 层 + SSE 事件流，Taskade/n8n 深色主题风格*

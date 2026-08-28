@@ -6,6 +6,25 @@ const NODE_HEIGHT = 100
 const RANK_SEP = 100
 const NODE_SEP = 60
 
+// 内嵌 UI 组件时节点卡片的额外占位（内边距 + 边框 + 间距）
+const WIDGET_PAD_X = 28
+const WIDGET_PAD_Y = 24
+
+interface LayoutNodeData {
+  ui?: { width?: number; height?: number }
+}
+
+function nodeSize(node: Node): { width: number; height: number } {
+  const data = node.data as LayoutNodeData | undefined
+  if (data?.ui) {
+    return {
+      width: Math.max(NODE_WIDTH, (data.ui.width || 260) + WIDGET_PAD_X),
+      height: NODE_HEIGHT + (data.ui.height || 120) + WIDGET_PAD_Y,
+    }
+  }
+  return { width: NODE_WIDTH, height: NODE_HEIGHT }
+}
+
 export function autoLayout(
   nodes: Node[],
   edges: Edge[],
@@ -21,8 +40,11 @@ export function autoLayout(
     ranksep: RANK_SEP,
   })
 
+  const sizes = new Map<string, { width: number; height: number }>()
   nodes.forEach((node) => {
-    dagreGraph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT })
+    const size = nodeSize(node)
+    sizes.set(node.id, size)
+    dagreGraph.setNode(node.id, size)
   })
 
   edges.forEach((edge) => {
@@ -33,11 +55,12 @@ export function autoLayout(
 
   const layoutedNodes = nodes.map((node) => {
     const nodeWithPosition = dagreGraph.node(node.id)
+    const size = sizes.get(node.id) || { width: NODE_WIDTH, height: NODE_HEIGHT }
     return {
       ...node,
       position: {
-        x: nodeWithPosition.x - NODE_WIDTH / 2,
-        y: nodeWithPosition.y - NODE_HEIGHT / 2,
+        x: nodeWithPosition.x - size.width / 2,
+        y: nodeWithPosition.y - size.height / 2,
       },
     }
   })

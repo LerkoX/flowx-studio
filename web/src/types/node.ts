@@ -22,6 +22,15 @@ export interface NodeMockConfig {
   entry?: string
 }
 
+/** 节点自定义 UI 组件配置（module 模式，见 flowx.json 的 ui 字段） */
+export interface NodeUIConfig {
+  entry: string
+  width?: number
+  height?: number
+  collapsed?: boolean
+  apiVersion?: number
+}
+
 export interface NodeDefinition {
   id: string
   name: string
@@ -54,6 +63,9 @@ export interface NodeDefinition {
   
   // 节点包文件
   files?: Record<string, string>
+
+  // 自定义 UI 组件配置（导入的节点包可能携带）
+  ui?: NodeUIConfig
 
   createdAt?: Date
   updatedAt?: Date

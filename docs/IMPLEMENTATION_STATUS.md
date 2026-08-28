@@ -1,7 +1,18 @@
 # FlowX Studio 实现状态跟踪文档
 
 > 本文档记录 FlowX Studio 各模块的实现状态，区分「已实现」和「待实现」功能。
-> 最后更新：2026-08-17
+> 最后更新：2026-08-21
+
+---
+
+## 近期重要变更（2026-08-21，节点自定义 UI）
+
+### 节点自定义 UI 组件（module 模式，已落地）
+- `flowx.json` 新增可选 `ui` 字段（`entry`/`width`/`height`/`collapsed`/`apiVersion`），节点包可携带预编译单文件 JS bundle 作为画布节点内嵌 UI。契约与字段说明见 `docs/11-node-package.md` 11.13 节。
+- 后端：`NodePackage.UI`/`Node.UI` 模型（复用 `package_config` 列，无新迁移）；导入校验（entry 存在、单文件 .js、≤10MB、apiVersion=1、防路径穿越）；bundle 内容存入 `Node.Files`；新增 `GET /api/v1/nodes/:id/ui/*filepath` 静态服务（`?v=<updatedAt>` 缓存破坏 + immutable 长缓存）。
+- 前端：新增 `ModuleNodeWidget`（ESM 动态 import / IIFE `FlowXNodeWidget.define` 双格式加载、模块级缓存 + 串行加载队列、mount/update/unmount 生命周期、错误兜底）；`WorkflowCanvas` 新增 `parseNodeRefs` 提取 `config.nodeRef` 并注入 ui 配置；`GlowNode` 内嵌渲染组件并按 `ui.width/height` 撑开卡片（原生摘要折叠为「查看数据」开关）；`AutoLayout` 按组件尺寸动态布局；`NodeTestPanel` 新增「UI 预览」；`NodeDetailModal` 标记「自定义 UI 组件」。
+- 数据契约（apiVersion 1，只读）：节点状态/入参/输出 + 流水线执行实例实时 metadata（`executionStore.selectedExecution`，SSE 驱动）。
+- 配套：`templates/node-widget/` React + Vite starter；`tests/e2e/testdata/ui-demo-node/` 免构建原生 DOM 示例；Go 单元测试（导入校验 6 例）+ E2E 新增 3b 分组（98 用例全过）。
 
 ---
 
