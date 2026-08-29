@@ -114,7 +114,7 @@ export default function NodeDetailModal({ node, isOpen, onClose }: NodeDetailMod
                           <InfoItem 
                             icon={Clock} 
                             label="创建时间" 
-                            value={node.createdAt.toLocaleDateString('zh-CN')} 
+                            value={new Date(node.createdAt).toLocaleDateString('zh-CN')} 
                           />
                         )}
                       </div>
