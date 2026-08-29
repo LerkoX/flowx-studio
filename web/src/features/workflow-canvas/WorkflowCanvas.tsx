@@ -45,6 +45,8 @@ function WorkflowCanvasInner() {
     nodeRuntimeData,
     updateNodeStatus,
     setNodeStatuses,
+    setNodeRuntimeData,
+    resetNodeRuntimeData,
   } = useWorkflowStore()
   const { nodes: nodeDefs, loadNodes } = useNodeStore()
 
@@ -175,11 +177,32 @@ function WorkflowCanvasInner() {
   }, [nodeRuntimeData, setNodes])
 
   const executionStore = useExecutionStore()
+  const selectedExecution = useExecutionStore((s) => s.selectedExecution)
+
+  // 将执行实例 metadata 中的节点输出（扁平点键：GetWeather.city）按节点分发到 nodeRuntimeData，
+  // 驱动画布节点的「返回」区域与自定义 UI 组件展示真实数据
+  useEffect(() => {
+    const meta = selectedExecution?.metadata as Record<string, unknown> | undefined
+    const runtime = (meta?.metadata ?? {}) as Record<string, unknown>
+    const byNode: Record<string, Record<string, string>> = {}
+    for (const [key, value] of Object.entries(runtime)) {
+      const dot = key.indexOf('.')
+      if (dot <= 0) continue
+      const nodeId = key.slice(0, dot)
+      const field = key.slice(dot + 1)
+      if (!byNode[nodeId]) byNode[nodeId] = {}
+      byNode[nodeId][field] = typeof value === 'string' ? value : JSON.stringify(value)
+    }
+    for (const [nodeId, outputs] of Object.entries(byNode)) {
+      setNodeRuntimeData(nodeId, { outputs })
+    }
+  }, [selectedExecution, setNodeRuntimeData])
 
   // 订阅 SSE 事件
   useEventStream('/api/v1/events', (type, data) => {
     if (type === 'execution.started') {
       setNodeStatuses({})
+      resetNodeRuntimeData()
       const payload = data as { execution_id?: number }
       if (payload.execution_id) {
         const id = String(payload.execution_id)

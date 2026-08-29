@@ -15,6 +15,7 @@ interface WorkflowState {
   syncParamsFromYAML: (yamlConfig: string) => void
   updateParam: (key: string, value: string | number | boolean | object) => void
   setNodeRuntimeData: (nodeId: string, data: Partial<NodeRuntimeData>) => void
+  resetNodeRuntimeData: () => void
 }
 
 function parseParamValue(v: unknown): { value: unknown; description?: string } {
@@ -166,4 +167,6 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
       },
     }))
   },
+
+  resetNodeRuntimeData: () => set({ nodeRuntimeData: {} }),
 }))

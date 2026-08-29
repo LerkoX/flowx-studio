@@ -666,6 +666,13 @@ func (s *WorkflowService) setExecutionMetadata(execID int64, status, trigger str
 	cache, ok := s.metaCache[execID]
 	if !ok {
 		cache = make(map[string]interface{})
+		// 以 DB 中已有快照为合并基础：execution_complete 事件（携带 params 与
+		// 节点输出 metadata）由异步事件桥处理并删除缓存，runWorkflow 的收尾
+		// 写入若落在其后，不能直接以空快照覆盖 DB（会丢失节点输出）。
+		var existing sql.NullString
+		if err := s.db.Get(&existing, "SELECT metadata_json FROM executions WHERE id = ?", execID); err == nil && existing.Valid && existing.String != "" {
+			_ = json.Unmarshal([]byte(existing.String), &cache)
+		}
 		s.metaCache[execID] = cache
 	}
 	if status != "" {

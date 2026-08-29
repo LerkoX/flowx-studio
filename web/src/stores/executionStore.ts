@@ -209,6 +209,20 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   },
 }))
 
+function normalizeMetadata(value: unknown): Record<string, unknown> | undefined {
+  if (!value) return undefined
+  // 后端 metadata_json 列以 JSON 字符串返回，需解析
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value)
+      return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined
+    } catch {
+      return undefined
+    }
+  }
+  return typeof value === 'object' ? (value as Record<string, unknown>) : undefined
+}
+
 function normalizeExecution(item: unknown): ExecutionStatus {
   const e = item as Record<string, unknown>
   return {
@@ -222,7 +236,7 @@ function normalizeExecution(item: unknown): ExecutionStatus {
     result: e.result ? String(e.result) : undefined,
     errorMessage: e.error_message ? String(e.error_message) : undefined,
     errorNodeId: e.error_node_id ? String(e.error_node_id) : undefined,
-    metadata: (e.metadata as Record<string, unknown>) || undefined,
+    metadata: normalizeMetadata(e.metadata),
     createdAt: parseDate(e.created_at ?? e.createdAt) || new Date(),
   }
 }
