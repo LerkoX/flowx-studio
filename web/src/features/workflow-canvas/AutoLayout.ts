@@ -15,6 +15,12 @@ interface LayoutNodeData {
 }
 
 function nodeSize(node: Node): { width: number; height: number } {
+  // 优先使用 React Flow 实测尺寸（组件挂载/详情展开后的真实渲染大小），
+  // 保证布局占位与实际渲染一致，避免节点重叠
+  const measured = node.measured
+  if (measured?.width && measured?.height) {
+    return { width: measured.width, height: measured.height }
+  }
   const data = node.data as LayoutNodeData | undefined
   if (data?.ui) {
     return {

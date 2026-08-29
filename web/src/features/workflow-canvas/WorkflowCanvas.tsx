@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ReactFlow,
   Background,
@@ -118,6 +118,25 @@ function WorkflowCanvasInner() {
         setEdges([])
       })
   }, [currentWorkflow, direction, nodeDefs, setNodes, setEdges])
+
+  // 按实测尺寸重排：首帧布局只能按估算尺寸占位，组件挂载/详情展开后节点实际
+  // 尺寸会变化（React Flow 自动测量到 node.measured），此处检测到变化后重跑 dagre，
+  // 避免节点重叠。key 不含位置，重排只改 position 不改变 measured，因此不会循环。
+  const layoutKeyRef = useRef('')
+  useEffect(() => {
+    if (nodes.length === 0) return
+    if (!nodes.every((n) => n.measured?.width && n.measured?.height)) return
+    const key =
+      direction +
+      '|' +
+      nodes
+        .map((n) => `${n.id}:${Math.round(n.measured!.width!)}x${Math.round(n.measured!.height!)}`)
+        .join('|')
+    if (key === layoutKeyRef.current) return
+    layoutKeyRef.current = key
+    const { nodes: layouted } = autoLayout(nodes, edges, { direction })
+    setNodes(layouted)
+  }, [nodes, edges, direction, setNodes])
 
   // 实时同步执行状态
   useEffect(() => {
