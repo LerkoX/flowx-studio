@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Loader2 } from 'lucide-react'
 import type { NodeWidgetHandle, NodeWidgetMount, NodeWidgetProps } from '@/types/nodeWidget'
 
 /**
@@ -101,26 +101,31 @@ const ModuleNodeWidget = memo(({ url, width, height, widgetProps }: ModuleNodeWi
   const propsRef = useRef(widgetProps)
   propsRef.current = widgetProps
   const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
 
   // 挂载：url 变化时重新加载并挂载（?v= 缓存破坏使重新导入后 url 变化）
   useEffect(() => {
     let cancelled = false
     setError(null)
+    setLoading(true)
 
     loadWidgetBundle(url)
       .then((mount) => {
         if (cancelled || !containerRef.current) return
         try {
           handleRef.current = mount(containerRef.current, propsRef.current) || {}
+          setLoading(false)
         } catch (err) {
           console.error('[ModuleNodeWidget] mount failed:', err)
           setError(err instanceof Error ? err.message : String(err))
+          setLoading(false)
         }
       })
       .catch((err) => {
         if (cancelled) return
         console.error('[ModuleNodeWidget] load failed:', err)
         setError(err instanceof Error ? err.message : String(err))
+        setLoading(false)
       })
 
     return () => {
@@ -163,14 +168,21 @@ const ModuleNodeWidget = memo(({ url, width, height, widgetProps }: ModuleNodeWi
   }
 
   return (
-    <div
-      ref={containerRef}
-      // nodrag/nowheel：防止组件内的拖拽/滚轮被 React Flow 画布接管
-      className="nodrag nowheel rounded-lg overflow-hidden"
-      style={{ width, height }}
-      onClick={(e) => e.stopPropagation()}
-      onPointerDown={(e) => e.stopPropagation()}
-    />
+    <div className="relative" style={{ width, height }}>
+      <div
+        ref={containerRef}
+        // nodrag/nowheel：防止组件内的拖拽/滚轮被 React Flow 画布接管
+        className="nodrag nowheel rounded-lg overflow-hidden"
+        style={{ width, height }}
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+      />
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-white/[0.03] border border-white/5 pointer-events-none">
+          <Loader2 size={18} className="animate-spin text-white/30" />
+        </div>
+      )}
+    </div>
   )
 })
 

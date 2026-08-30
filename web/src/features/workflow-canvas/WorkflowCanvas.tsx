@@ -50,9 +50,10 @@ function WorkflowCanvasInner() {
   } = useWorkflowStore()
   const { nodes: nodeDefs, loadNodes } = useNodeStore()
 
-  // 节点包列表用于按 nodeRef 匹配 ui 配置；画布页可能直接刷新进入，需确保已加载
+  // 节点包列表用于按 nodeRef 匹配 ui 配置；每次进入画布都刷新，
+  // 保证节点重新导入（ui 尺寸/bundle 更新）后能拿到最新定义
   useEffect(() => {
-    if (nodeDefs.length === 0) loadNodes()
+    loadNodes()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -71,6 +72,10 @@ function WorkflowCanvasInner() {
       if (!ref) return undefined
       return nodeDefs.find((n) => n.name === ref)
     }
+
+    // 过期取消：首次进入时 mermaid 动态加载较慢，若 nodeDefs 在此期间加载完成
+    // 触发了新一轮解析，旧的慢解析结果不得覆盖新结果（否则子 UI 首次不显示）
+    let cancelled = false
 
     parseWorkflowGraph(currentWorkflow.yamlConfig)
       .then(({ nodes: parsedNodes, edges: parsedEdges }) => {
@@ -109,14 +114,20 @@ function WorkflowCanvasInner() {
         }))
 
         const { nodes: layoutedNodes, edges: layoutedEdges } = autoLayout(rawNodes, rawEdges, { direction })
+        if (cancelled) return
         setNodes(layoutedNodes)
         setEdges(layoutedEdges)
       })
       .catch((err) => {
+        if (cancelled) return
         console.error('Failed to parse workflow graph:', err)
         setNodes([])
         setEdges([])
       })
+
+    return () => {
+      cancelled = true
+    }
   }, [currentWorkflow, direction, nodeDefs, setNodes, setEdges])
 
   // 按实测尺寸重排：首帧布局只能按估算尺寸占位，组件挂载/详情展开后节点实际
