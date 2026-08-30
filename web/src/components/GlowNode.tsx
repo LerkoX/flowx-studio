@@ -63,6 +63,8 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
   const hasUI = !!(nodeData.ui?.entry && nodeData.nodeDbId)
   const uiWidth = nodeData.ui?.width || 260
   const uiHeight = nodeData.ui?.height || 120
+  // 移动端组件宽度按屏幕上限收窄，但跟随 ui.width 变化
+  const widgetWidth = isMobile ? Math.min(uiWidth, 300) : uiWidth
 
   // 移动端详情默认收起；带 UI 组件时可用 ui.collapsed 控制（默认收起）
   const [detailsExpanded, setDetailsExpanded] = useState(
@@ -124,16 +126,14 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
           transition-all duration-300
           ${selected ? 'border-white/30' : ''}
           ${hasUI
-            ? isMobile
-              ? 'min-w-[140px] max-w-[240px]'
-              : 'min-w-[200px]'
+            ? 'min-w-[140px]'
             : isMobile
               ? 'min-w-[140px] max-w-[200px]'
               : 'min-w-[200px] max-w-[280px]'}
         `}
         style={{
-          // 带内嵌 UI 组件时按组件尺寸撑开节点卡片
-          ...(hasUI && !isMobile ? { width: uiWidth + 26 } : {}),
+          // 带内嵌 UI 组件时按组件尺寸撑开节点卡片（移动端有上限）
+          ...(hasUI ? { width: widgetWidth + 26 } : {}),
           boxShadow: selected
             ? `0 0 20px ${config.color}40, inset 0 1px 0 rgba(255,255,255,0.05)`
             : 'inset 0 1px 0 rgba(255,255,255,0.05)',
@@ -206,7 +206,7 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
           <div className="mt-2 pt-2 border-t border-white/10">
             <ModuleNodeWidget
               url={buildWidgetUrl(nodeData.nodeDbId!, nodeData.ui!.entry, nodeData.nodeUpdatedAt)}
-              width={isMobile ? Math.min(uiWidth, 212) : uiWidth}
+              width={widgetWidth}
               height={uiHeight}
               widgetProps={widgetProps}
             />

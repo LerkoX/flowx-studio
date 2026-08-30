@@ -347,7 +347,7 @@ function WorkflowCanvasInner() {
         fitViewOptions={{ padding: isMobile ? 0.1 : 0.2 }}
         minZoom={0.1}
         maxZoom={2}
-        nodesDraggable={!isMobile}
+        nodesDraggable={true}
         nodesConnectable={false}
         elementsSelectable={true}
         panOnScroll={true}
