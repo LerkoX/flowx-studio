@@ -196,6 +196,32 @@ func (s *Store) Empty() bool {
 	return empty
 }
 
+// ListDirs 返回资产根目录下的目录名列表（<name>@<version> 或遗留的 .tmp- 目录）
+func (s *Store) ListDirs() ([]string, error) {
+	entries, err := os.ReadDir(s.Root)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var dirs []string
+	for _, e := range entries {
+		if e.IsDir() {
+			dirs = append(dirs, e.Name())
+		}
+	}
+	return dirs, nil
+}
+
+// RemoveDir 按目录名删除资产目录（GC 用；名称需已通过校验或为 tmp 遗留）
+func (s *Store) RemoveDir(dirName string) error {
+	if dirName == "" || strings.Contains(dirName, "/") || strings.Contains(dirName, "..") {
+		return fmt.Errorf("invalid asset dir name: %s", dirName)
+	}
+	return os.RemoveAll(filepath.Join(s.Root, dirName))
+}
+
 // ContentTypeByExt 按扩展名推断 Content-Type（serving 用）
 func ContentTypeByExt(rel string) string {
 	switch strings.ToLower(filepath.Ext(rel)) {

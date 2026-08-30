@@ -415,6 +415,57 @@ func (s *NodeService) MigrateLegacyFiles() (int, error) {
 	return migrated, nil
 }
 
+// GCAssets 清理无节点引用的资产目录（P4）。
+// 规则：
+//   - <name>@<version> 目录若无对应节点（按 name + version 匹配，空版本归一为 "0"）→ 删除
+//   - Put 崩溃遗留的 .tmp-<pid> 临时目录 → 删除
+//   - 不符合命名规则的目录 → 保留（可能是人工放置的，不动）
+// 返回被删除的目录名列表。
+func (s *NodeService) GCAssets() ([]string, error) {
+	if s.assets == nil {
+		return nil, nil
+	}
+	rows, err := s.db.Query("SELECT name, COALESCE(NULLIF(version, ''), '0') FROM nodes")
+	if err != nil {
+		return nil, err
+	}
+	live := make(map[string]bool)
+	for rows.Next() {
+		var name, version string
+		if err := rows.Scan(&name, &version); err != nil {
+			continue
+		}
+		live[name+"@"+version] = true
+	}
+	rows.Close()
+
+	dirs, err := s.assets.ListDirs()
+	if err != nil {
+		return nil, err
+	}
+	var removed []string
+	for _, d := range dirs {
+		isTmp := strings.Contains(d, ".tmp-")
+		if !isTmp {
+			if live[d] {
+				continue
+			}
+			// 只清理形态合法的 <name>@<version> 目录，其他保留
+			name, _, found := strings.Cut(d, "@")
+			if !found || !packageNamePattern.MatchString(name) {
+				continue
+			}
+		}
+		if err := s.assets.RemoveDir(d); err != nil {
+			s.auditRecord("gc_assets", "", fmt.Sprintf("dir=%s error=%v", d, err))
+			continue
+		}
+		removed = append(removed, d)
+		s.auditRecord("gc_assets", "", "removed="+d)
+	}
+	return removed, nil
+}
+
 func scanNode(scanner interface {
 	Scan(dest ...interface{}) error
 }, node *model.Node) error {
