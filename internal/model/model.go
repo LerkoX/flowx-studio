@@ -49,7 +49,10 @@ type NodeExtractConfig struct {
 }
 
 // NodeExecutorConfig 执行器配置
+// ref 与 type 互斥：ref 引用 Studio 注册的执行器实例；type+config 为内联匿名实例；
+// 两者都缺省时使用全局默认执行器（有 image 时归为 docker）。
 type NodeExecutorConfig struct {
+	Ref    string                 `json:"ref,omitempty" db:"ref"`
 	Type   string                 `json:"type,omitempty" db:"type"`
 	Config map[string]interface{} `json:"config,omitempty" db:"config"`
 }
@@ -233,6 +236,19 @@ type SystemConfig struct {
 	Value       string    `json:"value" db:"value"`
 	Description string    `json:"description,omitempty" db:"description"`
 	UpdatedAt   time.Time `json:"updatedAt" db:"updated_at"`
+}
+
+// Executor 执行器实例（命名配置；local 单例，docker 可多实例）
+type Executor struct {
+	ID          int64                  `json:"id" db:"id"`
+	Name        string                 `json:"name" db:"name"`
+	Type        string                 `json:"type" db:"type"` // local | docker
+	Description string                 `json:"description,omitempty" db:"description"`
+	Config      map[string]interface{} `json:"config" db:"-"`
+	ConfigJSON  string                 `json:"-" db:"config"`
+	IsDefault   bool                   `json:"isDefault" db:"is_default"`
+	CreatedAt   time.Time              `json:"createdAt" db:"created_at"`
+	UpdatedAt   time.Time              `json:"updatedAt" db:"updated_at"`
 }
 
 // PaginatedResponse 分页响应

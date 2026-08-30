@@ -59,6 +59,16 @@ var schemas = map[string]string{
   },
   "required": ["file"]
 }`,
+	"node update": `{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "flowx-studio node update",
+  "type": "object",
+  "properties": {
+    "id":   {"type": "integer", "description": "节点 ID（必填）；原地更新，ID 不变"},
+    "file": {"type": "string", "description": "节点定义文件（YAML/JSON），'-' 表示 stdin（必填）。字段同 node create；定义为全量替换，省略的字段会被清空（例外：packageConfig/fileAssets 不可经 API 设置，省略时保留原值）"}
+  },
+  "required": ["id", "file"]
+}`,
 	"node delete": `{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "flowx-studio node delete",
@@ -73,9 +83,10 @@ var schemas = map[string]string{
   "title": "flowx-studio node import",
   "type": "object",
   "properties": {
-    "type": {"type": "string", "enum": ["git", "folder"], "description": "来源类型（必填）"},
-    "url":  {"type": "string", "description": "Git 仓库 URL（type=git 时必填）"},
-    "path": {"type": "string", "description": "本地目录路径（type=folder 时必填），目录下须包含合法的 flowx.json"}
+    "type":      {"type": "string", "enum": ["git", "folder"], "description": "来源类型（必填）"},
+    "url":       {"type": "string", "description": "Git 仓库 URL（type=git 时必填）"},
+    "path":      {"type": "string", "description": "本地目录路径（type=folder 时必填），目录下须包含合法的 flowx.json"},
+    "overwrite": {"type": "boolean", "default": false, "description": "同名节点已存在时原地更新（保持节点 ID 不变），无需先 delete；为 false 时同名冲突报错"}
   },
   "required": ["type"]
 }`,
@@ -121,6 +132,43 @@ var schemas = map[string]string{
     "level":   {"type": "string", "enum": ["info", "warn", "error"], "default": "info"}
   },
   "required": ["title", "message"]
+}`,
+	"executor create": `{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "flowx-studio executor create",
+  "type": "object",
+  "properties": {
+    "file": {"type": "string", "description": "执行器定义文件（YAML/JSON），'-' 表示 stdin（必填）。字段：name（必填，字母开头）、type（必填，local|docker；local 全局限一个、docker 可多个；k8s 暂不支持）、description、config（对象；docker 支持 host/tlsVerify/certPath/registry/network/workdir/volumes/env/tty，local 支持 shell/workdir/timeout/env/pty）"}
+  },
+  "required": ["file"]
+}`,
+	"executor update": `{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "flowx-studio executor update",
+  "type": "object",
+  "properties": {
+    "id":   {"type": "integer", "description": "执行器 ID（必填）"},
+    "file": {"type": "string", "description": "执行器定义文件（YAML/JSON），'-' 表示 stdin（必填）。仅 description/config 可更新；name 与 type 不可变更"}
+  },
+  "required": ["id", "file"]
+}`,
+	"executor delete": `{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "flowx-studio executor delete",
+  "type": "object",
+  "properties": {
+    "id": {"type": "integer", "description": "执行器 ID（必填）；默认执行器禁止删除，请先 executor set-default 切换"}
+  },
+  "required": ["id"]
+}`,
+	"executor set-default": `{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "flowx-studio executor set-default",
+  "type": "object",
+  "properties": {
+    "id": {"type": "integer", "description": "执行器 ID（必填）；设为全局默认后，未声明 executor 的 nodeRef 节点将使用它"}
+  },
+  "required": ["id"]
 }`,
 }
 

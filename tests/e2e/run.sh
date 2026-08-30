@@ -271,6 +271,39 @@ printf '%s' "${HEALTH}" | grep -q '"nodes"' && ok "10.1 health has db metrics" |
 [ -d "${DATA_DIR}/backups" ] && [ "$(ls "${DATA_DIR}/backups" | grep -c '\.db$')" -ge 1 ] \
     && ok "10.2 auto backup on startup" || bad "10.2 auto backup on startup"
 
+# ---------- 11. 执行器实例 ----------
+say "== 11. executors =="
+assert_exit "11.1 executor list" 0 FXS executor list
+assert_contains "11.1 seeded local default" "local"
+assert_contains "11.1 default marker" "(default)"
+cat > "${WORK_DIR}/exec-docker.yaml" <<'EOF'
+name: docker-e2e
+type: docker
+description: e2e 远程构建机
+config:
+  host: tcp://127.0.0.1:2375
+  network: bridge
+EOF
+assert_exit "11.2 create docker executor" 0 FXS executor create --file "${WORK_DIR}/exec-docker.yaml"
+assert_contains "11.2 created message" "Created executor"
+printf 'name: k8s-x\ntype: k8s\n' > "${WORK_DIR}/exec-k8s.yaml"
+assert_exit "11.3 k8s rejected" 1 FXS executor create --file "${WORK_DIR}/exec-k8s.yaml"
+assert_contains "11.3 k8s message" "not implemented"
+printf 'name: local2\ntype: local\n' > "${WORK_DIR}/exec-local2.yaml"
+assert_exit "11.4 local singleton" 1 FXS executor create --file "${WORK_DIR}/exec-local2.yaml"
+assert_contains "11.4 singleton message" "only one local executor"
+DOCKER_EXEC_ID=$(FXS executor list --json | grep -o '"name":"docker-e2e"[^}]*' | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)
+if [ -z "${DOCKER_EXEC_ID}" ]; then
+    DOCKER_EXEC_ID=$(FXS executor list --json | python3 -c "import json,sys; print([e['id'] for e in json.load(sys.stdin) if e['name']=='docker-e2e'][0])" 2>/dev/null)
+fi
+[ -n "${DOCKER_EXEC_ID}" ] && ok "11.5 got docker executor id" || bad "11.5 got docker executor id"
+assert_exit "11.6 set-default" 0 FXS executor set-default --id "${DOCKER_EXEC_ID}"
+assert_contains "11.6 default message" "Default executor is now"
+assert_exit "11.7 delete default refused" 1 FXS executor delete --id "${DOCKER_EXEC_ID}"
+assert_contains "11.7 refuse message" "cannot delete the default"
+assert_exit "11.8 schema output" 0 FXS executor create --schema
+assert_contains "11.8 schema has host" "host"
+
 # ---------- 5. 交互命令 ----------
 say "== 5. interaction commands =="
 OUT=$(echo "" | FXS ask --key env --prompt "pick env" --default prod 2>/dev/null)

@@ -26,6 +26,7 @@ type WorkflowService struct {
 	validator *validator.WorkflowValidator
 	nodeSvc   *NodeService
 	audit     *AuditService
+	executors *ExecutorService
 	logRing   *LogRingBuffer
 	metaMu    sync.Mutex
 	metaCache map[int64]map[string]interface{}
@@ -49,6 +50,21 @@ func NewWorkflowService(database *db.DB, rt *runtime.Adapter, bus *event.Bus, no
 // SetAudit 注入审计服务（可选）；审计写入失败不影响主流程
 func (s *WorkflowService) SetAudit(a *AuditService) {
 	s.audit = a
+}
+
+// SetExecutors 注入执行器实例服务（可选）；注入后 nodeRef 展开支持
+// executor.ref 引用注册实例与全局默认执行器
+func (s *WorkflowService) SetExecutors(e *ExecutorService) {
+	s.executors = e
+}
+
+// executorResolver 供 ExpandWorkflowConfig 解析执行器实例；
+// 未注入 ExecutorService 时返回 nil（展开器回退匿名实例合成）
+func (s *WorkflowService) executorResolver() runtime.ExecutorResolver {
+	if s.executors == nil {
+		return nil
+	}
+	return s.executors.ResolveForNode
 }
 
 // auditRecord 静默记录审计日志
@@ -243,7 +259,7 @@ func (s *WorkflowService) MockRun(id int64) (map[string]interface{}, error) {
 
 	expanded := wf.YAMLConfig
 	if s.nodeSvc != nil {
-		expanded, err = runtime.ExpandWorkflowConfig(wf.YAMLConfig, s.expandLookup)
+		expanded, err = runtime.ExpandWorkflowConfig(wf.YAMLConfig, s.expandLookup, s.executorResolver())
 		if err != nil {
 			return nil, fmt.Errorf("failed to expand nodeRef: %w", err)
 		}
@@ -261,7 +277,7 @@ func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 
 	yamlConfig := wf.YAMLConfig
 	if s.nodeSvc != nil {
-		expanded, err := runtime.ExpandWorkflowConfig(yamlConfig, s.expandLookup)
+		expanded, err := runtime.ExpandWorkflowConfig(yamlConfig, s.expandLookup, s.executorResolver())
 		if err != nil {
 			s.db.Exec("UPDATE executions SET status = ?, completed_at = ?, error_message = ? WHERE id = ?",
 				"failed", time.Now(), err.Error(), execID)

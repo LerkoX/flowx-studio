@@ -116,20 +116,6 @@ export async function getExecutionNodes(
   return response.data
 }
 
-/**
- * 更新流水线参数
- * PUT /api/v1/workflows/:id/config
- */
-export async function updateWorkflowParams(
-  workflowId: string,
-  params: Record<string, string>
-): Promise<ApiResponse<void>> {
-  const response = await apiClient.put(`/api/v1/workflows/${workflowId}/config`, {
-    param: params,
-  })
-  return response.data
-}
-
 export async function getExecutionLogs(
   executionId: string,
   params?: {

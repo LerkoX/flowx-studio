@@ -43,6 +43,7 @@ type appServices struct {
 	workflowSvc   *service.WorkflowService
 	auditSvc      *service.AuditService
 	backupSvc     *service.BackupService
+	executorSvc   *service.ExecutorService
 	assetStore    *assets.Store
 }
 
@@ -98,6 +99,7 @@ func main() {
 	rootCmd.AddCommand(cli.NewInfoCmd())     // info（原 FAP show_info）
 	rootCmd.AddCommand(cli.NewAuditCmd())    // audit list（审计日志查询）
 	rootCmd.AddCommand(cli.NewBackupCmd())   // backup create/list/download/restore
+	rootCmd.AddCommand(cli.NewExecutorCmd()) // executor list/create/update/delete/set-default
 
 	if err := rootCmd.Execute(); err != nil {
 		var uerr *usageError
@@ -153,6 +155,9 @@ func newAppServices(cfg *config.Config) (*appServices, func(), error) {
 	auditSvc := service.NewAuditService(database)
 	nodeSvc.SetAudit(auditSvc)
 	workflowSvc.SetAudit(auditSvc)
+	executorSvc := service.NewExecutorService(database, bus)
+	executorSvc.SetAudit(auditSvc)
+	workflowSvc.SetExecutors(executorSvc)
 	backupSvc := service.NewBackupService(database, cfg.Data.Dir, cfg.Data.DBPath)
 
 	cleanup := func() {
@@ -169,6 +174,7 @@ func newAppServices(cfg *config.Config) (*appServices, func(), error) {
 		workflowSvc:   workflowSvc,
 		auditSvc:      auditSvc,
 		backupSvc:     backupSvc,
+		executorSvc:   executorSvc,
 		assetStore:    assetStore,
 	}, cleanup, nil
 }
@@ -254,6 +260,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	handler.NewEventHandler(svcs.bus).RegisterRoutes(api)
 	handler.NewAuditHandler(svcs.auditSvc).RegisterRoutes(api)
 	handler.NewBackupHandler(svcs.backupSvc).RegisterRoutes(api)
+	handler.NewExecutorHandler(svcs.executorSvc).RegisterRoutes(api)
 
 	srv.RegisterStatic()
 

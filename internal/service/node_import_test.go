@@ -65,7 +65,7 @@ func TestNodeImportService_ImportFromFolder(t *testing.T) {
 	nodeSvc.SetAssetStore(&assets.Store{Root: filepath.Join(tmpDir, "assets-store")})
 	importSvc := NewNodeImportService(nodeSvc)
 
-	node, err := importSvc.ImportFromFolder(tmpDir)
+	node, err := importSvc.ImportFromFolder(tmpDir, false)
 	if err != nil {
 		t.Fatalf("import failed: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestNodeImportService_RejectsUpstreamNodeRef(t *testing.T) {
 	defer database.Close()
 
 	importSvc := NewNodeImportService(NewNodeService(database, event.NewBus()))
-	_, err = importSvc.ImportFromFolder(tmpDir)
+	_, err = importSvc.ImportFromFolder(tmpDir, false)
 	if err == nil {
 		t.Fatal("expected import to fail when env references a pipeline node instance ID")
 	}
@@ -187,7 +187,7 @@ func TestNodeImportService_RejectsUpstreamNodeRef(t *testing.T) {
 	defer database2.Close()
 
 	importSvc2 := NewNodeImportService(NewNodeService(database2, event.NewBus()))
-	if _, err := importSvc2.ImportFromFolder(tmpDir2); err == nil {
+	if _, err := importSvc2.ImportFromFolder(tmpDir2, false); err == nil {
 		t.Fatal("expected import to fail when run references a pipeline node instance ID")
 	}
 }
@@ -217,7 +217,7 @@ func TestNodeImportService_AcceptsParamSourceHint(t *testing.T) {
 	nodeSvc := NewNodeService(database, event.NewBus())
 	nodeSvc.SetAssetStore(&assets.Store{Root: filepath.Join(tmpDir, "assets-store")})
 	importSvc := NewNodeImportService(nodeSvc)
-	node, err := importSvc.ImportFromFolder(tmpDir)
+	node, err := importSvc.ImportFromFolder(tmpDir, false)
 	if err != nil {
 		t.Fatalf("import failed: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestNodeImportService_RejectsInvalidParamSource(t *testing.T) {
 	defer database.Close()
 
 	importSvc := NewNodeImportService(NewNodeService(database, event.NewBus()))
-	_, err = importSvc.ImportFromFolder(tmpDir)
+	_, err = importSvc.ImportFromFolder(tmpDir, false)
 	if err == nil || !strings.Contains(err.Error(), "source.output") {
 		t.Errorf("expected source.output required error, got: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestNodeImportService_ImportWithUI(t *testing.T) {
 	nodeSvc.SetAssetStore(&assets.Store{Root: filepath.Join(tmpDir, "assets-store")})
 	importSvc := NewNodeImportService(nodeSvc)
 
-	node, err := importSvc.ImportFromFolder(tmpDir)
+	node, err := importSvc.ImportFromFolder(tmpDir, false)
 	if err != nil {
 		t.Fatalf("import failed: %v", err)
 	}
@@ -391,7 +391,7 @@ func TestNodeImportService_RejectsInvalidUI(t *testing.T) {
 			defer database.Close()
 
 			importSvc := NewNodeImportService(NewNodeService(database, event.NewBus()))
-			_, err = importSvc.ImportFromFolder(tmpDir)
+			_, err = importSvc.ImportFromFolder(tmpDir, false)
 			if err == nil || !strings.Contains(err.Error(), tc.errContains) {
 				t.Errorf("expected error containing %q, got: %v", tc.errContains, err)
 			}
@@ -420,8 +420,56 @@ func TestNodeImportService_RejectsOversizedUI(t *testing.T) {
 	defer database.Close()
 
 	importSvc := NewNodeImportService(NewNodeService(database, event.NewBus()))
-	_, err = importSvc.ImportFromFolder(tmpDir)
+	_, err = importSvc.ImportFromFolder(tmpDir, false)
 	if err == nil || !strings.Contains(err.Error(), "10MB") {
 		t.Errorf("expected 10MB size limit error, got: %v", err)
+	}
+}
+
+func TestNodeImportService_ExecutorRefValidation(t *testing.T) {
+	cases := []struct {
+		name     string
+		executor string
+		wantErr  string
+	}{
+		{"valid ref", `"executor": {"ref": "docker-gpu"}`, ""},
+		{"ref and type mutually exclusive", `"executor": {"ref": "docker-gpu", "type": "docker"}`, "mutually exclusive"},
+		{"bad ref format", `"executor": {"ref": "1bad"}`, "invalid executor.ref"},
+		{"k8s type rejected", `"executor": {"type": "k8s"}`, "not implemented"},
+		{"kubernetes type rejected", `"executor": {"type": "kubernetes"}`, "not implemented"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir, cleanup := writeTestPackage(t, `{
+  "name": "exec-test-node",
+  "language": "python",
+  "entry": "main.py",
+  "parameters": [],
+  `+tc.executor+`
+}`)
+			defer cleanup()
+
+			database, err := db.New(filepath.Join(tmpDir, "test.db"))
+			if err != nil {
+				t.Fatalf("failed to open db: %v", err)
+			}
+			defer database.Close()
+
+			importSvc := NewNodeImportService(NewNodeService(database, event.NewBus()))
+			if tc.wantErr == "" {
+				// 合法用例需要走完整个导入流程（资产外置后需注入 store）
+				importSvc.nodeSvc.SetAssetStore(&assets.Store{Root: filepath.Join(tmpDir, "assets-store")})
+			}
+			_, err = importSvc.ImportFromFolder(tmpDir, false)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Errorf("import should succeed, got: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error = %v, want substring %q", err, tc.wantErr)
+			}
+		})
 	}
 }

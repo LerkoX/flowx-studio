@@ -341,16 +341,18 @@ Mermaid `stateDiagram-v2` 中的 `[*]` 渲染为圆形 Start / End 节点（`com
 
 ### 5.7.4 界面 4: 执行器配置 (ExecutorConfigPage)
 
-两栏布局（移动端为纵向滚动 + 横向类型卡片）：
+执行器**实例**管理页（2026-09-01 重写，数据落地到后端 `/api/v1/executors`，不再是纯前端假页面）：
 
-- **左侧**：执行器类型列表，三种类型：
-  - Local（本地 Shell 执行器）
-  - Docker（Docker 容器执行器）
-  - Kubernetes（K8s Pod 执行器）
-  - 每项包含图标、名称、描述，选中项高亮
-- **右侧**：上下两部分：
-  - 上部：`ExecutorForm` 配置表单（根据选中的执行器类型渲染不同表单字段）
-  - 下部：`ExecutorMonitor` 监控面板（显示状态和资源使用）
+- **左侧**：执行器实例列表 + 「新增 Docker 执行器」按钮：
+  - `local` 本地 Shell 执行器（全局限一个，迁移时自动播种）
+  - N 个 docker 实例（可配置不同 daemon 地址、网络、卷挂载等）
+  - 默认执行器带星标；无 K8s（暂不支持，导入含 `executor.type: k8s` 的节点包会被后端拒绝）
+- **右侧**：`ExecutorForm` 配置表单（按选中实例类型渲染真实字段，读写后端）：
+  - local：shell / workdir / timeout / env / pty
+  - docker：**host（远程 daemon 地址，支持 `tcp://` / `ssh://`，留空读 `DOCKER_HOST`）** / tlsVerify / certPath / registry / network / workdir / volumes / env / tty
+  - 操作区：设为默认执行器、删除（仅非默认的 docker 实例可删）
+- 数据源：`executorService.ts` + `executorStore.ts`（Zustand），订阅全局 SSE 的 `executor.*` 事件实时刷新
+- 假监控面板 `ExecutorMonitor` 已移除（无真实数据源）
 
 ### 5.7.5 界面 5: 设置 (SettingsPage)
 

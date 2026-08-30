@@ -11,7 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// NewNodeCmd 创建 node 命令组（list/create/delete/import/mock）。
+// NewNodeCmd 创建 node 命令组（list/create/update/delete/import/mock）。
 func NewNodeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "node",
@@ -20,6 +20,7 @@ func NewNodeCmd() *cobra.Command {
 	cmd.AddCommand(
 		newNodeListCmd(),
 		newNodeCreateCmd(),
+		newNodeUpdateCmd(),
 		newNodeDeleteCmd(),
 		newNodeImportCmd(),
 		newNodeMockCmd(),
@@ -139,6 +140,54 @@ func newNodeCreateCmd() *cobra.Command {
 	return cmd
 }
 
+func newNodeUpdateCmd() *cobra.Command {
+	var id int64
+	var file string
+	cmd := &cobra.Command{
+		Use:   "update",
+		Short: "Update a node in place from a YAML/JSON definition file (keeps node ID)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if maybePrintSchema("node update") {
+				return nil
+			}
+			if id <= 0 {
+				return fmt.Errorf("--id is required. Run `flowx-studio node update --schema` for the parameter contract")
+			}
+			if file == "" {
+				return fmt.Errorf("--file is required. Run `flowx-studio node update --schema` for the parameter contract")
+			}
+			raw, err := readFileOrStdin(file)
+			if err != nil {
+				return fmt.Errorf("failed to read node definition: %w", err)
+			}
+
+			// YAML 是 JSON 超集，统一用 YAML 解析后转 JSON 提交。
+			var def map[string]interface{}
+			if err := yaml.Unmarshal(raw, &def); err != nil {
+				return fmt.Errorf("invalid node definition: %w. Please fix the file and retry.", err)
+			}
+
+			data, err := do(cmd.Context(), http.MethodPut, "/nodes/"+strconv.FormatInt(id, 10), nil, def)
+			if err != nil {
+				return fail("update node", err, false)
+			}
+
+			var n struct {
+				ID   int64  `json:"id"`
+				Name string `json:"name"`
+			}
+			_ = json.Unmarshal(data, &n)
+			printData(data, func() {
+				fmt.Printf("Updated node id=%d name=%s\n", n.ID, n.Name)
+			})
+			return nil
+		},
+	}
+	cmd.Flags().Int64Var(&id, "id", 0, "node ID (required)")
+	cmd.Flags().StringVar(&file, "file", "", "node definition file (YAML/JSON), '-' for stdin (required)")
+	return cmd
+}
+
 func newNodeDeleteCmd() *cobra.Command {
 	var id int64
 	cmd := &cobra.Command{
@@ -167,6 +216,7 @@ func newNodeDeleteCmd() *cobra.Command {
 
 func newNodeImportCmd() *cobra.Command {
 	var sourceType, sourceURL, sourcePath string
+	var overwrite bool
 	cmd := &cobra.Command{
 		Use:   "import",
 		Short: "Import a node package (flowx.json) from a git repo or local folder",
@@ -174,7 +224,7 @@ func newNodeImportCmd() *cobra.Command {
 			if maybePrintSchema("node import") {
 				return nil
 			}
-			body := map[string]string{"source_type": sourceType}
+			body := map[string]interface{}{"source_type": sourceType, "overwrite": overwrite}
 			switch sourceType {
 			case "git":
 				if sourceURL == "" {
@@ -198,7 +248,11 @@ func newNodeImportCmd() *cobra.Command {
 			var n nodeJSON
 			_ = json.Unmarshal(data, &n)
 			printData(data, func() {
-				fmt.Printf("Imported node id=%d name=%s version=%s language=%s\n", n.ID, n.Name, n.Version, n.Language)
+				verb := "Imported"
+				if overwrite {
+					verb = "Imported (overwrite)"
+				}
+				fmt.Printf("%s node id=%d name=%s version=%s language=%s\n", verb, n.ID, n.Name, n.Version, n.Language)
 			})
 			return nil
 		},
@@ -206,6 +260,7 @@ func newNodeImportCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sourceType, "type", "", "source type: git|folder (required)")
 	cmd.Flags().StringVar(&sourceURL, "url", "", "git repository URL (required when --type=git)")
 	cmd.Flags().StringVar(&sourcePath, "path", "", "local folder path (required when --type=folder)")
+	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "update in place when a node with the same name exists (keeps node ID; no need to delete first)")
 	return cmd
 }
 

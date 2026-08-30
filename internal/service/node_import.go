@@ -25,8 +25,9 @@ func NewNodeImportService(nodeSvc *NodeService) *NodeImportService {
 	return &NodeImportService{nodeSvc: nodeSvc}
 }
 
-// ImportFromGit 从 Git 仓库导入节点包
-func (s *NodeImportService) ImportFromGit(url string) (*model.Node, error) {
+// ImportFromGit 从 Git 仓库导入节点包。
+// overwrite 为 true 且同名节点已存在时原地更新（保持节点 ID 不变），否则报错。
+func (s *NodeImportService) ImportFromGit(url string, overwrite bool) (*model.Node, error) {
 	if strings.TrimSpace(url) == "" {
 		return nil, fmt.Errorf("git url is required")
 	}
@@ -42,15 +43,16 @@ func (s *NodeImportService) ImportFromGit(url string) (*model.Node, error) {
 		return nil, fmt.Errorf("failed to clone git repo: %w", err)
 	}
 
-	node, err := s.importFromPath(cloneDir, "git", url, "")
+	node, err := s.importFromPath(cloneDir, "git", url, "", overwrite)
 	if err != nil {
 		return nil, err
 	}
 	return node, nil
 }
 
-// ImportFromFolder 从本地文件夹导入节点包
-func (s *NodeImportService) ImportFromFolder(path string) (*model.Node, error) {
+// ImportFromFolder 从本地文件夹导入节点包。
+// overwrite 为 true 且同名节点已存在时原地更新（保持节点 ID 不变），否则报错。
+func (s *NodeImportService) ImportFromFolder(path string, overwrite bool) (*model.Node, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("folder path is required")
 	}
@@ -60,7 +62,7 @@ func (s *NodeImportService) ImportFromFolder(path string) (*model.Node, error) {
 		return nil, fmt.Errorf("failed to resolve folder path: %w", err)
 	}
 
-	node, err := s.importFromPath(absPath, "folder", "", absPath)
+	node, err := s.importFromPath(absPath, "folder", "", absPath, overwrite)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +76,7 @@ func (s *NodeImportService) gitClone(url, dir string) error {
 	return cmd.Run()
 }
 
-func (s *NodeImportService) importFromPath(dir, sourceType, sourceURL, sourcePath string) (*model.Node, error) {
+func (s *NodeImportService) importFromPath(dir, sourceType, sourceURL, sourcePath string, overwrite bool) (*model.Node, error) {
 	configPath := filepath.Join(dir, "flowx.json")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -93,6 +95,21 @@ func (s *NodeImportService) importFromPath(dir, sourceType, sourceURL, sourcePat
 	node, err := s.buildNode(dir, &pkg, sourceType, sourceURL, sourcePath)
 	if err != nil {
 		return nil, err
+	}
+
+	// 原地更新：同名节点已存在时保留原 ID 覆盖记录。
+	// 流水线按 nodeRef 名称引用节点，ID 不变即无感知；资产已由 buildNode 落盘。
+	if overwrite {
+		if existing, err := s.nodeSvc.GetByName(node.Name); err == nil && existing != nil {
+			if err := s.nodeSvc.Update(existing.ID, node); err != nil {
+				return nil, err
+			}
+			node.ID = existing.ID
+			s.nodeSvc.auditRecord("import_node_overwrite", fmt.Sprintf("%d", node.ID),
+				fmt.Sprintf("name=%s source=%s", node.Name, sourceType))
+			return node, nil
+		}
+		// 同名节点不存在时退化为创建
 	}
 
 	created, err := s.nodeSvc.Create(node)
@@ -177,9 +194,18 @@ func (s *NodeImportService) validatePackage(dir string, pkg *model.NodePackage) 
 		return err
 	}
 
+	if pkg.Executor.Ref != "" {
+		if pkg.Executor.Type != "" {
+			return fmt.Errorf("executor.ref and executor.type are mutually exclusive; use ref to reference a registered executor, or type+config for an inline one")
+		}
+		if !executorNameRe.MatchString(pkg.Executor.Ref) {
+			return fmt.Errorf("invalid executor.ref %q: must start with a letter and contain only letters, digits, '_' or '-'", pkg.Executor.Ref)
+		}
+	}
+
 	if pkg.Executor.Type != "" {
 		if !isValidExecutorType(pkg.Executor.Type) {
-			return fmt.Errorf("invalid executor type: %s", pkg.Executor.Type)
+			return fmt.Errorf("invalid executor type: %s (only local and docker are supported; k8s is not implemented yet)", pkg.Executor.Type)
 		}
 	}
 
@@ -237,7 +263,7 @@ func isValidParamType(t string) bool {
 
 func isValidExecutorType(t string) bool {
 	switch strings.ToLower(t) {
-	case "local", "docker", "k8s", "kubernetes":
+	case "local", "docker":
 		return true
 	}
 	return false

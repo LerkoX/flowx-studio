@@ -230,11 +230,26 @@ func (s *NodeService) Create(req *model.Node) (*model.Node, error) {
 	return req, nil
 }
 
-// Update 更新节点
+// Update 原地更新节点（保持 ID 不变；流水线按 nodeRef 名称引用，不受影响）。
+// ID 不存在返回 "node not found"；改名为已占用名称返回 "node name already exists"。
+// PackageConfig / FileAssets 无法通过 API 设置（PackageConfig json:"-"，资产由导入流程落盘），
+// 请求未携带时保留原值，避免更新导入的节点包时丢失 UI 配置与资产索引。
 func (s *NodeService) Update(id int64, req *model.Node) error {
 	if err := validator.ValidateNode(req); err != nil {
 		return err
 	}
+
+	existing, err := s.Get(id)
+	if err != nil {
+		return err // 含 "node not found"
+	}
+	if req.PackageConfig == nil {
+		req.PackageConfig = existing.PackageConfig
+	}
+	if req.FileAssets == nil {
+		req.FileAssets = existing.FileAssets
+	}
+
 	paramsJSON, _ := json.Marshal(req.Parameters)
 	outputsJSON, _ := json.Marshal(req.Outputs)
 	reqsJSON, _ := json.Marshal(req.Requirements)
@@ -244,7 +259,7 @@ func (s *NodeService) Update(id int64, req *model.Node) error {
 	fileAssetsJSON, _ := json.Marshal(req.FileAssets)
 	pkgJSON, _ := json.Marshal(req.PackageConfig)
 
-	_, err := s.db.Exec(`
+	result, err := s.db.Exec(`
 		UPDATE nodes SET
 			name = ?, display_name = ?, description = ?, version = ?, author = ?, icon = ?, node_type = ?,
 			language = ?, code = ?, entry = ?, requirements = ?, image = ?,
@@ -257,7 +272,13 @@ func (s *NodeService) Update(id int64, req *model.Node) error {
 		string(pkgJSON), req.SourceType, req.SourceURL, req.SourcePath, string(tagsJSON), string(fileAssetsJSON), id)
 
 	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return fmt.Errorf("node name already exists")
+		}
 		return fmt.Errorf("failed to update node: %w", err)
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return fmt.Errorf("node not found")
 	}
 
 	req.ID = id

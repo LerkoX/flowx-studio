@@ -1,125 +1,206 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Server, Container, Cloud } from 'lucide-react'
+import { Server, Container, Plus, Star, Trash2 } from 'lucide-react'
 import ExecutorForm from '@/features/executor-config/ExecutorForm'
-import ExecutorMonitor from '@/features/executor-config/ExecutorMonitor'
+import GlassPanel from '@/components/GlassPanel'
+import { useExecutorStore } from '@/stores/executorStore'
+import { useEventStream } from '@/services/eventService'
 import { useIsMobile } from '@/hooks/useMediaQuery'
+import type { Executor } from '@/types/executor'
 
-const executorTypes = [
-  { id: 'local', name: 'Local', icon: Server, description: '本地 Shell 执行器' },
-  { id: 'docker', name: 'Docker', icon: Container, description: 'Docker 容器执行器' },
-  { id: 'kubernetes', name: 'Kubernetes', icon: Cloud, description: 'K8s Pod 执行器' },
-]
+const typeIcon = { local: Server, docker: Container }
+const typeDesc = { local: '本地 Shell 执行器', docker: 'Docker 容器执行器' }
 
 export default function ExecutorConfigPage() {
-  const [selectedExecutor, setSelectedExecutor] = useState<string>('local')
+  const { executors, isLoading, error, loadExecutors, create, update, remove, setDefault } =
+    useExecutorStore()
+  const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [opError, setOpError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
   const isMobile = useIsMobile()
+
+  useEffect(() => {
+    loadExecutors()
+  }, [loadExecutors])
+
+  // 实时感知其他端（CLI / 其他浏览器）对执行器的变更
+  useEventStream('/api/v1/events', (type) => {
+    if (type.startsWith('executor.')) {
+      loadExecutors()
+    }
+  })
+
+  const selected: Executor | null =
+    (!creating && executors.find((e) => e.id === selectedId)) ||
+    (!creating && executors.length > 0 ? executors[0] : null) ||
+    null
+
+  const runOp = async (op: () => Promise<void>) => {
+    setSaving(true)
+    setOpError(null)
+    try {
+      await op()
+      setCreating(false)
+    } catch (err) {
+      setOpError(err instanceof Error ? err.message : '操作失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const executorList = (compact: boolean) => (
+    <>
+      {executors.map((executor) => {
+        const Icon = typeIcon[executor.type] ?? Server
+        const isActive = !creating && selected?.id === executor.id
+        return (
+          <motion.button
+            key={executor.id}
+            onClick={() => {
+              setCreating(false)
+              setSelectedId(executor.id)
+            }}
+            className={`
+              ${compact ? 'flex-shrink-0 p-3 rounded-xl' : 'w-full p-4 rounded-2xl'}
+              text-left transition-all
+              ${isActive
+                ? 'bg-white/10 border border-white/20'
+                : 'bg-white/5 border border-white/10 hover:bg-white/[0.07]'
+              }
+            `}
+            whileHover={compact ? undefined : { scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <div className="flex items-center gap-3">
+              <div
+                className={`
+                  ${compact ? 'w-8 h-8' : 'w-10 h-10'} rounded-xl flex items-center justify-center
+                  ${isActive ? 'bg-gradient-to-br from-indigo-500 to-purple-500' : 'bg-white/5'}
+                `}
+              >
+                <Icon size={compact ? 16 : 20} className={isActive ? 'text-white' : 'text-white/50'} />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-white/90 font-medium text-sm truncate">{executor.name}</span>
+                  {executor.isDefault && (
+                    <Star size={12} className="text-amber-400 fill-amber-400 flex-shrink-0" />
+                  )}
+                </div>
+                <div className="text-white/40 text-xs mt-0.5">{typeDesc[executor.type]}</div>
+              </div>
+            </div>
+          </motion.button>
+        )
+      })}
+
+      <motion.button
+        onClick={() => setCreating(true)}
+        className={`
+          ${compact ? 'flex-shrink-0 p-3 rounded-xl' : 'w-full p-4 rounded-2xl'}
+          text-left transition-all border border-dashed
+          ${creating
+            ? 'bg-white/10 border-indigo-400/50'
+            : 'bg-transparent border-white/15 hover:bg-white/5 hover:border-white/25'
+          }
+        `}
+        whileTap={{ scale: 0.98 }}
+      >
+        <div className="flex items-center gap-3">
+          <div
+            className={`
+              ${compact ? 'w-8 h-8' : 'w-10 h-10'} rounded-xl flex items-center justify-center bg-white/5
+            `}
+          >
+            <Plus size={compact ? 16 : 20} className="text-white/50" />
+          </div>
+          <div>
+            <div className="text-white/70 font-medium text-sm">新增 Docker 执行器</div>
+            <div className="text-white/40 text-xs mt-0.5">可配置远程 daemon 地址</div>
+          </div>
+        </div>
+      </motion.button>
+    </>
+  )
+
+  const detailPanel = (
+    <div className="flex-1 flex flex-col gap-4 min-w-0">
+      <ExecutorForm
+        executor={creating ? null : selected}
+        saving={saving}
+        error={opError}
+        onSave={async (input) => {
+          if (creating) {
+            await runOp(() => create(input as Parameters<typeof create>[0]))
+          } else if (selected) {
+            await runOp(() => update(selected.id, input as Parameters<typeof update>[1]))
+          }
+        }}
+        onCancelCreate={() => setCreating(false)}
+      />
+
+      {!creating && selected && (
+        <GlassPanel className="p-4 flex items-center gap-3 flex-wrap">
+          {!selected.isDefault && (
+            <button
+              onClick={() => runOp(() => setDefault(selected.id))}
+              disabled={saving}
+              className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10
+                         text-white/70 text-xs hover:bg-white/10 hover:text-white transition-all
+                         disabled:opacity-40 flex items-center gap-1.5"
+            >
+              <Star size={12} /> 设为默认执行器
+            </button>
+          )}
+          {selected.isDefault && (
+            <span className="text-amber-400/80 text-xs flex items-center gap-1.5">
+              <Star size={12} className="fill-amber-400" /> 当前默认执行器
+            </span>
+          )}
+          {selected.type === 'docker' && !selected.isDefault && (
+            <button
+              onClick={() => {
+                if (window.confirm(`确定删除执行器 "${selected.name}" 吗？引用它的节点将无法运行。`)) {
+                  runOp(() => remove(selected.id))
+                }
+              }}
+              disabled={saving}
+              className="px-3 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20
+                         text-rose-300 text-xs hover:bg-rose-500/20 transition-all
+                         disabled:opacity-40 flex items-center gap-1.5"
+            >
+              <Trash2 size={12} /> 删除
+            </button>
+          )}
+        </GlassPanel>
+      )}
+    </div>
+  )
 
   if (isMobile) {
     return (
       <div className="h-full overflow-auto p-4 space-y-4">
         <h2 className="text-white/90 font-semibold text-lg">执行器</h2>
-
-        {/* 执行器类型卡片 - 横向滚动 */}
-        <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
-          {executorTypes.map((type) => {
-            const Icon = type.icon
-            const isActive = selectedExecutor === type.id
-
-            return (
-              <motion.button
-                key={type.id}
-                onClick={() => setSelectedExecutor(type.id)}
-                className={`
-                  flex-shrink-0 p-3 rounded-xl text-left transition-all
-                  ${isActive
-                    ? 'bg-white/10 border border-white/20'
-                    : 'bg-white/5 border border-white/10 hover:bg-white/[0.07]'
-                  }
-                `}
-                whileTap={{ scale: 0.98 }}
-              >
-                <div className="flex items-center gap-2">
-                  <div
-                    className={`
-                      w-8 h-8 rounded-lg flex items-center justify-center
-                      ${isActive
-                        ? 'bg-gradient-to-br from-indigo-500 to-purple-500'
-                        : 'bg-white/5'
-                      }
-                    `}
-                  >
-                    <Icon size={16} className={isActive ? 'text-white' : 'text-white/50'} />
-                  </div>
-                  <div>
-                    <div className="text-white/90 font-medium text-sm">{type.name}</div>
-                    <div className="text-white/40 text-xs">{type.description}</div>
-                  </div>
-                </div>
-              </motion.button>
-            )
-          })}
-        </div>
-
-        {/* 配置表单 */}
-        <div className="space-y-4">
-          <ExecutorForm type={selectedExecutor} />
-          <ExecutorMonitor type={selectedExecutor} />
-        </div>
+        {error && <p className="text-rose-400 text-xs">{error}</p>}
+        <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">{executorList(true)}</div>
+        {detailPanel}
       </div>
     )
   }
 
   return (
     <div className="h-full flex p-6 gap-6">
-      {/* 执行器列表 */}
       <div className="w-80 flex-shrink-0 space-y-3">
         <h2 className="text-white/90 font-semibold text-lg mb-4">执行器</h2>
-        {executorTypes.map((type) => {
-          const Icon = type.icon
-          const isActive = selectedExecutor === type.id
-
-          return (
-            <motion.button
-              key={type.id}
-              onClick={() => setSelectedExecutor(type.id)}
-              className={`
-                w-full p-4 rounded-2xl text-left transition-all
-                ${isActive
-                  ? 'bg-white/10 border border-white/20'
-                  : 'bg-white/5 border border-white/10 hover:bg-white/[0.07]'
-                }
-              `}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <div className="flex items-center gap-3">
-                <div
-                  className={`
-                    w-10 h-10 rounded-xl flex items-center justify-center
-                    ${isActive
-                      ? 'bg-gradient-to-br from-indigo-500 to-purple-500'
-                      : 'bg-white/5'
-                    }
-                  `}
-                >
-                  <Icon size={20} className={isActive ? 'text-white' : 'text-white/50'} />
-                </div>
-                <div>
-                  <div className="text-white/90 font-medium text-sm">{type.name}</div>
-                  <div className="text-white/40 text-xs mt-0.5">{type.description}</div>
-                </div>
-              </div>
-            </motion.button>
-          )
-        })}
+        {error && <p className="text-rose-400 text-xs">{error}</p>}
+        {isLoading && executors.length === 0 ? (
+          <p className="text-white/40 text-sm">加载中…</p>
+        ) : (
+          executorList(false)
+        )}
       </div>
-
-      {/* 配置表单 */}
-      <div className="flex-1 flex flex-col gap-6">
-        <ExecutorForm type={selectedExecutor} />
-        <ExecutorMonitor type={selectedExecutor} />
-      </div>
+      {detailPanel}
     </div>
   )
 }

@@ -122,7 +122,7 @@ CLI 调用前可用以下命令探测与启动 server；`status` 退出码恒为
 | 命令 | 说明 |
 | --- | --- |
 | `flowx-studio server status` | 输出 `running (pid=N, url=...)` 或 `stopped`；`--json` 输出 `{"status":"running","pid":N,"url":"..."}` |
-| `flowx-studio server start [--port 8080] [--host 0.0.0.0]` | 后台守护启动（Setsid 脱离终端，日志写入 `<data.dir>/server.log`），阻塞轮询就绪（复用 `GET /api/v1/config/system` 探测，任意 HTTP 响应即就绪，超时 10s）；已在运行时幂等输出 `Server already running` 并退出 0 |
+| `flowx-studio server start [--port 8080] [--host 0.0.0.0]` | 后台守护启动（Setsid 脱离终端，日志写入 `<data.dir>/server.log`），阻塞轮询就绪（复用免认证的 `GET /api/v1/health` 探测，超时 10s）；已在运行时幂等输出 `Server already running` 并退出 0 |
 | `flowx-studio server stop` | SIGTERM 优雅停止，最多等待 5s；未运行时输出 `Server not running` 并清理陈旧 pid 文件 |
 
 实现要点：`runServer` 启动后将实际监听地址写入 `<data.dir>/server.json`（`{pid, host, port}`），`status`/`stop` 读取它探测真实端口；`stop`/`status` 通过 `singleton.FindRunning`（`/proc/<pid>/exe` 比对 + cmdline 子命令匹配）确认进程身份。
@@ -147,7 +147,8 @@ CLI 调用前可用以下命令探测与启动 server；`status` 退出码恒为
 | 命令 | 说明 | 对应原 MCP 工具 |
 | --- | --- | --- |
 | `flowx-studio node list [--language l] [--tag t] [--search kw] [--node-type t] [--page n] [--page-size n]` | 分页列出节点（生成 YAML 前查询可用 `nodeRef` 名称） | `list_nodes` |
-| `flowx-studio node import --type git --url <repo>` / `flowx-studio node import --type folder --path <dir>` | 从 Git 仓库或本地文件夹导入节点包（读取 `flowx.json`） | `import_node` |
+| `flowx-studio node import --type git --url <repo>` / `flowx-studio node import --type folder --path <dir>` [--overwrite] | 从 Git 仓库或本地文件夹导入节点包（读取 `flowx.json`）；`--overwrite` 同名时原地更新保持节点 ID | `import_node` |
+| `flowx-studio node update --id N --file node.yaml` | 原地更新节点定义（保持节点 ID，全量替换） | 无（新增） |
 | `flowx-studio node create --file node.yaml` | 直接创建代码节点（对应原 FAP `create_node` 动作） | 无（原 FAP 能力） |
 | `flowx-studio node delete --id N` | 删除节点 | `delete_node` |
 | `flowx-studio node mock --id N [--params '{...}']` | 触发节点 Mock 测试并输出结果 | 无（新增，便于 Agent 自验） |

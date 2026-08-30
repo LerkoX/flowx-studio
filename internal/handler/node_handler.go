@@ -103,7 +103,7 @@ func (h *NodeHandler) Create(c *gin.Context) {
 	Success(c, node)
 }
 
-// Update 更新节点
+// Update 原地更新节点（保持 ID 不变）
 func (h *NodeHandler) Update(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -117,11 +117,21 @@ func (h *NodeHandler) Update(c *gin.Context) {
 	}
 
 	if err := h.service.Update(id, &req); err != nil {
-		Error(c, http.StatusInternalServerError, err.Error())
+		switch {
+		case err.Error() == "node not found":
+			Error(c, http.StatusNotFound, err.Error())
+		case err.Error() == "node name already exists":
+			Error(c, http.StatusConflict, err.Error())
+		case strings.HasPrefix(err.Error(), "failed to update node"):
+			Error(c, http.StatusInternalServerError, err.Error())
+		default:
+			// 其余为参数校验错误
+			Error(c, http.StatusBadRequest, err.Error())
+		}
 		return
 	}
 
-	Success(c, gin.H{"id": id})
+	Success(c, gin.H{"id": id, "name": req.Name})
 }
 
 // Delete 删除节点
@@ -145,6 +155,7 @@ type ImportRequest struct {
 	SourceType string `json:"source_type"`
 	SourceURL  string `json:"source_url"`
 	SourcePath string `json:"source_path"`
+	Overwrite  bool   `json:"overwrite"`
 }
 
 // Import 导入节点（git / folder）
@@ -160,9 +171,9 @@ func (h *NodeHandler) Import(c *gin.Context) {
 
 	switch sourceType {
 	case "git":
-		node, err = h.importService.ImportFromGit(req.SourceURL)
+		node, err = h.importService.ImportFromGit(req.SourceURL, req.Overwrite)
 	case "folder":
-		node, err = h.importService.ImportFromFolder(req.SourcePath)
+		node, err = h.importService.ImportFromFolder(req.SourcePath, req.Overwrite)
 	default:
 		Error(c, http.StatusBadRequest, "source_type must be git or folder")
 		return

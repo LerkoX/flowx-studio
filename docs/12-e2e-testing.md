@@ -115,6 +115,19 @@
 | 10.1 | 免认证健康检查 | `curl $BASE/api/v1/health`（不带 token） | HTTP 200，`status` 为 `ok`，含 db 计数指标 |
 | 10.2 | 启动自动备份 | `server start` 后检查 `<data.dir>/backups/` | 存在至少一个 `.db` 备份文件 |
 
+### 12.3.11 执行器实例
+
+| # | 目的 | 命令 | 预期 |
+|---|------|------|------|
+| 11.1 | 播种默认 local | `executor list` | 退出 0，含 `local` 与 `(default)` 标记 |
+| 11.2 | 创建 docker 实例（含远程 host） | `executor create --file exec.yaml` | 退出 0，输出含 `Created executor` |
+| 11.3 | k8s 拒绝 | `executor create`（type: k8s） | 退出 1，stderr 含 `not implemented` |
+| 11.4 | local 单例约束 | `executor create`（第二个 local） | 退出 1，stderr 含 `only one local executor` |
+| 11.5 | 实例可查询 | `executor list --json` | 能提取到新 docker 实例 id |
+| 11.6 | 切换默认执行器 | `executor set-default --id <N>` | 退出 0，输出含 `Default executor is now` |
+| 11.7 | 默认执行器禁删 | `executor delete --id <N>`（默认实例） | 退出 1，stderr 含 `cannot delete the default` |
+| 11.8 | 参数契约含 host | `executor create --schema` | 退出 0，stdout 含 `host` |
+
 ## 12.4 AI 驱动方式
 
 **方式一：直接运行脚本（推荐）**

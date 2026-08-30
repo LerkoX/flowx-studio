@@ -28,7 +28,8 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 | 检查/启动/停止 server | `flowx-studio server status` / `server start` / `server stop` |
 | 列出节点（查 nodeRef 名称） | `flowx-studio node list --json` |
 | 创建节点 | `flowx-studio node create --file node.yaml` |
-| 导入节点包（flowx.json） | `flowx-studio node import --type git --url <repo>` 或 `--type folder --path <dir>` |
+| 原地更新节点（YAML 定义，保持 ID） | `flowx-studio node update --id <N> --file node.yaml` |
+| 导入节点包（flowx.json） | `flowx-studio node import --type git --url <repo>` 或 `--type folder --path <dir>`；同名存在时加 `--overwrite` 原地更新 |
 | Mock 测试节点 | `flowx-studio node mock --id <N> [--params '{...}']` |
 | 删除节点 | `flowx-studio node delete --id <N>` |
 | 列出流水线 | `flowx-studio pipeline list [--json]` |
@@ -36,6 +37,9 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 | 更新流水线 | `flowx-studio pipeline update --id <N> [--file wf.yaml] [--status active]` |
 | 运行流水线 | `flowx-studio pipeline run --id <N> [--follow]` |
 | 删除流水线 | `flowx-studio pipeline delete --id <N>` |
+| 列出执行器实例（查 executor.ref 名称） | `flowx-studio executor list [--json]` |
+| 创建执行器（docker 可多个，支持远程 host） | `flowx-studio executor create --file exec.yaml` |
+| 设为全局默认执行器 | `flowx-studio executor set-default --id <N>` |
 | 向用户提问 | `flowx-studio ask --key <k> --prompt "<问题>" [--options a,b,c] [--default v]` |
 | 展示信息卡片 | `flowx-studio info --title <t> --message <m> [--level info\|warn\|error]` |
 
@@ -80,7 +84,7 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 
 1. `node import --type folder --path <dir>`（校验失败按 stderr 修正重试）
 2. `node mock --id <N>` 验证节点逻辑（有 mock 时）
-3. 同名节点已存在时：`node delete --id <旧id>` 后重新导入（pipeline 按 nodeRef 名称引用，不受影响）
+3. 同名节点已存在时：`node import ... --overwrite` 原地更新（保持节点 ID，pipeline 按 nodeRef 名称引用不受影响）；或 `node update --id <N> --file node.yaml` 更新 YAML 定义的节点
 4. 画布验证：pipeline YAML 用 `config.nodeRef: <name>` 引用后运行，浏览器查看内嵌 UI
 
 ## 典型流程

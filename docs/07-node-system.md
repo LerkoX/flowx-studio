@@ -400,7 +400,15 @@ func ExpandNodeToConfig(node *model.Node) (*core.NodeConfig, error)
    - 纯内联节点：`cat > {entry} << 'FLOWX_FILE_EOF'` heredoc 写入入口代码
 4. 追加运行命令（`flowx.json` 的 `run` 字段；缺省时按语言推断，如 `python3 main.py`）
 
-同时以 `{nodeName}-executor` 为名向 `cfg.Executors` 写入执行器配置，类型来自 `flowx.json` 的 `executor.type`（缺省时：有 `image` 为 `docker`，否则 `local`）。未声明 `extract` 时默认 `codec-block`。
+**执行器解析（三级优先级，2026-09-01 起）**：节点展开时对每个 nodeRef 节点按下述规则确定执行器（`node_expander.go` 的 `resolveNodeExecutor`）：
+
+1. `flowx.json` 声明 `executor.ref` → 引用 Studio 注册的执行器实例（`executors` 表），实例配置（含远程 docker 的 `host`/`tlsVerify` 等）写入 `cfg.Executors[实例名]`，**多个节点引用同一实例时共享同一条目**；
+2. `flowx.json` 声明 `executor.type`（+`config`）→ 内联匿名实例，合成 `<node名>-executor`（原行为）；
+3. 均未声明 → 有 `image` 归为 docker（全局默认执行器是 docker 实例时**复用其实例配置**，否则合成匿名 docker）；无 `image` 使用全局默认执行器（`is_default=1`，初始为播种的 `local`）。
+
+执行器实例由 `ExecutorService`（`internal/service/executor.go`）管理：`local` 全局限一个、docker 可多个、全局唯一默认（迁移 010）；API 见 4.9 节 `/executors` 路由组，CLI 为 `flowx-studio executor` 命令组。解析结果同时决定资产引导方式：实例类型为 `local` 时走 `cp` 物化，`docker` 时走签名 URL 拉取。
+
+同时以解析出的执行器名为键向 `cfg.Executors` 写入执行器配置。未声明 `extract` 时默认 `codec-block`。
 
 ### 7.4.2 事件桥接
 

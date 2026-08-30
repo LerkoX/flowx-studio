@@ -4,7 +4,12 @@
   "description": "在画布节点中内嵌渲染可交互的 3D 地球：NASA 真实地表贴图、实时卫星云图（含离线兜底）、按真实世界时间计算的太阳直射点光照（晨昏线实时正确）。入口脚本同时输出当前太阳直射点经纬度供下游节点使用。",
   "version": "1.0.0",
   "author": "flowx-team",
-  "tags": ["3d", "earth", "visualization", "threejs"],
+  "tags": [
+    "3d",
+    "earth",
+    "visualization",
+    "threejs"
+  ],
   "icon": "🌍",
   "language": "bash",
   "entry": "main.sh",
@@ -58,10 +63,26 @@
     "CLOUD_OPACITY": "{{ Param.cloud_opacity }}"
   },
   "outputs": [
-    { "name": "sun_lat", "type": "float", "description": "当前太阳直射点纬度（度，北纬为正）" },
-    { "name": "sun_lon", "type": "float", "description": "当前太阳直射点经度（度，东经为正）" },
-    { "name": "utc_time", "type": "string", "description": "计算时刻的 UTC 时间，ISO8601 格式" },
-    { "name": "config", "type": "string", "description": "UI 渲染配置 JSON（autoRotate/rotationSpeed/cameraLat/cameraLon/cloudOpacity），画布 3D 组件读取使用" }
+    {
+      "name": "sun_lat",
+      "type": "float",
+      "description": "当前太阳直射点纬度（度，北纬为正）"
+    },
+    {
+      "name": "sun_lon",
+      "type": "float",
+      "description": "当前太阳直射点经度（度，东经为正）"
+    },
+    {
+      "name": "utc_time",
+      "type": "string",
+      "description": "计算时刻的 UTC 时间，ISO8601 格式"
+    },
+    {
+      "name": "config",
+      "type": "string",
+      "description": "UI 渲染配置 JSON（autoRotate/rotationSpeed/cameraLat/cameraLon/cloudOpacity），画布 3D 组件读取使用"
+    }
   ],
   "extract": {
     "type": "codec-block"
@@ -72,8 +93,8 @@
   },
   "ui": {
     "entry": "ui/node-widget.js",
-    "width": 420,
-    "height": 360,
+    "width": 800,
+    "height": 800,
     "collapsed": false,
     "apiVersion": 1
   },

@@ -356,30 +356,40 @@ log.Info("Execution started",
 | nodes_total | Gauge | 注册节点总数 |
 | workflows_total | Gauge | 工作流总数 |
 
-### 9.3.3 健康检查（规划中，未实现）
+### 9.3.3 健康检查（已实现）
 
-> ⚠️ 未实现，`GET /api/v1/health` 端点不存在。以下为**目标设计**：
-
-提供健康检查端点：
+已实现（2026-08-21，`internal/handler/health_handler.go`）：
 
 ```http
 GET /api/v1/health
 ```
 
-**响应**：
+**免认证**：不挂在 `/api/v1` 认证路由组下（供监控探针与 `server start/status` 守护探测使用），且不包含敏感数据。响应**不套**统一 `{code, data, message}` 封装：
 
 ```json
 {
-  "status": "healthy",
-  "timestamp": "2025-01-20T10:00:00Z",
-  "version": "1.0.0",
-  "checks": {
-    "database": "ok",
-    "ai_service": "ok",
-    "disk_space": "ok"
+  "status": "ok",
+  "version": "dev",
+  "uptime_sec": 3600,
+  "db": {
+    "ok": true,
+    "size_bytes": 122880,
+    "nodes": 5,
+    "workflows": 2,
+    "executions": 12,
+    "audit_logs": 30
+  },
+  "runtime": {
+    "goroutines": 18,
+    "heap_alloc_mb": 6.4
   }
 }
 ```
+
+**说明**：
+- `status` 正常为 `ok`；任一数据库计数查询失败时降级为 `degraded`（此时 `db.ok=false`）。
+- `version` 由构建时 `-ldflags` 注入；`uptime_sec` 为进程启动以来的秒数。
+- daemon 管理（`server start` / `server status`）的就绪探测使用此端点（`internal/cli/daemon.go`）。
 
 ## 9.4 备份与恢复
 

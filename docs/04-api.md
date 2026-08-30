@@ -248,6 +248,7 @@ POST /api/v1/nodes/import
 | source_type | string | 是 | `git` 或 `folder` |
 | source_url | string | git 时必填 | Git 仓库地址 |
 | source_path | string | folder 时必填 | 本地文件夹路径 |
+| overwrite | bool | 否 | 同名节点已存在时原地更新（保持节点 ID 不变），缺省 false 时同名冲突返回 409 |
 
 **响应示例**：返回导入后的完整节点对象（结构同 4.3.3）。
 
@@ -599,12 +600,18 @@ PUT /api/v1/config/system
 | `pipeline run --id N [--follow]` | 运行流水线/工作流；`--follow` 跟随 SSE 日志 | `POST /workflows/:id/run`、`GET /executions/:id/stream` |
 | `node list` | 列出节点 | `GET /nodes` |
 | `node create --file node.yaml` | 创建节点（承接原 FAP `create_node` 动作） | `POST /nodes` |
-| `node import --type git\|folder ...` | 从 Git 仓库或本地文件夹导入节点（读取 flowx.json） | `POST /nodes/import` |
+| `node update --id N --file node.yaml` | 原地更新节点定义（保持节点 ID；全量替换） | `PUT /nodes/:id` |
+| `node import --type git\|folder ... [--overwrite]` | 从 Git 仓库或本地文件夹导入节点（读取 flowx.json）；`--overwrite` 同名时原地更新保持 ID | `POST /nodes/import` |
 | `node delete --id N` | 删除节点 | `DELETE /nodes/:id` |
 | `node mock --id N` | Mock 测试节点 | `POST /nodes/:id/mock` |
 | `ask --key k --prompt ...` | 终端交互式提问（承接原 FAP `ask_input`，纯终端，不访问 server） | 无 |
 | `info --title t --message m` | 终端信息卡片（承接原 FAP `show_info`，纯终端，不访问 server） | 无 |
 | `audit list` | 查询审计日志（`--action`/`--resource-type` 过滤） | `GET /audit-logs` |
+| `executor list` | 列出执行器实例（local 单例 + docker 多实例，`(default)` 标记默认） | `GET /executors` |
+| `executor create --file exec.yaml` | 创建执行器实例（字段：name/type/description/config；docker config 支持 `host` 远程 daemon 地址） | `POST /executors` |
+| `executor update --id N --file exec.yaml` | 更新执行器 description/config（name/type 不可变更） | `PUT /executors/:id` |
+| `executor delete --id N` | 删除执行器（默认执行器需先 set-default 切换） | `DELETE /executors/:id` |
+| `executor set-default --id N` | 设为全局默认执行器（未声明 executor 的 nodeRef 节点将使用它） | `PUT /executors/:id/default` |
 | `backup create` / `backup list` / `backup download` | 备份创建/列表/下载（`.db` + 配套 `.assets.tar.gz` 节点资产包） | `POST /backups`、`GET /backups`、`GET /backups/:name/download` |
 | `backup restore --file f` | 恢复备份（要求 server 已停止；`f` 旁存在 `.assets.tar.gz` 时自动恢复资产，自动保留 `.pre-restore` 回滚副本） | 无（直接操作数据库文件） |
 
@@ -650,6 +657,14 @@ PUT /api/v1/config/system
 │   ├── GET    /          备份列表
 │   ├── POST   /          创建备份（VACUUM INTO + 资产 tar.gz）
 │   └── GET    /:name/download  下载备份文件（.db 或 .assets.tar.gz）
+│
+├── /executors
+│   ├── GET    /          执行器实例列表（local 单例 + N 个 docker）
+│   ├── POST   /          创建执行器（type=local 已存在 → 409；type=k8s → 400）
+│   ├── GET    /:id       执行器详情
+│   ├── PUT    /:id       更新（name/type 不可变更，仅 description/config）
+│   ├── DELETE /:id       删除（默认执行器禁止删除 → 409）
+│   └── PUT    /:id/default  设为全局默认执行器
 │
 ├── /assets                    ※ 免认证（签名 URL 自校验，供 docker/k8s 执行器拉取节点资产）
 │   └── GET    /nodes/:nodeRef/*filepath?expires&sig  签名 URL 拉取节点文件（HMAC-SHA256 + 时效）

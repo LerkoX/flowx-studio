@@ -4,7 +4,7 @@ import { Save, RotateCcw, FileJson, AlertCircle } from 'lucide-react'
 import GlassPanel from '@/components/GlassPanel'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { useExecutionStore } from '@/stores/executionStore'
-import { updateWorkflowParams } from '@/services/workflowService'
+import { updateWorkflow } from '@/services/workflowService'
 import ExecutionHistoryPanel from '@/features/workflow-canvas/ExecutionHistoryPanel'
 import type { PipelineParam, Workflow } from '@/types/workflow'
 import type { ExecutionStatus } from '@/types/execution'
@@ -53,7 +53,19 @@ export default function WorkflowConfigPanel({ view }: WorkflowConfigPanelProps) 
         }
       })
 
-      await updateWorkflowParams(currentWorkflow.id, editingValues)
+      // updateParam 已把参数同步写回内存中的 yamlConfig；
+      // 持久化走已存在的全量更新接口 PUT /api/v1/workflows/:id
+      // （原 updateWorkflowParams 指向的 /workflows/:id/config 路由后端不存在）
+      const latest = useWorkflowStore.getState().currentWorkflow
+      if (latest && latest.yamlConfig !== currentWorkflow.yamlConfig) {
+        await updateWorkflow(latest.id, {
+          name: latest.name,
+          description: latest.description,
+          intent: latest.intent,
+          yamlConfig: latest.yamlConfig,
+          status: latest.status,
+        })
+      }
     } finally {
       setSaving(false)
     }
