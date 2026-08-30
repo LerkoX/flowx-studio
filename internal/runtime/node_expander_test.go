@@ -108,3 +108,28 @@ func TestExpandNodeToConfig_NoBindingsKeepsParamRef(t *testing.T) {
 		t.Errorf("expected Param reference kept, run:\n%s", cfg.Steps[0].Run)
 	}
 }
+
+func TestExpandNodeToConfig_SkipUIFiles(t *testing.T) {
+	pkg := &model.NodePackage{
+		Name:     "ui-node",
+		Language: "bash",
+		Entry:    "main.sh",
+	}
+	node := newTestNode(pkg)
+	node.Files = map[string]string{
+		"ui/node-widget.js":  "big-ui-bundle",
+		"ui/textures.js":     "big-textures",
+		"utils/helper.sh":    "echo helper",
+	}
+	cfg, err := ExpandNodeToConfig(node)
+	if err != nil {
+		t.Fatalf("expand failed: %v", err)
+	}
+	run := cfg.Steps[0].Run
+	if strings.Contains(run, "big-ui-bundle") || strings.Contains(run, "ui/node-widget.js") {
+		t.Errorf("ui/ files must not be inlined into run script, run:\n%s", run)
+	}
+	if !strings.Contains(run, "utils/helper.sh") {
+		t.Errorf("non-ui files should still be written, run:\n%s", run)
+	}
+}

@@ -1,0 +1,81 @@
+{
+  "name": "earth-3d-viewer",
+  "displayName": "3D 地球（真实日照）",
+  "description": "在画布节点中内嵌渲染可交互的 3D 地球：NASA 真实地表贴图、实时卫星云图（含离线兜底）、按真实世界时间计算的太阳直射点光照（晨昏线实时正确）。入口脚本同时输出当前太阳直射点经纬度供下游节点使用。",
+  "version": "1.0.0",
+  "author": "flowx-team",
+  "tags": ["3d", "earth", "visualization", "threejs"],
+  "icon": "🌍",
+  "language": "bash",
+  "entry": "main.sh",
+  "files": [
+    "ui/three.core.min.js",
+    "ui/three.module.min.js",
+    "ui/textures.js"
+  ],
+  "parameters": [
+    {
+      "name": "auto_rotate",
+      "type": "boolean",
+      "description": "是否自动环绕旋转镜头（true/false）。为保持太阳-地球几何关系与真实世界一致，旋转的是相机而非地球本身。默认 true",
+      "required": false,
+      "default": true
+    },
+    {
+      "name": "rotation_speed",
+      "type": "float",
+      "description": "相机自动环绕速度，单位 度/秒，建议 0.5-10，默认 2",
+      "required": false,
+      "default": 2
+    },
+    {
+      "name": "camera_lat",
+      "type": "float",
+      "description": "初始视角中心纬度，范围 -80 到 80，单位 度，默认 25",
+      "required": false,
+      "default": 25
+    },
+    {
+      "name": "camera_lon",
+      "type": "float",
+      "description": "初始视角中心经度（东经为正），范围 -180 到 180，单位 度，默认 110",
+      "required": false,
+      "default": 110
+    },
+    {
+      "name": "cloud_opacity",
+      "type": "float",
+      "description": "云层不透明度，范围 0.0-1.0，默认 0.85",
+      "required": false,
+      "default": 0.85
+    }
+  ],
+  "env": {
+    "AUTO_ROTATE": "{{ Param.auto_rotate }}",
+    "ROTATION_SPEED": "{{ Param.rotation_speed }}",
+    "CAMERA_LAT": "{{ Param.camera_lat }}",
+    "CAMERA_LON": "{{ Param.camera_lon }}",
+    "CLOUD_OPACITY": "{{ Param.cloud_opacity }}"
+  },
+  "outputs": [
+    { "name": "sun_lat", "type": "float", "description": "当前太阳直射点纬度（度，北纬为正）" },
+    { "name": "sun_lon", "type": "float", "description": "当前太阳直射点经度（度，东经为正）" },
+    { "name": "utc_time", "type": "string", "description": "计算时刻的 UTC 时间，ISO8601 格式" },
+    { "name": "config", "type": "string", "description": "UI 渲染配置 JSON（autoRotate/rotationSpeed/cameraLat/cameraLon/cloudOpacity），画布 3D 组件读取使用" }
+  ],
+  "extract": {
+    "type": "codec-block"
+  },
+  "mock": {
+    "enabled": true,
+    "entry": "mock.sh"
+  },
+  "ui": {
+    "entry": "ui/node-widget.js",
+    "width": 420,
+    "height": 360,
+    "collapsed": false,
+    "apiVersion": 1
+  },
+  "timeout": 30
+}

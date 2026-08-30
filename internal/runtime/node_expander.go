@@ -63,8 +63,13 @@ func ExpandNodeToConfig(node *model.Node, paramBindings ...map[string]string) (*
 	}
 	runScript.WriteString("FLOWX_FILE_EOF\n")
 
-	// 写入额外文件
+	// 写入额外文件（跳过 ui/ 目录：UI 组件 bundle 仅供前端静态服务，
+	// 运行时无需写入工作目录；内联大体积 bundle 会导致 local 执行器
+	// fork/exec 参数表超限 "argument list too long"）
 	for filename, content := range node.Files {
+		if strings.HasPrefix(filename, "ui/") {
+			continue
+		}
 		fmt.Fprintf(&runScript, "cat > %s << 'FLOWX_FILE_EOF'\n", filename)
 		runScript.WriteString(content)
 		if !strings.HasSuffix(content, "\n") {
