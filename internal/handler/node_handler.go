@@ -241,35 +241,29 @@ func (h *NodeHandler) ServeUIFile(c *gin.Context) {
 		c.Header("Cache-Control", "no-cache")
 	}
 
-	// legacy：内容直接在 DB Files 里
-	if content, ok := node.Files[rel]; ok && content != "" {
-		c.Data(http.StatusOK, assets.ContentTypeByExt(rel), []byte(content))
+	// 内容外置到资产目录，字节流 serving（二进制安全）
+	asset, ok := node.FileAssets[rel]
+	if !ok {
+		Error(c, http.StatusNotFound, "ui file not found")
 		return
 	}
-
-	// P1：内容外置到资产目录，字节流 serving（二进制安全）
-	if asset, ok := node.FileAssets[rel]; ok {
-		store := h.service.Assets()
-		if store == nil {
-			Error(c, http.StatusInternalServerError, "asset store not configured")
-			return
-		}
-		f, err := store.Open(node.Name, node.Version, rel)
-		if err != nil {
-			Error(c, http.StatusNotFound, "ui file not found")
-			return
-		}
-		defer f.Close()
-		if asset.SHA256 != "" {
-			c.Header("ETag", `"`+asset.SHA256+`"`)
-		}
-		ct := asset.ContentType
-		if ct == "" {
-			ct = assets.ContentTypeByExt(rel)
-		}
-		c.DataFromReader(http.StatusOK, asset.Size, ct, f, nil)
+	store := h.service.Assets()
+	if store == nil {
+		Error(c, http.StatusInternalServerError, "asset store not configured")
 		return
 	}
-
-	Error(c, http.StatusNotFound, "ui file not found")
+	f, err := store.Open(node.Name, node.Version, rel)
+	if err != nil {
+		Error(c, http.StatusNotFound, "ui file not found")
+		return
+	}
+	defer f.Close()
+	if asset.SHA256 != "" {
+		c.Header("ETag", `"`+asset.SHA256+`"`)
+	}
+	ct := asset.ContentType
+	if ct == "" {
+		ct = assets.ContentTypeByExt(rel)
+	}
+	c.DataFromReader(http.StatusOK, asset.Size, ct, f, nil)
 }

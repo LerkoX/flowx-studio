@@ -142,11 +142,6 @@ func newAppServices(cfg *config.Config) (*appServices, func(), error) {
 	}
 	nodeSvc := service.NewNodeService(database, bus)
 	nodeSvc.SetAssetStore(assetStore)
-	if n, err := nodeSvc.MigrateLegacyFiles(); err != nil {
-		log.Printf("legacy node files migration failed: %v", err)
-	} else if n > 0 {
-		log.Printf("migrated %d legacy nodes' files to asset store", n)
-	}
 	// P4：清理无引用的资产目录（删除节点遗留/版本变更/崩溃残留的临时目录）
 	if removed, err := nodeSvc.GCAssets(); err != nil {
 		log.Printf("asset GC failed: %v", err)

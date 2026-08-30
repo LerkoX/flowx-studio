@@ -306,7 +306,6 @@ func (s *NodeImportService) buildNode(dir string, pkg *model.NodePackage, source
 		return nil, fmt.Errorf("failed to read entry file: %w", err)
 	}
 
-	files := make(map[string]string)
 	fileData := make(map[string]assets.FileData)
 	uiEntry := ""
 	if pkg.UI != nil {
@@ -352,21 +351,14 @@ func (s *NodeImportService) buildNode(dir string, pkg *model.NodePackage, source
 		}
 	}
 
-	// P1：注入资产存储时文件内容外置到磁盘（二进制安全、DB 不膨胀）；
-	// 未注入时（如单测）回退为 legacy 行为——内容直接存 Files JSON。
-	var fileAssets map[string]model.NodeFileAsset
-	if store := s.nodeSvc.Assets(); store != nil {
-		fileAssets, err = store.Put(pkg.Name, pkg.Version, fileData)
-		if err != nil {
-			return nil, fmt.Errorf("failed to store node assets: %w", err)
-		}
-	} else {
-		for rel, fd := range fileData {
-			if rel == pkg.Entry {
-				continue // legacy 行为：入口代码由 Code 字段承载，不进 Files
-			}
-			files[rel] = string(fd.Content)
-		}
+	// 文件内容一律外置到资产库（二进制安全、DB 不膨胀）
+	store := s.nodeSvc.Assets()
+	if store == nil {
+		return nil, fmt.Errorf("asset store not configured")
+	}
+	fileAssets, err := store.Put(pkg.Name, pkg.Version, fileData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to store node assets: %w", err)
 	}
 
 	requirements := pkg.Requirements
@@ -418,7 +410,6 @@ func (s *NodeImportService) buildNode(dir string, pkg *model.NodePackage, source
 		Language:      pkg.Language,
 		Code:          string(code),
 		Entry:         pkg.Entry,
-		Files:         files,
 		FileAssets:    fileAssets,
 		Image:         pkg.Image,
 		DockerConfig:  dockerConfig,

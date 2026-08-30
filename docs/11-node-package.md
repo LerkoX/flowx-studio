@@ -586,22 +586,22 @@ localStorage、auth token、Studio 内部状态），**只应导入可信来源�
 - `AutoLayout`（dagre）：带 ui 节点按组件尺寸动态计算占位
 - `NodeTestPanel`：提供「UI 预览」，用 Mock 测试的真实输出渲染组件
 
-## 11.14 节点文件外置存储（P1，2026-08-30 起）
+## 11.14 节点文件资产存储（assets store，2026-08-30 起）
 
-节点文件内容不再直接存数据库 `nodes.files` JSON 字段，而是落盘到 **Node Asset Store**：
+节点文件内容**不存数据库**（迁移 009 已删除 `nodes.files` 列），统一落盘到资产库：
 
 ```
 <data.dir>/assets/nodes/<name>@<version>/<包内相对路径>
 ```
 
 - 导入时（`node_import.go`）原子写入资产目录（临时目录 + rename），DB 只存索引
-  `nodes.file_assets`（迁移 008）：`path -> { sha256, size, contentType, kind }`
-- `kind` 为 `runtime`（`pkg.files` 中的运行时依赖）或 `ui`（`ui/` 前缀或 `ui.entry`）；
-  运行时展开器（`node_expander.go`）跳过 `ui/` 文件，不再内联进 bash argv
-- UI serving（`/api/v1/nodes/:id/ui/*`）优先读 legacy `Files`，否则从资产目录字节流返回，
-  **二进制安全**（此前 JSON/TEXT 通道会把非法 UTF-8 替换为 U+FFFD）
-- 运行时/Mock 通过 `NodeService.HydrateFiles` 将资产内容补入 `node.Files` 后走原有链路
-- 删除节点时清理对应资产目录；启动时自动迁移存量 legacy 节点（`MigrateLegacyFiles`）
+  `nodes.file_assets`（迁移 008）：`path -> { sha256, size, contentType, kind }`；
+  入口文件也以 `runtime` 类入资产库
+- `kind` 为 `runtime`（`pkg.files` 中的运行时依赖与入口）或 `ui`（`ui/` 前缀或 `ui.entry`）
+- UI serving（`/api/v1/nodes/:id/ui/*`）从资产目录字节流返回，**二进制安全**
+  （此前 JSON/TEXT 通道会把非法 UTF-8 替换为 U+FFFD）
+- Mock 测试通过 `NodeService.LoadRuntimeFiles` 从资产库读取 runtime 文件物化到沙箱
+- 删除节点时清理对应资产目录；启动时 GC 清理无引用目录（见 11.15 末）
 - `backup create` 会配套生成 `<name>.assets.tar.gz`（整个 assets 目录），
   `backup restore --file x.db` 时若旁边存在 `x.assets.tar.gz` 会自动一并恢复
   （现有 assets 目录先改名为 `assets.pre-restore-<时间戳>` 保留回滚副本）
@@ -617,12 +617,11 @@ localStorage、auth token、Studio 内部状态），**只应导入可信来源�
    - *cp 引导*（local 执行器 + 节点已入资产库）：导出 `FLOWX_ASSETS_DIR`，
      用 `cp "$FLOWX_ASSETS_DIR/<rel>" <rel>` 物化入口与 runtime 资产（子目录自动 mkdir）。
      脚本体积恒定 ~1KB，不受 argv 上限约束；二进制安全；入口代码中的 `{{ }}`
-     不再经模板渲染，根除误伤。迁移而来的 legacy 节点若入口不在资产库，
-     则入口回退 heredoc、runtime 依赖仍走 cp（混合模式）
+     不再经模板渲染，根除误伤
    - *HTTP 引导*（docker/k8s 执行器 + 已配置资产 HTTP 服务）：导出签名 URL
      `FLOWX_ASSETS_URL`，用 `curl -fsSL`（wget 兜底）拉取。签名方案见下
-   - *heredoc 内联*（legacy 节点，或未配置签名服务的容器执行器）：
-     保持原行为（仍跳过 `ui/` 文件）
+   - *heredoc 内联*（仅纯内联节点的入口代码；带 runtime 依赖的 docker/k8s 节点
+     未配置签名服务时展开直接报错，不再静默缺文件）
 4. **执行命令**（不变）
 
 ### 签名资产 URL（P3）
@@ -637,6 +636,16 @@ localStorage、auth token、Studio 内部状态），**只应导入可信来源�
   缺省按 `server.host:port` 推导（`0.0.0.0` 视为 `127.0.0.1`）。**跨主机/容器场景
   必须显式配置为执行器网络可达的地址**，如 `http://192.168.1.10:8080`
 - 校验失败/过期/路径穿越一律 403/404；响应带正确 Content-Type
+
+### 资产 GC（P4）
+
+`NodeService.GCAssets()` 在 server 启动时（legacy 迁移之后）自动执行：
+
+- 扫描 `<data.dir>/assets/nodes/` 下的 `<name>@<version>` 目录，无对应节点
+  （按 name + version 匹配，空版本归一为 `0`）→ 删除
+- `Put` 崩溃遗留的 `.tmp-<pid>` 临时目录 → 删除
+- 不符合命名规则的目录（如人工放置的）→ 保留不动
+- 每次清理写入审计日志（`gc_assets`）
 
 ## 11.16 参考资料
 

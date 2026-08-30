@@ -61,8 +61,8 @@ export interface NodeDefinition {
   sourceURL?: string
   sourcePath?: string
   
-  // 节点包文件
-  files?: Record<string, string>
+  // 节点包文件资产索引（内容存于 server 资产库，不再回传文件内容）
+  fileAssets?: Record<string, { sha256: string; size: number; contentType?: string; kind: 'runtime' | 'ui' }>
 
   // 自定义 UI 组件配置（导入的节点包可能携带）
   ui?: NodeUIConfig

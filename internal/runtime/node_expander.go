@@ -72,6 +72,12 @@ func ExpandNodeToConfig(node *model.Node, paramBindings ...map[string]string) (*
 		(executorType == "" || executorType == "local")
 	httpBacked := node.AssetURL != "" && hasAssets &&
 		(executorType == "docker" || executorType == "k8s")
+	// 容器执行器拿不到宿主机文件系统：带 runtime 依赖却没有签名 URL 时直接报错，
+	// 避免静默产出缺文件的工作目录
+	if !httpBacked && (executorType == "docker" || executorType == "k8s") && hasRuntimeAssets(node, pkg) {
+		return nil, fmt.Errorf("node %s has runtime asset files but no signed asset URL; "+
+			"configure assets.http_base (FLOWX_STUDIO_ASSETS_HTTP_BASE) to an executor-reachable address", node.Name)
+	}
 	switch {
 	case cpBacked:
 		fmt.Fprintf(&runScript, "FLOWX_ASSETS_DIR=%s\n", shellQuote(node.AssetDir))
@@ -94,18 +100,10 @@ func ExpandNodeToConfig(node *model.Node, paramBindings ...map[string]string) (*
 		}
 		writeAssetFiles(&runScript, node, pkg, writeAssetFetch)
 	default:
-		// 写入入口文件
+		// 无资产库内容：仅 heredoc 写入入口代码（纯内联节点）。
+		// 注意：带 runtime 依赖的 docker/k8s 节点必须在上方走 HTTP 引导，
+		// 未配置 assets.http_base 时已在前面报错。
 		writeFileHeredoc(&runScript, pkg.Entry, node.Code)
-
-		// 写入额外文件（跳过 ui/ 目录：UI 组件 bundle 仅供前端静态服务，
-		// 运行时无需写入工作目录；内联大体积 bundle 会导致 local 执行器
-		// fork/exec 参数表超限 "argument list too long"）
-		for _, filename := range sortedKeys(node.Files) {
-			if strings.HasPrefix(filename, "ui/") {
-				continue
-			}
-			writeFileHeredoc(&runScript, filename, node.Files[filename])
-		}
 	}
 
 	// 执行命令
@@ -255,6 +253,16 @@ func defaultRunCommand(language, entry string) string {
 
 // parseParamBindings 从 pipeline YAML 的节点 config.params 中提取参数绑定。
 // 值为标量或模板字符串（如 {{ GetWeather.city }}），统一转为 string。
+// hasRuntimeAssets 节点是否有 runtime 类资产（不含入口与 ui 资产）
+func hasRuntimeAssets(node *model.Node, pkg *model.NodePackage) bool {
+	for rel, asset := range node.FileAssets {
+		if rel != pkg.Entry && asset.Kind != "ui" {
+			return true
+		}
+	}
+	return false
+}
+
 // writeAssetFiles 物化入口 + runtime 资产（ui 资产不进执行链路）。
 // 入口不在资产库时（迁移的 legacy 节点）回退 heredoc。
 func writeAssetFiles(sb *strings.Builder, node *model.Node, pkg *model.NodePackage, fetch func(rel string)) {

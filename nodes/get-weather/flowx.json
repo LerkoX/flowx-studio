@@ -1,0 +1,54 @@
+{
+  "name": "get-weather",
+  "displayName": "获取天气",
+  "description": "从 Open-Meteo 免费天气 API 获取城市当前天气和未来7天预报",
+  "version": "1.0.0",
+  "author": "flowx-team",
+  "tags": ["weather", "api"],
+  "icon": "🌤️",
+  "language": "python",
+  "entry": "main.py",
+  "image": "python:3.11-slim",
+  "executor": {
+    "type": "local",
+    "config": {
+      "shell": "bash",
+      "workdir": "/data/data/com.termux/files/home/.flowx-studio/workspace"
+    }
+  },
+  "requirements": ["requests", "pyyaml"],
+  "parameters": [
+    {
+      "name": "city",
+      "type": "string",
+      "description": "城市名称，如 深圳 / 北京 / Shanghai",
+      "required": false,
+      "default": "深圳"
+    }
+  ],
+  "env": {
+    "WEATHER_CITY": "{{ Param.city }}"
+  },
+  "run": "python3 main.py",
+  "outputs": [
+    { "name": "city", "type": "string", "description": "城市名" },
+    { "name": "temp", "type": "string", "description": "当前温度" },
+    { "name": "feelsLike", "type": "string", "description": "体感温度" },
+    { "name": "weather", "type": "string", "description": "天气描述" },
+    { "name": "humidity", "type": "string", "description": "湿度" },
+    { "name": "windspeed", "type": "string", "description": "风速 km/h" },
+    { "name": "updateTime", "type": "string", "description": "更新时间" },
+    { "name": "forecasts", "type": "array", "description": "未来7天预报" }
+  ],
+  "extract": {
+    "type": "codec-block"
+  },
+  "ui": {
+    "entry": "ui/node-widget.js",
+    "width": 1080,
+    "height": 230,
+    "collapsed": false,
+    "apiVersion": 1
+  },
+  "timeout": 60
+}

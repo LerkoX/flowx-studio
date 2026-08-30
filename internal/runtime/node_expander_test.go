@@ -109,28 +109,25 @@ func TestExpandNodeToConfig_NoBindingsKeepsParamRef(t *testing.T) {
 	}
 }
 
-func TestExpandNodeToConfig_SkipUIFiles(t *testing.T) {
+func TestExpandNodeToConfig_InlineNodeHeredocEntryOnly(t *testing.T) {
+	// 纯内联节点（无资产库）：只有入口 heredoc，不含任何文件遍历产物
 	pkg := &model.NodePackage{
-		Name:     "ui-node",
+		Name:     "inline-node",
 		Language: "bash",
 		Entry:    "main.sh",
 	}
 	node := newTestNode(pkg)
-	node.Files = map[string]string{
-		"ui/node-widget.js":  "big-ui-bundle",
-		"ui/textures.js":     "big-textures",
-		"utils/helper.sh":    "echo helper",
-	}
+	node.Code = "echo inline\n"
 	cfg, err := ExpandNodeToConfig(node)
 	if err != nil {
 		t.Fatalf("expand failed: %v", err)
 	}
 	run := cfg.Steps[0].Run
-	if strings.Contains(run, "big-ui-bundle") || strings.Contains(run, "ui/node-widget.js") {
-		t.Errorf("ui/ files must not be inlined into run script, run:\n%s", run)
+	if !strings.Contains(run, "cat > main.sh << 'FLOWX_FILE_EOF'") || !strings.Contains(run, "echo inline") {
+		t.Errorf("expected entry heredoc, run:\n%s", run)
 	}
-	if !strings.Contains(run, "utils/helper.sh") {
-		t.Errorf("non-ui files should still be written, run:\n%s", run)
+	if !strings.Contains(run, "mktemp -d") || strings.Contains(run, "FLOWX_ASSETS_DIR") || strings.Contains(run, "FLOWX_ASSETS_URL") {
+		t.Errorf("inline node should use temp workdir without asset bootstrap, run:\n%s", run)
 	}
 }
 
@@ -146,10 +143,6 @@ func TestExpandNodeToConfig_AssetBackedBootstrap(t *testing.T) {
 		"main.sh":           {SHA256: "a", Size: 10, Kind: "runtime"},
 		"lib/helper.sh":     {SHA256: "b", Size: 10, Kind: "runtime"},
 		"ui/node-widget.js": {SHA256: "c", Size: 999999, Kind: "ui"},
-	}
-	node.Files = map[string]string{
-		"main.sh":       "SHOULD-NOT-BE-INLINED",
-		"lib/helper.sh": "SHOULD-NOT-BE-INLINED",
 	}
 
 	cfg, err := ExpandNodeToConfig(node)
@@ -173,7 +166,7 @@ func TestExpandNodeToConfig_AssetBackedBootstrap(t *testing.T) {
 		t.Errorf("expected helper cp with mkdir, run:\n%s", run)
 	}
 	// 文件内容与 ui 资产不得内联
-	if strings.Contains(run, "SHOULD-NOT-BE-INLINED") || strings.Contains(run, "node-widget.js") {
+	if strings.Contains(run, "FLOWX_FILE_EOF") || strings.Contains(run, "node-widget.js") {
 		t.Errorf("asset contents / ui files must not be inlined, run:\n%s", run)
 	}
 }
@@ -223,7 +216,6 @@ func TestExpandNodeToConfig_DockerHTTPBootstrap(t *testing.T) {
 		"lib/helper.sh":     {SHA256: "b", Size: 10, Kind: "runtime"},
 		"ui/node-widget.js": {SHA256: "c", Size: 10, Kind: "ui"},
 	}
-	node.Files = map[string]string{"main.sh": "SHOULD-NOT-BE-INLINED"}
 
 	cfg, err := ExpandNodeToConfig(node)
 	if err != nil {
@@ -237,12 +229,13 @@ func TestExpandNodeToConfig_DockerHTTPBootstrap(t *testing.T) {
 	if !strings.Contains(run, "flowx_fetch 'main.sh'") || !strings.Contains(run, "flowx_fetch 'lib/helper.sh'") {
 		t.Errorf("expected curl/wget fetch for entry and runtime deps, run:\n%s", run)
 	}
-	if strings.Contains(run, "FLOWX_ASSETS_DIR") || strings.Contains(run, "SHOULD-NOT-BE-INLINED") || strings.Contains(run, "node-widget.js") {
+	if strings.Contains(run, "FLOWX_ASSETS_DIR") || strings.Contains(run, "FLOWX_FILE_EOF") || strings.Contains(run, "node-widget.js") {
 		t.Errorf("http bootstrap must not reference host dir / inline contents / ui files, run:\n%s", run)
 	}
 }
 
-func TestExpandNodeToConfig_DockerWithoutSignedURLFallsBack(t *testing.T) {
+func TestExpandNodeToConfig_DockerRuntimeDepsRequireSignedURL(t *testing.T) {
+	// docker/k8s + runtime 依赖 + 无签名 URL → 展开报错（而不是静默缺文件）
 	pkg := &model.NodePackage{
 		Name:     "docker-node",
 		Language: "bash",
@@ -252,8 +245,28 @@ func TestExpandNodeToConfig_DockerWithoutSignedURLFallsBack(t *testing.T) {
 	}
 	node := newTestNode(pkg)
 	node.Code = "echo docker\n"
-	node.AssetDir = "/data/assets/nodes/docker-node@1"
-	node.AssetURL = "" // 未配置 assets.http_base 时
+	node.FileAssets = map[string]model.NodeFileAsset{
+		"main.sh":       {SHA256: "a", Size: 10, Kind: "runtime"},
+		"lib/helper.sh": {SHA256: "b", Size: 10, Kind: "runtime"},
+	}
+
+	_, err := ExpandNodeToConfig(node)
+	if err == nil || !strings.Contains(err.Error(), "assets.http_base") {
+		t.Errorf("expected signed-url error, got %v", err)
+	}
+}
+
+func TestExpandNodeToConfig_DockerEntryOnlyNoURL(t *testing.T) {
+	// docker + 仅入口资产（无额外 runtime 依赖）→ heredoc 入口即可运行
+	pkg := &model.NodePackage{
+		Name:     "docker-node",
+		Language: "bash",
+		Entry:    "main.sh",
+		Image:    "bash:5",
+		Executor: model.NodeExecutorConfig{Type: "docker"},
+	}
+	node := newTestNode(pkg)
+	node.Code = "echo docker\n"
 	node.FileAssets = map[string]model.NodeFileAsset{
 		"main.sh": {SHA256: "a", Size: 10, Kind: "runtime"},
 	}
@@ -264,6 +277,6 @@ func TestExpandNodeToConfig_DockerWithoutSignedURLFallsBack(t *testing.T) {
 	}
 	run := cfg.Steps[0].Run
 	if !strings.Contains(run, "cat > main.sh << 'FLOWX_FILE_EOF'") || !strings.Contains(run, "echo docker") {
-		t.Errorf("expected heredoc fallback when no signed url, run:\n%s", run)
+		t.Errorf("expected entry heredoc, run:\n%s", run)
 	}
 }

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"github.com/LerkoX/flowx-studio/internal/assets"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,6 +62,7 @@ func TestNodeImportService_ImportFromFolder(t *testing.T) {
 	defer database.Close()
 
 	nodeSvc := NewNodeService(database, event.NewBus())
+	nodeSvc.SetAssetStore(&assets.Store{Root: filepath.Join(tmpDir, "assets-store")})
 	importSvc := NewNodeImportService(nodeSvc)
 
 	node, err := importSvc.ImportFromFolder(tmpDir)
@@ -77,11 +79,17 @@ func TestNodeImportService_ImportFromFolder(t *testing.T) {
 	if node.Code != "print('hello')" {
 		t.Errorf("unexpected code: %s", node.Code)
 	}
-	if len(node.Files) != 1 {
-		t.Errorf("expected 1 file, got %d", len(node.Files))
+	// 文件内容入资产库：入口 main.py + 依赖 utils.py，DB 仅存索引
+	if len(node.FileAssets) != 2 {
+		t.Errorf("expected 2 file assets, got %d", len(node.FileAssets))
 	}
-	if node.Files["utils.py"] != "# helper" {
-		t.Errorf("unexpected utils.py content: %s", node.Files["utils.py"])
+	store := nodeSvc.Assets()
+	got, err := store.Read(node.Name, node.Version, "utils.py")
+	if err != nil || string(got) != "# helper" {
+		t.Errorf("unexpected utils.py asset: %v %q", err, got)
+	}
+	if node.FileAssets["utils.py"].Kind != "runtime" {
+		t.Errorf("expected runtime kind, got %s", node.FileAssets["utils.py"].Kind)
 	}
 	if node.PackageConfig == nil {
 		t.Fatal("expected package config")
@@ -93,9 +101,14 @@ func TestNodeImportService_ImportFromFolder(t *testing.T) {
 		t.Errorf("unexpected docker config: %+v", node.DockerConfig)
 	}
 
+	// docker 执行器 + runtime 依赖（utils.py）→ 需要签名 URL 引导（P3）
+	node.AssetURL = "http://test.local/api/v1/assets/nodes/test-download@0?expires=999&sig=abc"
 	cfg, err := runtime.ExpandNodeToConfig(node)
 	if err != nil {
 		t.Fatalf("expand node failed: %v", err)
+	}
+	if !strings.Contains(cfg.Steps[0].Run, "flowx_fetch 'utils.py'") {
+		t.Errorf("expected curl bootstrap for runtime dep, run:\n%s", cfg.Steps[0].Run)
 	}
 	if cfg.Executor != node.Name+"-executor" {
 		t.Errorf("unexpected executor name: %s", cfg.Executor)
@@ -201,7 +214,9 @@ func TestNodeImportService_AcceptsParamSourceHint(t *testing.T) {
 	}
 	defer database.Close()
 
-	importSvc := NewNodeImportService(NewNodeService(database, event.NewBus()))
+	nodeSvc := NewNodeService(database, event.NewBus())
+	nodeSvc.SetAssetStore(&assets.Store{Root: filepath.Join(tmpDir, "assets-store")})
+	importSvc := NewNodeImportService(nodeSvc)
 	node, err := importSvc.ImportFromFolder(tmpDir)
 	if err != nil {
 		t.Fatalf("import failed: %v", err)
@@ -281,6 +296,7 @@ func TestNodeImportService_ImportWithUI(t *testing.T) {
 	defer database.Close()
 
 	nodeSvc := NewNodeService(database, event.NewBus())
+	nodeSvc.SetAssetStore(&assets.Store{Root: filepath.Join(tmpDir, "assets-store")})
 	importSvc := NewNodeImportService(nodeSvc)
 
 	node, err := importSvc.ImportFromFolder(tmpDir)
@@ -298,8 +314,11 @@ func TestNodeImportService_ImportWithUI(t *testing.T) {
 	if node.UI.Collapsed == nil || *node.UI.Collapsed != false {
 		t.Errorf("unexpected collapsed: %+v", node.UI.Collapsed)
 	}
-	if node.Files["ui/node-widget.js"] != widget {
-		t.Errorf("widget bundle not stored in Files")
+	if a, ok := node.FileAssets["ui/node-widget.js"]; !ok || a.Kind != "ui" {
+		t.Errorf("widget bundle not indexed as ui asset: %+v", node.FileAssets)
+	}
+	if got, err := nodeSvc.Assets().Read(node.Name, node.Version, "ui/node-widget.js"); err != nil || string(got) != widget {
+		t.Errorf("widget bundle not stored in asset store: %v", err)
 	}
 
 	// 重新读取（走 scanNode）后 UI 仍可用
@@ -310,8 +329,8 @@ func TestNodeImportService_ImportWithUI(t *testing.T) {
 	if got.UI == nil || got.UI.Entry != "ui/node-widget.js" {
 		t.Errorf("expected UI from scanNode, got: %+v", got.UI)
 	}
-	if got.Files["ui/node-widget.js"] != widget {
-		t.Errorf("widget bundle not persisted")
+	if _, ok := got.FileAssets["ui/node-widget.js"]; !ok {
+		t.Errorf("widget asset index not persisted")
 	}
 }
 

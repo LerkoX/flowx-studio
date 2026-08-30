@@ -219,15 +219,13 @@ func (s *WorkflowService) Run(id int64, params map[string]interface{}, dryRun bo
 }
 
 // expandLookup 供 ExpandWorkflowConfig 按 nodeRef 名称查找节点，
-// 并将外置资产内容补入 Files（运行时展开需要文件内容）。
+// 并填充资产目录/签名 URL（展开器据此生成 cp/curl 引导脚本）。
 func (s *WorkflowService) expandLookup(name string) (*model.Node, error) {
 	node, err := s.nodeSvc.GetByName(name)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.nodeSvc.HydrateFiles(node); err != nil {
-		return nil, err
-	}
+	s.nodeSvc.PrepareAssets(node)
 	return node, nil
 }
 

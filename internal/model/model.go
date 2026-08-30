@@ -125,16 +125,13 @@ type Node struct {
 	DockerConfig *NodeDockerConfig `json:"docker,omitempty" db:"docker_config"`
 	MockConfig   *NodeMockConfig   `json:"mock,omitempty" db:"mock_config"`
 
-	// 节点包文件（legacy：内容直接存 JSON；新导入的节点此字段为空，内容在 FileAssets 指向的资产目录）
-	Files map[string]string `json:"files,omitempty" db:"files"`
-
-	// 节点文件资产索引（path -> 元信息），内容存于 assets store
+	// 节点文件资产索引（path -> 元信息），内容存于 assets store（<data.dir>/assets/nodes/）
 	FileAssets map[string]NodeFileAsset `json:"fileAssets,omitempty" db:"file_assets"`
 
-	// 资产目录绝对路径（运行时由 HydrateFiles 填充，不入库、不出 API）
+	// 资产目录绝对路径（运行时由 PrepareAssets 填充，不入库、不出 API）
 	AssetDir string `json:"-" db:"-"`
 
-	// 资产签名拉取 URL 前缀（docker/k8s 执行器用，HydrateFiles 填充）
+	// 资产签名拉取 URL 前缀（docker/k8s 执行器用，PrepareAssets 填充）
 	AssetURL string `json:"-" db:"-"`
 
 	// 完整的 flowx.json 包配置（运行时展开使用）

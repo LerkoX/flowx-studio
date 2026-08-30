@@ -43,40 +43,42 @@ func (s *NodeService) Assets() *assets.Store {
 	return s.assets
 }
 
-// HydrateFiles 将 FileAssets 指向的 runtime 资产内容读入 node.Files（供 Mock 沙箱物化），
-// 并填充 node.AssetDir 供展开器生成 cp/curl 引导脚本。
-// legacy 节点（Files 已有内容）不受影响；ui 类资产不进执行链路，跳过不读。
-func (s *NodeService) HydrateFiles(node *model.Node) error {
+// PrepareAssets 填充 node.AssetDir / node.AssetURL，供展开器生成 cp/curl 引导脚本。
+// 节点文件内容一律不落内存/DB，运行时直接从资产目录物化。
+func (s *NodeService) PrepareAssets(node *model.Node) {
 	if len(node.FileAssets) == 0 || s.assets == nil {
-		return nil
+		return
 	}
 	if dir, err := s.assets.NodeDir(node.Name, node.Version); err == nil {
 		node.AssetDir = dir
 	}
 	// 签名 URL（docker/k8s 执行器通过 HTTP 拉资产用；未配置 HTTPBase 时为空）
 	node.AssetURL = s.assets.SignedURL(node.Name, node.Version, assets.DefaultSignTTL)
-	if node.Files == nil {
-		node.Files = make(map[string]string, len(node.FileAssets))
+}
+
+// LoadRuntimeFiles 从资产目录读取 runtime 类文件内容（Mock 沙箱物化用）。
+// ui 类资产不进执行链路，跳过不读。
+func (s *NodeService) LoadRuntimeFiles(node *model.Node) (map[string]string, error) {
+	if len(node.FileAssets) == 0 || s.assets == nil {
+		return nil, nil
 	}
+	files := make(map[string]string, len(node.FileAssets))
 	var missing []string
 	for rel, asset := range node.FileAssets {
 		if asset.Kind == assets.KindUI {
-			continue // ui 资产仅供前端 serving
-		}
-		if node.Files[rel] != "" {
-			continue // legacy 内容优先
+			continue
 		}
 		content, err := s.assets.Read(node.Name, node.Version, rel)
 		if err != nil {
 			missing = append(missing, rel)
 			continue
 		}
-		node.Files[rel] = string(content)
+		files[rel] = string(content)
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("asset files missing for node %s@%s: %s", node.Name, node.Version, strings.Join(missing, ", "))
+		return nil, fmt.Errorf("asset files missing for node %s@%s: %s", node.Name, node.Version, strings.Join(missing, ", "))
 	}
-	return nil
+	return files, nil
 }
 
 // SetAudit 注入审计服务（可选）；审计写入失败不影响主流程
@@ -197,18 +199,17 @@ func (s *NodeService) Create(req *model.Node) (*model.Node, error) {
 	dockerJSON, _ := json.Marshal(req.DockerConfig)
 	mockJSON, _ := json.Marshal(req.MockConfig)
 	tagsJSON, _ := json.Marshal(req.Tags)
-	filesJSON, _ := json.Marshal(req.Files)
 	fileAssetsJSON, _ := json.Marshal(req.FileAssets)
 	pkgJSON, _ := json.Marshal(req.PackageConfig)
 
 	result, err := s.db.Exec(`
 		INSERT INTO nodes (name, display_name, description, version, author, icon, node_type,
 			language, code, entry, requirements, image, parameters, outputs, docker_config, mock_config,
-			files, package_config, source_type, source_url, source_path, tags, file_assets)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			package_config, source_type, source_url, source_path, tags, file_assets)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, req.Name, req.DisplayName, req.Description, req.Version, req.Author, req.Icon, req.NodeType,
 		req.Language, req.Code, req.Entry, string(reqsJSON), req.Image, string(paramsJSON), string(outputsJSON),
-		string(dockerJSON), string(mockJSON), string(filesJSON), string(pkgJSON), req.SourceType, req.SourceURL, req.SourcePath, string(tagsJSON), string(fileAssetsJSON))
+		string(dockerJSON), string(mockJSON), string(pkgJSON), req.SourceType, req.SourceURL, req.SourcePath, string(tagsJSON), string(fileAssetsJSON))
 
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
@@ -240,7 +241,6 @@ func (s *NodeService) Update(id int64, req *model.Node) error {
 	dockerJSON, _ := json.Marshal(req.DockerConfig)
 	mockJSON, _ := json.Marshal(req.MockConfig)
 	tagsJSON, _ := json.Marshal(req.Tags)
-	filesJSON, _ := json.Marshal(req.Files)
 	fileAssetsJSON, _ := json.Marshal(req.FileAssets)
 	pkgJSON, _ := json.Marshal(req.PackageConfig)
 
@@ -249,12 +249,12 @@ func (s *NodeService) Update(id int64, req *model.Node) error {
 			name = ?, display_name = ?, description = ?, version = ?, author = ?, icon = ?, node_type = ?,
 			language = ?, code = ?, entry = ?, requirements = ?, image = ?,
 			parameters = ?, outputs = ?, docker_config = ?, mock_config = ?,
-			files = ?, package_config = ?, source_type = ?, source_url = ?, source_path = ?, tags = ?, file_assets = ?, updated_at = CURRENT_TIMESTAMP
+			package_config = ?, source_type = ?, source_url = ?, source_path = ?, tags = ?, file_assets = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
 	`, req.Name, req.DisplayName, req.Description, req.Version, req.Author, req.Icon, req.NodeType,
 		req.Language, req.Code, req.Entry, string(reqsJSON), req.Image,
 		string(paramsJSON), string(outputsJSON), string(dockerJSON), string(mockJSON),
-		string(filesJSON), string(pkgJSON), req.SourceType, req.SourceURL, req.SourcePath, string(tagsJSON), string(fileAssetsJSON), id)
+		string(pkgJSON), req.SourceType, req.SourceURL, req.SourcePath, string(tagsJSON), string(fileAssetsJSON), id)
 
 	if err != nil {
 		return fmt.Errorf("failed to update node: %w", err)
@@ -315,11 +315,6 @@ func (s *NodeService) MockTest(id int64, parameters map[string]string, timeout i
 		return nil, fmt.Errorf("node code is empty")
 	}
 
-	// 资产外置的节点：先将磁盘资产内容补入 Files，供沙箱物化
-	if err := s.HydrateFiles(node); err != nil {
-		return nil, err
-	}
-
 	if parameters == nil {
 		parameters = make(map[string]string)
 	}
@@ -347,72 +342,21 @@ func (s *NodeService) MockTest(id int64, parameters map[string]string, timeout i
 	}
 	s.executor.Timeout = d
 
+	runtimeFiles, err := s.LoadRuntimeFiles(node)
+	if err != nil {
+		return nil, err
+	}
+
 	result := s.executor.Execute(sandbox.ExecuteOptions{
 		Code:     code,
 		Language: node.Language,
 		Entry:    node.Entry,
 		EnvVars:  envVars,
-		Files:    node.Files,
+		Files:    runtimeFiles,
 	})
 
 	s.auditRecord("mock_node", fmt.Sprintf("%d", id), "name="+node.Name+" status="+result.Status)
 	return result, nil
-}
-
-// MigrateLegacyFiles 将 legacy 节点（Files JSON 直接存内容、FileAssets 为空）的文件
-// 落盘到资产目录并改写 DB 索引。启动时调用一次；失败仅记录日志，保留 legacy 行为。
-func (s *NodeService) MigrateLegacyFiles() (int, error) {
-	if s.assets == nil {
-		return 0, nil
-	}
-	resp, err := s.List("", "", "", "", 1, 100)
-	if err != nil {
-		return 0, err
-	}
-	items, _ := resp.Items.([]model.Node)
-	migrated := 0
-	for i := range items {
-		node := &items[i]
-		if len(node.Files) == 0 || len(node.FileAssets) > 0 {
-			continue
-		}
-		// 跳过空内容占位（不应出现，防御）
-		hasContent := false
-		for _, v := range node.Files {
-			if v != "" {
-				hasContent = true
-				break
-			}
-		}
-		if !hasContent {
-			continue
-		}
-		uiEntry := ""
-		if node.PackageConfig != nil && node.PackageConfig.UI != nil {
-			uiEntry = node.PackageConfig.UI.Entry
-		}
-		fileData := make(map[string]assets.FileData, len(node.Files))
-		for rel, content := range node.Files {
-			kind := assets.KindRuntime
-			if rel == uiEntry || strings.HasPrefix(rel, "ui/") {
-				kind = assets.KindUI
-			}
-			fileData[rel] = assets.FileData{Content: []byte(content), Kind: kind}
-		}
-		index, err := s.assets.Put(node.Name, node.Version, fileData)
-		if err != nil {
-			s.auditRecord("migrate_node_assets", fmt.Sprintf("%d", node.ID), "error="+err.Error())
-			continue
-		}
-		indexJSON, _ := json.Marshal(index)
-		if _, err := s.db.Exec("UPDATE nodes SET file_assets = ?, files = NULL WHERE id = ?",
-			string(indexJSON), node.ID); err != nil {
-			s.auditRecord("migrate_node_assets", fmt.Sprintf("%d", node.ID), "error="+err.Error())
-			continue
-		}
-		migrated++
-	}
-	return migrated, nil
 }
 
 // GCAssets 清理无节点引用的资产目录（P4）。
@@ -420,6 +364,7 @@ func (s *NodeService) MigrateLegacyFiles() (int, error) {
 //   - <name>@<version> 目录若无对应节点（按 name + version 匹配，空版本归一为 "0"）→ 删除
 //   - Put 崩溃遗留的 .tmp-<pid> 临时目录 → 删除
 //   - 不符合命名规则的目录 → 保留（可能是人工放置的，不动）
+//
 // 返回被删除的目录名列表。
 func (s *NodeService) GCAssets() ([]string, error) {
 	if s.assets == nil {
@@ -470,14 +415,14 @@ func scanNode(scanner interface {
 	Scan(dest ...interface{}) error
 }, node *model.Node) error {
 	var paramsJSON, outputsJSON, reqsJSON, dockerJSON, mockJSON, tagsJSON, pkgJSON string
-	var filesJSON, fileAssetsJSON sql.NullString // 资产外置后 files/file_assets 可为 NULL
+	var fileAssetsJSON sql.NullString // file_assets 可为 NULL（纯内联节点无资产）
 
 	dests := []interface{}{
 		&node.ID, &node.Name, &node.DisplayName, &node.Description, &node.Version,
 		&node.Author, &node.Icon, &node.NodeType, &node.Language, &node.Code,
 		&node.Entry, &reqsJSON, &node.Image, &paramsJSON, &outputsJSON,
 		&dockerJSON, &mockJSON, &node.SourceType, &node.SourceURL, &node.SourcePath,
-		&tagsJSON, &node.CreatedAt, &node.UpdatedAt, &filesJSON, &pkgJSON,
+		&tagsJSON, &node.CreatedAt, &node.UpdatedAt, &pkgJSON,
 		&fileAssetsJSON,
 	}
 
@@ -491,9 +436,6 @@ func scanNode(scanner interface {
 	json.Unmarshal([]byte(dockerJSON), &node.DockerConfig)
 	json.Unmarshal([]byte(mockJSON), &node.MockConfig)
 	json.Unmarshal([]byte(tagsJSON), &node.Tags)
-	if filesJSON.Valid {
-		json.Unmarshal([]byte(filesJSON.String), &node.Files)
-	}
 	json.Unmarshal([]byte(pkgJSON), &node.PackageConfig)
 	if fileAssetsJSON.Valid {
 		json.Unmarshal([]byte(fileAssetsJSON.String), &node.FileAssets)
