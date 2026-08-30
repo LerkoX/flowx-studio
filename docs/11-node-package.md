@@ -606,7 +606,26 @@ localStorage、auth token、Studio 内部状态），**只应导入可信来源�
   `backup restore --file x.db` 时若旁边存在 `x.assets.tar.gz` 会自动一并恢复
   （现有 assets 目录先改名为 `assets.pre-restore-<时间戳>` 保留回滚副本）
 
-## 11.15 参考资料
+## 11.15 展开器资产引导与独立工作目录（P2，2026-08-30 起）
+
+运行时展开（`node_expander.go`）生成的脚本结构：
+
+1. **独立工作目录**：`mktemp -d` 创建临时目录 + `trap rm -rf EXIT` 清理 + `cd` 进入，
+   不再往执行器（server 进程）cwd 散落文件
+2. **env 注入**（不变，含 `config.params` 接线替换）
+3. **文件物化**两条路径：
+   - *资产引导*（local 执行器 + 节点已入资产库）：导出 `FLOWX_ASSETS_DIR`，
+     用 `cp "$FLOWX_ASSETS_DIR/<rel>" <rel>` 物化入口与 runtime 资产（子目录自动 mkdir）。
+     脚本体积恒定 ~1KB，不受 argv 上限约束；二进制安全；入口代码中的 `{{ }}`
+     不再经模板渲染，根除误伤。迁移而来的 legacy 节点若入口不在资产库，
+     则入口回退 heredoc、runtime 依赖仍走 cp（混合模式）
+   - *heredoc 内联*（legacy 节点 / docker 执行器）：容器内看不到宿主机资产目录，
+     保持原 heredoc 行为（仍跳过 `ui/` 文件）
+4. **执行命令**（不变）
+
+docker/k8s 执行器通过 HTTP 拉取资产（`curl` 一次性签名 URL）属 P3 范畴。
+
+## 11.16 参考资料
 
 - `flowx/core/config.go:113-124` — `NodeConfig` 结构定义
 - `flowx/dag/eval_context.go:80-115` — 模板上下文（`Param` 与 `Metadata`）

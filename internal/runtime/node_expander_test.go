@@ -133,3 +133,76 @@ func TestExpandNodeToConfig_SkipUIFiles(t *testing.T) {
 		t.Errorf("non-ui files should still be written, run:\n%s", run)
 	}
 }
+
+func TestExpandNodeToConfig_AssetBackedBootstrap(t *testing.T) {
+	pkg := &model.NodePackage{
+		Name:     "asset-node",
+		Language: "bash",
+		Entry:    "main.sh",
+	}
+	node := newTestNode(pkg)
+	node.AssetDir = "/data/assets/nodes/asset-node@1.0.0"
+	node.FileAssets = map[string]model.NodeFileAsset{
+		"main.sh":           {SHA256: "a", Size: 10, Kind: "runtime"},
+		"lib/helper.sh":     {SHA256: "b", Size: 10, Kind: "runtime"},
+		"ui/node-widget.js": {SHA256: "c", Size: 999999, Kind: "ui"},
+	}
+	node.Files = map[string]string{
+		"main.sh":       "SHOULD-NOT-BE-INLINED",
+		"lib/helper.sh": "SHOULD-NOT-BE-INLINED",
+	}
+
+	cfg, err := ExpandNodeToConfig(node)
+	if err != nil {
+		t.Fatalf("expand failed: %v", err)
+	}
+	run := cfg.Steps[0].Run
+
+	// 独立工作目录 + 自动清理
+	if !strings.Contains(run, "mktemp -d") || !strings.Contains(run, "trap 'rm -rf") {
+		t.Errorf("expected isolated temp workdir with cleanup trap, run:\n%s", run)
+	}
+	// cp 引导而非 heredoc
+	if !strings.Contains(run, `FLOWX_ASSETS_DIR='/data/assets/nodes/asset-node@1.0.0'`) {
+		t.Errorf("expected assets dir export, run:\n%s", run)
+	}
+	if !strings.Contains(run, `cp "$FLOWX_ASSETS_DIR/main.sh" 'main.sh'`) {
+		t.Errorf("expected entry cp, run:\n%s", run)
+	}
+	if !strings.Contains(run, `mkdir -p 'lib'`) || !strings.Contains(run, `cp "$FLOWX_ASSETS_DIR/lib/helper.sh" 'lib/helper.sh'`) {
+		t.Errorf("expected helper cp with mkdir, run:\n%s", run)
+	}
+	// 文件内容与 ui 资产不得内联
+	if strings.Contains(run, "SHOULD-NOT-BE-INLINED") || strings.Contains(run, "node-widget.js") {
+		t.Errorf("asset contents / ui files must not be inlined, run:\n%s", run)
+	}
+}
+
+func TestExpandNodeToConfig_DockerFallsBackToHeredoc(t *testing.T) {
+	pkg := &model.NodePackage{
+		Name:     "docker-node",
+		Language: "bash",
+		Entry:    "main.sh",
+		Image:    "bash:5",
+		Executor: model.NodeExecutorConfig{Type: "docker"},
+	}
+	node := newTestNode(pkg)
+	node.Code = "echo docker\n"
+	node.AssetDir = "/data/assets/nodes/docker-node@1"
+	node.FileAssets = map[string]model.NodeFileAsset{
+		"main.sh": {SHA256: "a", Size: 10, Kind: "runtime"},
+	}
+
+	cfg, err := ExpandNodeToConfig(node)
+	if err != nil {
+		t.Fatalf("expand failed: %v", err)
+	}
+	run := cfg.Steps[0].Run
+	// docker 容器内看不到宿主机资产目录，回退 heredoc
+	if !strings.Contains(run, "cat > main.sh << 'FLOWX_FILE_EOF'") || !strings.Contains(run, "echo docker") {
+		t.Errorf("expected heredoc fallback for docker executor, run:\n%s", run)
+	}
+	if strings.Contains(run, "FLOWX_ASSETS_DIR") {
+		t.Errorf("docker executor must not reference host asset dir, run:\n%s", run)
+	}
+}

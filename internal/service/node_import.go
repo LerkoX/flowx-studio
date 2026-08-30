@@ -344,6 +344,14 @@ func (s *NodeImportService) buildNode(dir string, pkg *model.NodePackage, source
 		}
 	}
 
+	// 入口文件一并入资产（kind=runtime）：展开器可直接 cp 而非 heredoc 内联，
+	// 避免入口代码中的 {{ }} 被模板渲染误伤，也进一步压缩 argv 体积
+	if pkg.Entry != "" {
+		if _, ok := fileData[pkg.Entry]; !ok {
+			fileData[pkg.Entry] = assets.FileData{Content: code, Kind: assets.KindRuntime}
+		}
+	}
+
 	// P1：注入资产存储时文件内容外置到磁盘（二进制安全、DB 不膨胀）；
 	// 未注入时（如单测）回退为 legacy 行为——内容直接存 Files JSON。
 	var fileAssets map[string]model.NodeFileAsset
@@ -354,6 +362,9 @@ func (s *NodeImportService) buildNode(dir string, pkg *model.NodePackage, source
 		}
 	} else {
 		for rel, fd := range fileData {
+			if rel == pkg.Entry {
+				continue // legacy 行为：入口代码由 Code 字段承载，不进 Files
+			}
 			files[rel] = string(fd.Content)
 		}
 	}

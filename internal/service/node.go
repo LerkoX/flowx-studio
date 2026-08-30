@@ -43,17 +43,24 @@ func (s *NodeService) Assets() *assets.Store {
 	return s.assets
 }
 
-// HydrateFiles 将 FileAssets 指向的资产内容读入 node.Files（供运行时展开/Mock 使用）。
-// legacy 节点（Files 已有内容）不受影响；资产缺失时保留占位键并返回错误。
+// HydrateFiles 将 FileAssets 指向的 runtime 资产内容读入 node.Files（供 Mock 沙箱物化），
+// 并填充 node.AssetDir 供展开器生成 cp/curl 引导脚本。
+// legacy 节点（Files 已有内容）不受影响；ui 类资产不进执行链路，跳过不读。
 func (s *NodeService) HydrateFiles(node *model.Node) error {
 	if len(node.FileAssets) == 0 || s.assets == nil {
 		return nil
+	}
+	if dir, err := s.assets.NodeDir(node.Name, node.Version); err == nil {
+		node.AssetDir = dir
 	}
 	if node.Files == nil {
 		node.Files = make(map[string]string, len(node.FileAssets))
 	}
 	var missing []string
-	for rel := range node.FileAssets {
+	for rel, asset := range node.FileAssets {
+		if asset.Kind == assets.KindUI {
+			continue // ui 资产仅供前端 serving
+		}
 		if node.Files[rel] != "" {
 			continue // legacy 内容优先
 		}

@@ -131,6 +131,9 @@ type Node struct {
 	// 节点文件资产索引（path -> 元信息），内容存于 assets store
 	FileAssets map[string]NodeFileAsset `json:"fileAssets,omitempty" db:"file_assets"`
 
+	// 资产目录绝对路径（运行时由 HydrateFiles 填充，不入库、不出 API）
+	AssetDir string `json:"-" db:"-"`
+
 	// 完整的 flowx.json 包配置（运行时展开使用）
 	PackageConfig *NodePackage `json:"-" db:"package_config"`
 

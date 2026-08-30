@@ -2,7 +2,9 @@ package runtime
 
 import (
 	"fmt"
+	"path"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -48,34 +50,56 @@ func ExpandNodeToConfig(node *model.Node, paramBindings ...map[string]string) (*
 
 	var runScript strings.Builder
 
+	// 独立工作目录：每次执行创建临时目录，跑完自动清理，
+	// 不再往执行器（server 进程）的 cwd 里散落文件
+	runScript.WriteString("FLOWX_WORK_DIR=$(mktemp -d \"${TMPDIR:-/tmp}/flowx-node-XXXXXX\") || exit 1\n")
+	runScript.WriteString("trap 'rm -rf \"$FLOWX_WORK_DIR\"' EXIT\n")
+	runScript.WriteString("cd \"$FLOWX_WORK_DIR\" || exit 1\n")
+
 	// 环境变量注入
 	envMap := buildEnvMap(node, pkg)
-	for key, template := range envMap {
-		template = applyParamBindings(template, bindings)
+	for _, key := range sortedKeys(envMap) {
+		template := applyParamBindings(envMap[key], bindings)
 		fmt.Fprintf(&runScript, "export %s=\"%s\"\n", key, template)
 	}
 
-	// 写入入口文件
-	fmt.Fprintf(&runScript, "cat > %s << 'FLOWX_FILE_EOF'\n", pkg.Entry)
-	runScript.WriteString(node.Code)
-	if !strings.HasSuffix(node.Code, "\n") {
-		runScript.WriteString("\n")
-	}
-	runScript.WriteString("FLOWX_FILE_EOF\n")
+	// 资产引导：local 执行器且节点文件已入资产库时，直接 cp 物化
+	//（脚本体积恒定，二进制安全，不受 argv 上限约束）；
+	// 其余情况（legacy 节点 / docker 等）回退 heredoc 内联。
+	assetBacked := node.AssetDir != "" && len(node.FileAssets) > 0 &&
+		(executorType == "" || executorType == "local")
+	if assetBacked {
+		fmt.Fprintf(&runScript, "FLOWX_ASSETS_DIR=%s\n", shellQuote(node.AssetDir))
+		writeAssetCp := func(rel string) {
+			if dir := path.Dir(rel); dir != "." {
+				fmt.Fprintf(&runScript, "mkdir -p %s\n", shellQuote(dir))
+			}
+			fmt.Fprintf(&runScript, "cp \"$FLOWX_ASSETS_DIR/%s\" %s\n", rel, shellQuote(rel))
+		}
+		if _, ok := node.FileAssets[pkg.Entry]; ok {
+			writeAssetCp(pkg.Entry)
+		} else {
+			writeFileHeredoc(&runScript, pkg.Entry, node.Code)
+		}
+		for _, rel := range sortedFileAssets(node.FileAssets) {
+			if rel == pkg.Entry || node.FileAssets[rel].Kind == "ui" {
+				continue
+			}
+			writeAssetCp(rel)
+		}
+	} else {
+		// 写入入口文件
+		writeFileHeredoc(&runScript, pkg.Entry, node.Code)
 
-	// 写入额外文件（跳过 ui/ 目录：UI 组件 bundle 仅供前端静态服务，
-	// 运行时无需写入工作目录；内联大体积 bundle 会导致 local 执行器
-	// fork/exec 参数表超限 "argument list too long"）
-	for filename, content := range node.Files {
-		if strings.HasPrefix(filename, "ui/") {
-			continue
+		// 写入额外文件（跳过 ui/ 目录：UI 组件 bundle 仅供前端静态服务，
+		// 运行时无需写入工作目录；内联大体积 bundle 会导致 local 执行器
+		// fork/exec 参数表超限 "argument list too long"）
+		for _, filename := range sortedKeys(node.Files) {
+			if strings.HasPrefix(filename, "ui/") {
+				continue
+			}
+			writeFileHeredoc(&runScript, filename, node.Files[filename])
 		}
-		fmt.Fprintf(&runScript, "cat > %s << 'FLOWX_FILE_EOF'\n", filename)
-		runScript.WriteString(content)
-		if !strings.HasSuffix(content, "\n") {
-			runScript.WriteString("\n")
-		}
-		runScript.WriteString("FLOWX_FILE_EOF\n")
 	}
 
 	// 执行命令
@@ -225,6 +249,36 @@ func defaultRunCommand(language, entry string) string {
 
 // parseParamBindings 从 pipeline YAML 的节点 config.params 中提取参数绑定。
 // 值为标量或模板字符串（如 {{ GetWeather.city }}），统一转为 string。
+// writeFileHeredoc 生成 heredoc 写文件命令（legacy 路径）
+func writeFileHeredoc(sb *strings.Builder, name, content string) {
+	fmt.Fprintf(sb, "cat > %s << 'FLOWX_FILE_EOF'\n", name)
+	sb.WriteString(content)
+	if !strings.HasSuffix(content, "\n") {
+		sb.WriteString("\n")
+	}
+	sb.WriteString("FLOWX_FILE_EOF\n")
+}
+
+// shellQuote 单引号包裹，内部单引号转义为 '\''
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+// sortedKeys 返回 map 的有序键（保证展开输出确定，便于测试与 diff）
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// sortedFileAssets 返回资产索引的有序路径
+func sortedFileAssets(m map[string]model.NodeFileAsset) []string {
+	return sortedKeys(m)
+}
+
 func parseParamBindings(nodeName string, config map[string]interface{}) (map[string]string, error) {
 	if config == nil {
 		return nil, nil
