@@ -218,6 +218,19 @@ func (s *WorkflowService) Run(id int64, params map[string]interface{}, dryRun bo
 	return execID, fmt.Sprintf("/api/v1/executions/%d/stream", execID), nil
 }
 
+// expandLookup 供 ExpandWorkflowConfig 按 nodeRef 名称查找节点，
+// 并将外置资产内容补入 Files（运行时展开需要文件内容）。
+func (s *WorkflowService) expandLookup(name string) (*model.Node, error) {
+	node, err := s.nodeSvc.GetByName(name)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.nodeSvc.HydrateFiles(node); err != nil {
+		return nil, err
+	}
+	return node, nil
+}
+
 // MockRun 工作流 Mock 执行：校验 YAML 并展开 nodeRef，返回展开后的配置，
 // 不创建执行记录、不触发 FlowX Runtime。用于在真实运行前验证工作流可被正确装配。
 func (s *WorkflowService) MockRun(id int64) (map[string]interface{}, error) {
@@ -232,9 +245,7 @@ func (s *WorkflowService) MockRun(id int64) (map[string]interface{}, error) {
 
 	expanded := wf.YAMLConfig
 	if s.nodeSvc != nil {
-		expanded, err = runtime.ExpandWorkflowConfig(wf.YAMLConfig, func(name string) (*model.Node, error) {
-			return s.nodeSvc.GetByName(name)
-		})
+		expanded, err = runtime.ExpandWorkflowConfig(wf.YAMLConfig, s.expandLookup)
 		if err != nil {
 			return nil, fmt.Errorf("failed to expand nodeRef: %w", err)
 		}
@@ -252,9 +263,7 @@ func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 
 	yamlConfig := wf.YAMLConfig
 	if s.nodeSvc != nil {
-		expanded, err := runtime.ExpandWorkflowConfig(yamlConfig, func(name string) (*model.Node, error) {
-			return s.nodeSvc.GetByName(name)
-		})
+		expanded, err := runtime.ExpandWorkflowConfig(yamlConfig, s.expandLookup)
 		if err != nil {
 			s.db.Exec("UPDATE executions SET status = ?, completed_at = ?, error_message = ? WHERE id = ?",
 				"failed", time.Now(), err.Error(), execID)

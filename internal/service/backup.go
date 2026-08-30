@@ -6,25 +6,31 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
+	"github.com/LerkoX/flowx-studio/internal/assets"
 	"github.com/LerkoX/flowx-studio/internal/db"
 )
 
 // BackupInfo 备份文件信息
 type BackupInfo struct {
-	Name      string    `json:"name"`
-	Path      string    `json:"path"`
-	Size      int64     `json:"size"`
-	CreatedAt time.Time `json:"createdAt"`
+	Name       string    `json:"name"`
+	Path       string    `json:"path"`
+	Size       int64     `json:"size"`
+	CreatedAt  time.Time `json:"createdAt"`
+	AssetsName string    `json:"assetsName,omitempty"` // 配套的资产包（<name 去 .db>.assets.tar.gz）
+	AssetsSize int64     `json:"assetsSize,omitempty"`
 }
 
-// BackupService SQLite 数据备份与恢复。
-// 备份通过 SQLite Online Backup（VACUUM INTO）实现，运行中也可安全执行。
+// BackupService SQLite 数据 + 节点资产备份与恢复。
+// 数据库备份通过 SQLite Online Backup（VACUUM INTO）实现，运行中也可安全执行；
+// 资产目录（<data.dir>/assets）以 tar.gz 形式与 .db 同名配套存放。
 type BackupService struct {
 	db        *db.DB
 	backupDir string
 	dbPath    string
+	assetsDir string
 }
 
 // NewBackupService 创建备份服务，备份文件存放在 <data.dir>/backups/。
@@ -33,6 +39,7 @@ func NewBackupService(database *db.DB, dataDir, dbPath string) *BackupService {
 		db:        database,
 		backupDir: filepath.Join(dataDir, "backups"),
 		dbPath:    dbPath,
+		assetsDir: filepath.Join(dataDir, "assets"),
 	}
 }
 
@@ -57,7 +64,20 @@ func (s *BackupService) Create() (*BackupInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &BackupInfo{Name: name, Path: dest, Size: fi.Size(), CreatedAt: fi.ModTime()}, nil
+	info := &BackupInfo{Name: name, Path: dest, Size: fi.Size(), CreatedAt: fi.ModTime()}
+
+	// 配套打包节点资产目录（外置存储后，仅有 .db 不足以完整恢复节点）
+	assetsName := strings.TrimSuffix(name, ".db") + ".assets.tar.gz"
+	wrote, err := assets.TarGz(s.assetsDir, filepath.Join(s.backupDir, assetsName))
+	if err != nil {
+		log.Printf("backup: assets archive failed (db backup kept): %v", err)
+	} else if wrote {
+		if afi, err := os.Stat(filepath.Join(s.backupDir, assetsName)); err == nil {
+			info.AssetsName = assetsName
+			info.AssetsSize = afi.Size()
+		}
+	}
+	return info, nil
 }
 
 // List 列出所有备份文件（按时间倒序）。
@@ -79,12 +99,19 @@ func (s *BackupService) List() ([]BackupInfo, error) {
 		if err != nil {
 			continue
 		}
-		backups = append(backups, BackupInfo{
+		info := BackupInfo{
 			Name:      e.Name(),
 			Path:      filepath.Join(s.backupDir, e.Name()),
 			Size:      fi.Size(),
 			CreatedAt: fi.ModTime(),
-		})
+		}
+		// 配套资产包
+		assetsName := strings.TrimSuffix(e.Name(), ".db") + ".assets.tar.gz"
+		if afi, err := os.Stat(filepath.Join(s.backupDir, assetsName)); err == nil {
+			info.AssetsName = assetsName
+			info.AssetsSize = afi.Size()
+		}
+		backups = append(backups, info)
 	}
 	sort.Slice(backups, func(i, j int) bool { return backups[i].CreatedAt.After(backups[j].CreatedAt) })
 	if backups == nil {
@@ -111,6 +138,10 @@ func (s *BackupService) Prune(keep int) (int, error) {
 		if err := os.Remove(b.Path); err == nil {
 			removed++
 		}
+		// 配套资产包一并清理
+		if b.AssetsName != "" {
+			_ = os.Remove(filepath.Join(s.backupDir, b.AssetsName))
+		}
 	}
 	return removed, nil
 }
@@ -132,8 +163,11 @@ func (s *BackupService) AutoOnStartup(keep int) {
 }
 
 // BackupPath 按文件名解析备份完整路径（防目录穿越）。
+// 允许 .db（数据库备份）与 .assets.tar.gz（配套资产包）两类文件。
 func (s *BackupService) BackupPath(name string) (string, error) {
-	if name == "" || name != filepath.Base(name) || filepath.Ext(name) != ".db" {
+	valid := name != "" && name == filepath.Base(name) &&
+		(filepath.Ext(name) == ".db" || strings.HasSuffix(name, ".assets.tar.gz"))
+	if !valid {
 		return "", fmt.Errorf("invalid backup name")
 	}
 	path := filepath.Join(s.backupDir, name)

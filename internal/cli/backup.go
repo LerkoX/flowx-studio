@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/LerkoX/flowx-studio/internal/assets"
 	"github.com/LerkoX/flowx-studio/internal/config"
 	"github.com/LerkoX/flowx-studio/internal/singleton"
 	"github.com/spf13/cobra"
@@ -182,6 +184,26 @@ func newBackupRestoreCmd() *cobra.Command {
 			_ = os.Remove(cfg.Data.DBPath + "-shm")
 
 			fmt.Printf("Restored database from %s\n", file)
+
+			// 若备份文件旁边存在配套资产包（<base>.assets.tar.gz），一并恢复
+			assetsTar := strings.TrimSuffix(file, ".db") + ".assets.tar.gz"
+			if _, err := os.Stat(assetsTar); err == nil {
+				assetsParent := cfg.Data.Dir
+				cur := filepath.Join(assetsParent, "assets")
+				if _, err := os.Stat(cur); err == nil {
+					side := fmt.Sprintf("%s.pre-restore-%s", cur, time.Now().Format("20060102-150405"))
+					if err := os.Rename(cur, side); err == nil {
+						fmt.Printf("Current assets saved to %s\n", side)
+					}
+				}
+				n, err := assets.UntarGz(assetsTar, assetsParent)
+				if err != nil {
+					return fmt.Errorf("database restored, but failed to restore assets from %s: %w", assetsTar, err)
+				}
+				fmt.Printf("Restored %d asset files from %s\n", n, assetsTar)
+			} else {
+				fmt.Println("No sibling assets archive found (<base>.assets.tar.gz); node assets not restored")
+			}
 			return nil
 		},
 	}

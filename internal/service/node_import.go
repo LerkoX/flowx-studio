@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/LerkoX/flowx-studio/internal/assets"
 	"github.com/LerkoX/flowx-studio/internal/model"
 	"github.com/LerkoX/flowx-studio/internal/sandbox"
 )
@@ -306,23 +307,54 @@ func (s *NodeImportService) buildNode(dir string, pkg *model.NodePackage, source
 	}
 
 	files := make(map[string]string)
-	for _, filename := range pkg.Files {
-		filePath := filepath.Join(dir, filename)
-		content, err := os.ReadFile(filePath)
+	fileData := make(map[string]assets.FileData)
+	uiEntry := ""
+	if pkg.UI != nil {
+		uiEntry = pkg.UI.Entry
+	}
+	assetKind := func(rel string) string {
+		if rel == uiEntry || strings.HasPrefix(rel, "ui/") {
+			return assets.KindUI
+		}
+		return assets.KindRuntime
+	}
+	readFile := func(filename string) ([]byte, error) {
+		content, err := os.ReadFile(filepath.Join(dir, filename))
 		if err != nil {
 			return nil, fmt.Errorf("failed to read file %s: %w", filename, err)
 		}
-		files[filename] = string(content)
+		return content, nil
+	}
+	for _, filename := range pkg.Files {
+		content, err := readFile(filename)
+		if err != nil {
+			return nil, err
+		}
+		fileData[filename] = assets.FileData{Content: content, Kind: assetKind(filename)}
 	}
 
-	// UI 组件 bundle 一并存入 Files，供 /api/v1/nodes/:id/ui/* 静态服务读取
+	// UI 组件 bundle 一并纳入资产，供 /api/v1/nodes/:id/ui/* 静态服务读取
 	if pkg.UI != nil {
-		if _, ok := files[pkg.UI.Entry]; !ok {
-			content, err := os.ReadFile(filepath.Join(dir, pkg.UI.Entry))
+		if _, ok := fileData[pkg.UI.Entry]; !ok {
+			content, err := readFile(pkg.UI.Entry)
 			if err != nil {
 				return nil, fmt.Errorf("failed to read ui entry file %s: %w", pkg.UI.Entry, err)
 			}
-			files[pkg.UI.Entry] = string(content)
+			fileData[pkg.UI.Entry] = assets.FileData{Content: content, Kind: assets.KindUI}
+		}
+	}
+
+	// P1：注入资产存储时文件内容外置到磁盘（二进制安全、DB 不膨胀）；
+	// 未注入时（如单测）回退为 legacy 行为——内容直接存 Files JSON。
+	var fileAssets map[string]model.NodeFileAsset
+	if store := s.nodeSvc.Assets(); store != nil {
+		fileAssets, err = store.Put(pkg.Name, pkg.Version, fileData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to store node assets: %w", err)
+		}
+	} else {
+		for rel, fd := range fileData {
+			files[rel] = string(fd.Content)
 		}
 	}
 
@@ -376,6 +408,7 @@ func (s *NodeImportService) buildNode(dir string, pkg *model.NodePackage, source
 		Code:          string(code),
 		Entry:         pkg.Entry,
 		Files:         files,
+		FileAssets:    fileAssets,
 		Image:         pkg.Image,
 		DockerConfig:  dockerConfig,
 		Requirements:  requirements,

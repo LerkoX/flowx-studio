@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/LerkoX/flowx-studio/internal/assets"
 	"github.com/LerkoX/flowx-studio/internal/model"
 	"github.com/LerkoX/flowx-studio/internal/service"
 	"github.com/gin-gonic/gin"
@@ -208,7 +209,7 @@ func (h *NodeHandler) MockTest(c *gin.Context) {
 }
 
 // ServeUIFile 提供节点自定义 UI 组件 bundle（module 模式）。
-// 文件内容来自导入时存入 Node.Files 的 ui.entry，只允许访问已入库的文件，
+// 只允许访问已入库（legacy Node.Files）或已入资产索引（FileAssets）的文件，
 // 天然免疫路径穿越。带 ?v=<updatedAt> 查询时响应长缓存（内容随重新导入变化，
 // URL 中的 v 随之更新），否则不缓存。
 func (h *NodeHandler) ServeUIFile(c *gin.Context) {
@@ -234,30 +235,41 @@ func (h *NodeHandler) ServeUIFile(c *gin.Context) {
 		return
 	}
 
-	content, ok := node.Files[rel]
-	if !ok {
-		Error(c, http.StatusNotFound, "ui file not found")
-		return
-	}
-
-	contentType := "application/octet-stream"
-	switch {
-	case strings.HasSuffix(rel, ".js"):
-		contentType = "text/javascript; charset=utf-8"
-	case strings.HasSuffix(rel, ".mjs"):
-		contentType = "text/javascript; charset=utf-8"
-	case strings.HasSuffix(rel, ".css"):
-		contentType = "text/css; charset=utf-8"
-	case strings.HasSuffix(rel, ".html"):
-		contentType = "text/html; charset=utf-8"
-	case strings.HasSuffix(rel, ".map"):
-		contentType = "application/json"
-	}
-
 	if c.Query("v") != "" {
 		c.Header("Cache-Control", "public, max-age=31536000, immutable")
 	} else {
 		c.Header("Cache-Control", "no-cache")
 	}
-	c.Data(http.StatusOK, contentType, []byte(content))
+
+	// legacy：内容直接在 DB Files 里
+	if content, ok := node.Files[rel]; ok && content != "" {
+		c.Data(http.StatusOK, assets.ContentTypeByExt(rel), []byte(content))
+		return
+	}
+
+	// P1：内容外置到资产目录，字节流 serving（二进制安全）
+	if asset, ok := node.FileAssets[rel]; ok {
+		store := h.service.Assets()
+		if store == nil {
+			Error(c, http.StatusInternalServerError, "asset store not configured")
+			return
+		}
+		f, err := store.Open(node.Name, node.Version, rel)
+		if err != nil {
+			Error(c, http.StatusNotFound, "ui file not found")
+			return
+		}
+		defer f.Close()
+		if asset.SHA256 != "" {
+			c.Header("ETag", `"`+asset.SHA256+`"`)
+		}
+		ct := asset.ContentType
+		if ct == "" {
+			ct = assets.ContentTypeByExt(rel)
+		}
+		c.DataFromReader(http.StatusOK, asset.Size, ct, f, nil)
+		return
+	}
+
+	Error(c, http.StatusNotFound, "ui file not found")
 }

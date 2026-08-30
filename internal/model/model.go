@@ -90,6 +90,15 @@ type NodePackage struct {
 	Timeout      int                `json:"timeout,omitempty"`
 }
 
+// NodeFileAsset 节点文件资产索引：文件内容外置到 assets store（<data.dir>/assets/nodes/），
+// DB 只存此索引。serving/运行时按需从磁盘读取，二进制安全且不占 JSON 存储。
+type NodeFileAsset struct {
+	SHA256      string `json:"sha256"`
+	Size        int64  `json:"size"`
+	ContentType string `json:"contentType,omitempty"`
+	Kind        string `json:"kind"` // runtime | ui
+}
+
 // Node 节点定义
 type Node struct {
 	ID          int64  `json:"id" db:"id"`
@@ -116,8 +125,11 @@ type Node struct {
 	DockerConfig *NodeDockerConfig `json:"docker,omitempty" db:"docker_config"`
 	MockConfig   *NodeMockConfig   `json:"mock,omitempty" db:"mock_config"`
 
-	// 节点包文件
+	// 节点包文件（legacy：内容直接存 JSON；新导入的节点此字段为空，内容在 FileAssets 指向的资产目录）
 	Files map[string]string `json:"files,omitempty" db:"files"`
+
+	// 节点文件资产索引（path -> 元信息），内容存于 assets store
+	FileAssets map[string]NodeFileAsset `json:"fileAssets,omitempty" db:"file_assets"`
 
 	// 完整的 flowx.json 包配置（运行时展开使用）
 	PackageConfig *NodePackage `json:"-" db:"package_config"`

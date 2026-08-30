@@ -586,7 +586,27 @@ localStorage、auth token、Studio 内部状态），**只应导入可信来源�
 - `AutoLayout`（dagre）：带 ui 节点按组件尺寸动态计算占位
 - `NodeTestPanel`：提供「UI 预览」，用 Mock 测试的真实输出渲染组件
 
-## 11.14 参考资料
+## 11.14 节点文件外置存储（P1，2026-08-30 起）
+
+节点文件内容不再直接存数据库 `nodes.files` JSON 字段，而是落盘到 **Node Asset Store**：
+
+```
+<data.dir>/assets/nodes/<name>@<version>/<包内相对路径>
+```
+
+- 导入时（`node_import.go`）原子写入资产目录（临时目录 + rename），DB 只存索引
+  `nodes.file_assets`（迁移 008）：`path -> { sha256, size, contentType, kind }`
+- `kind` 为 `runtime`（`pkg.files` 中的运行时依赖）或 `ui`（`ui/` 前缀或 `ui.entry`）；
+  运行时展开器（`node_expander.go`）跳过 `ui/` 文件，不再内联进 bash argv
+- UI serving（`/api/v1/nodes/:id/ui/*`）优先读 legacy `Files`，否则从资产目录字节流返回，
+  **二进制安全**（此前 JSON/TEXT 通道会把非法 UTF-8 替换为 U+FFFD）
+- 运行时/Mock 通过 `NodeService.HydrateFiles` 将资产内容补入 `node.Files` 后走原有链路
+- 删除节点时清理对应资产目录；启动时自动迁移存量 legacy 节点（`MigrateLegacyFiles`）
+- `backup create` 会配套生成 `<name>.assets.tar.gz`（整个 assets 目录），
+  `backup restore --file x.db` 时若旁边存在 `x.assets.tar.gz` 会自动一并恢复
+  （现有 assets 目录先改名为 `assets.pre-restore-<时间戳>` 保留回滚副本）
+
+## 11.15 参考资料
 
 - `flowx/core/config.go:113-124` — `NodeConfig` 结构定义
 - `flowx/dag/eval_context.go:80-115` — 模板上下文（`Param` 与 `Metadata`）

@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/LerkoX/flowx-studio/internal/assets"
 	"github.com/LerkoX/flowx-studio/internal/cli"
 	"github.com/LerkoX/flowx-studio/internal/config"
 	"github.com/LerkoX/flowx-studio/internal/db"
@@ -120,7 +121,14 @@ func newAppServices(cfg *config.Config) (*appServices, func(), error) {
 
 	bus := event.NewBus()
 	rt := runtime.NewAdapter()
+	assetStore := assets.NewStore(cfg.Data.Dir)
 	nodeSvc := service.NewNodeService(database, bus)
+	nodeSvc.SetAssetStore(assetStore)
+	if n, err := nodeSvc.MigrateLegacyFiles(); err != nil {
+		log.Printf("legacy node files migration failed: %v", err)
+	} else if n > 0 {
+		log.Printf("migrated %d legacy nodes' files to asset store", n)
+	}
 	nodeImportSvc := service.NewNodeImportService(nodeSvc)
 	workflowSvc := service.NewWorkflowService(database, rt, bus, nodeSvc)
 	auditSvc := service.NewAuditService(database)
