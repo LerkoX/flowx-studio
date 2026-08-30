@@ -206,3 +206,64 @@ func TestExpandNodeToConfig_DockerFallsBackToHeredoc(t *testing.T) {
 		t.Errorf("docker executor must not reference host asset dir, run:\n%s", run)
 	}
 }
+
+func TestExpandNodeToConfig_DockerHTTPBootstrap(t *testing.T) {
+	pkg := &model.NodePackage{
+		Name:     "docker-node",
+		Language: "bash",
+		Entry:    "main.sh",
+		Image:    "bash:5",
+		Executor: model.NodeExecutorConfig{Type: "docker"},
+	}
+	node := newTestNode(pkg)
+	node.AssetDir = "/data/assets/nodes/docker-node@1" // 容器内不可用，不得引用
+	node.AssetURL = "http://192.168.1.10:8080/api/v1/assets/nodes/docker-node@1?expires=999&sig=abc"
+	node.FileAssets = map[string]model.NodeFileAsset{
+		"main.sh":           {SHA256: "a", Size: 10, Kind: "runtime"},
+		"lib/helper.sh":     {SHA256: "b", Size: 10, Kind: "runtime"},
+		"ui/node-widget.js": {SHA256: "c", Size: 10, Kind: "ui"},
+	}
+	node.Files = map[string]string{"main.sh": "SHOULD-NOT-BE-INLINED"}
+
+	cfg, err := ExpandNodeToConfig(node)
+	if err != nil {
+		t.Fatalf("expand failed: %v", err)
+	}
+	run := cfg.Steps[0].Run
+
+	if !strings.Contains(run, "FLOWX_ASSETS_URL='http://192.168.1.10:8080/api/v1/assets/nodes/docker-node@1?expires=999&sig=abc'") {
+		t.Errorf("expected signed assets url, run:\n%s", run)
+	}
+	if !strings.Contains(run, "flowx_fetch 'main.sh'") || !strings.Contains(run, "flowx_fetch 'lib/helper.sh'") {
+		t.Errorf("expected curl/wget fetch for entry and runtime deps, run:\n%s", run)
+	}
+	if strings.Contains(run, "FLOWX_ASSETS_DIR") || strings.Contains(run, "SHOULD-NOT-BE-INLINED") || strings.Contains(run, "node-widget.js") {
+		t.Errorf("http bootstrap must not reference host dir / inline contents / ui files, run:\n%s", run)
+	}
+}
+
+func TestExpandNodeToConfig_DockerWithoutSignedURLFallsBack(t *testing.T) {
+	pkg := &model.NodePackage{
+		Name:     "docker-node",
+		Language: "bash",
+		Entry:    "main.sh",
+		Image:    "bash:5",
+		Executor: model.NodeExecutorConfig{Type: "docker"},
+	}
+	node := newTestNode(pkg)
+	node.Code = "echo docker\n"
+	node.AssetDir = "/data/assets/nodes/docker-node@1"
+	node.AssetURL = "" // 未配置 assets.http_base 时
+	node.FileAssets = map[string]model.NodeFileAsset{
+		"main.sh": {SHA256: "a", Size: 10, Kind: "runtime"},
+	}
+
+	cfg, err := ExpandNodeToConfig(node)
+	if err != nil {
+		t.Fatalf("expand failed: %v", err)
+	}
+	run := cfg.Steps[0].Run
+	if !strings.Contains(run, "cat > main.sh << 'FLOWX_FILE_EOF'") || !strings.Contains(run, "echo docker") {
+		t.Errorf("expected heredoc fallback when no signed url, run:\n%s", run)
+	}
+}

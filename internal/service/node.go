@@ -53,6 +53,8 @@ func (s *NodeService) HydrateFiles(node *model.Node) error {
 	if dir, err := s.assets.NodeDir(node.Name, node.Version); err == nil {
 		node.AssetDir = dir
 	}
+	// 签名 URL（docker/k8s 执行器通过 HTTP 拉资产用；未配置 HTTPBase 时为空）
+	node.AssetURL = s.assets.SignedURL(node.Name, node.Version, assets.DefaultSignTTL)
 	if node.Files == nil {
 		node.Files = make(map[string]string, len(node.FileAssets))
 	}

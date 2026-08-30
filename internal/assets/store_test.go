@@ -1,6 +1,7 @@
 package assets
 
 import (
+	"time"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,5 +143,55 @@ func TestTarGzMissingDir(t *testing.T) {
 	wrote, err := TarGz(filepath.Join(tmp, "nonexistent"), filepath.Join(tmp, "x.tar.gz"))
 	if err != nil || wrote {
 		t.Errorf("expected wrote=false err=nil, got wrote=%v err=%v", wrote, err)
+	}
+}
+
+func TestSignedURLRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	s.HTTPBase = "http://192.168.1.10:8080/"
+	s.SignKey = []byte("0123456789abcdef0123456789abcdef")
+
+	u := s.SignedURL("my-node", "1.2.0", time.Minute)
+	if !strings.HasPrefix(u, "http://192.168.1.10:8080/api/v1/assets/nodes/my-node@1.2.0?expires=") {
+		t.Fatalf("unexpected url: %s", u)
+	}
+	// 解析并校验
+	q, _ := strings.CutPrefix(u, "http://192.168.1.10:8080/api/v1/assets/nodes/my-node@1.2.0?")
+	parts := map[string]string{}
+	for _, kv := range strings.Split(q, "&") {
+		kv := strings.SplitN(kv, "=", 2)
+		parts[kv[0]] = kv[1]
+	}
+	if !s.VerifySignedRequest("my-node", "1.2.0", parts["expires"], parts["sig"]) {
+		t.Error("valid signature rejected")
+	}
+	// 篡改节点名/版本/签名都应拒绝
+	if s.VerifySignedRequest("other-node", "1.2.0", parts["expires"], parts["sig"]) {
+		t.Error("tampered name accepted")
+	}
+	if s.VerifySignedRequest("my-node", "9.9.9", parts["expires"], parts["sig"]) {
+		t.Error("tampered version accepted")
+	}
+	if s.VerifySignedRequest("my-node", "1.2.0", parts["expires"], "deadbeef") {
+		t.Error("bad sig accepted")
+	}
+	// 过期拒绝
+	if s.VerifySignedRequest("my-node", "1.2.0", "1", parts["sig"]) {
+		t.Error("expired accepted")
+	}
+	// 未配置 HTTPBase/SignKey 时不生成 URL、不通过校验
+	s2 := newTestStore(t)
+	if u := s2.SignedURL("n", "1", 0); u != "" {
+		t.Errorf("expected empty url without config, got %s", u)
+	}
+	if s2.VerifySignedRequest("n", "1", parts["expires"], parts["sig"]) {
+		t.Error("verify passed without key")
+	}
+	// 空版本归一为 "0"
+	s3 := newTestStore(t)
+	s3.HTTPBase = "http://x"
+	s3.SignKey = s.SignKey
+	if u := s3.SignedURL("n", "", time.Minute); !strings.Contains(u, "n@0?") {
+		t.Errorf("empty version should normalize to 0: %s", u)
 	}
 }

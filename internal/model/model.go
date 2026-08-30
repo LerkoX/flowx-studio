@@ -134,6 +134,9 @@ type Node struct {
 	// 资产目录绝对路径（运行时由 HydrateFiles 填充，不入库、不出 API）
 	AssetDir string `json:"-" db:"-"`
 
+	// 资产签名拉取 URL 前缀（docker/k8s 执行器用，HydrateFiles 填充）
+	AssetURL string `json:"-" db:"-"`
+
 	// 完整的 flowx.json 包配置（运行时展开使用）
 	PackageConfig *NodePackage `json:"-" db:"package_config"`
 

@@ -63,31 +63,37 @@ func ExpandNodeToConfig(node *model.Node, paramBindings ...map[string]string) (*
 		fmt.Fprintf(&runScript, "export %s=\"%s\"\n", key, template)
 	}
 
-	// 资产引导：local 执行器且节点文件已入资产库时，直接 cp 物化
-	//（脚本体积恒定，二进制安全，不受 argv 上限约束）；
-	// 其余情况（legacy 节点 / docker 等）回退 heredoc 内联。
-	assetBacked := node.AssetDir != "" && len(node.FileAssets) > 0 &&
+	// 资产引导三条路径：
+	//  1. local 执行器 + 资产库：cp 物化（脚本体积恒定，二进制安全）
+	//  2. docker/k8s + 签名 URL：curl/wget HTTP 拉取（容器内看不到宿主机路径）
+	//  3. legacy 节点：heredoc 内联（跳过 ui/ 文件）
+	hasAssets := len(node.FileAssets) > 0
+	cpBacked := node.AssetDir != "" && hasAssets &&
 		(executorType == "" || executorType == "local")
-	if assetBacked {
+	httpBacked := node.AssetURL != "" && hasAssets &&
+		(executorType == "docker" || executorType == "k8s")
+	switch {
+	case cpBacked:
 		fmt.Fprintf(&runScript, "FLOWX_ASSETS_DIR=%s\n", shellQuote(node.AssetDir))
-		writeAssetCp := func(rel string) {
+		writeAssetFetch := func(rel string) {
 			if dir := path.Dir(rel); dir != "." {
 				fmt.Fprintf(&runScript, "mkdir -p %s\n", shellQuote(dir))
 			}
 			fmt.Fprintf(&runScript, "cp \"$FLOWX_ASSETS_DIR/%s\" %s\n", rel, shellQuote(rel))
 		}
-		if _, ok := node.FileAssets[pkg.Entry]; ok {
-			writeAssetCp(pkg.Entry)
-		} else {
-			writeFileHeredoc(&runScript, pkg.Entry, node.Code)
-		}
-		for _, rel := range sortedFileAssets(node.FileAssets) {
-			if rel == pkg.Entry || node.FileAssets[rel].Kind == "ui" {
-				continue
+		writeAssetFiles(&runScript, node, pkg, writeAssetFetch)
+	case httpBacked:
+		fmt.Fprintf(&runScript, "FLOWX_ASSETS_URL=%s\n", shellQuote(node.AssetURL))
+		// curl 优先，wget 兜底（精简镜像可能二缺一）
+		runScript.WriteString("flowx_fetch() { curl -fsSL \"$FLOWX_ASSETS_URL/$1\" -o \"$1\" 2>/dev/null || wget -qO \"$1\" \"$FLOWX_ASSETS_URL/$1\"; }\n")
+		writeAssetFetch := func(rel string) {
+			if dir := path.Dir(rel); dir != "." {
+				fmt.Fprintf(&runScript, "mkdir -p %s\n", shellQuote(dir))
 			}
-			writeAssetCp(rel)
+			fmt.Fprintf(&runScript, "flowx_fetch %s\n", shellQuote(rel))
 		}
-	} else {
+		writeAssetFiles(&runScript, node, pkg, writeAssetFetch)
+	default:
 		// 写入入口文件
 		writeFileHeredoc(&runScript, pkg.Entry, node.Code)
 
@@ -249,6 +255,22 @@ func defaultRunCommand(language, entry string) string {
 
 // parseParamBindings 从 pipeline YAML 的节点 config.params 中提取参数绑定。
 // 值为标量或模板字符串（如 {{ GetWeather.city }}），统一转为 string。
+// writeAssetFiles 物化入口 + runtime 资产（ui 资产不进执行链路）。
+// 入口不在资产库时（迁移的 legacy 节点）回退 heredoc。
+func writeAssetFiles(sb *strings.Builder, node *model.Node, pkg *model.NodePackage, fetch func(rel string)) {
+	if _, ok := node.FileAssets[pkg.Entry]; ok {
+		fetch(pkg.Entry)
+	} else {
+		writeFileHeredoc(sb, pkg.Entry, node.Code)
+	}
+	for _, rel := range sortedFileAssets(node.FileAssets) {
+		if rel == pkg.Entry || node.FileAssets[rel].Kind == "ui" {
+			continue
+		}
+		fetch(rel)
+	}
+}
+
 // writeFileHeredoc 生成 heredoc 写文件命令（legacy 路径）
 func writeFileHeredoc(sb *strings.Builder, name, content string) {
 	fmt.Fprintf(sb, "cat > %s << 'FLOWX_FILE_EOF'\n", name)

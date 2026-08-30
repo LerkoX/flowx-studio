@@ -42,6 +42,7 @@ type appServices struct {
 	workflowSvc   *service.WorkflowService
 	auditSvc      *service.AuditService
 	backupSvc     *service.BackupService
+	assetStore    *assets.Store
 }
 
 func main() {
@@ -122,6 +123,22 @@ func newAppServices(cfg *config.Config) (*appServices, func(), error) {
 	bus := event.NewBus()
 	rt := runtime.NewAdapter()
 	assetStore := assets.NewStore(cfg.Data.Dir)
+	// P3：远程执行器资产拉取。HTTPBase 未显式配置时按 server.host:port 推导
+	//（0.0.0.0 对执行器不可达，视为 127.0.0.1；跨主机/容器请配置 assets.http_base）
+	httpBase := cfg.Assets.HTTPBase
+	if httpBase == "" {
+		host := cfg.Server.Host
+		if host == "0.0.0.0" || host == "::" || host == "" {
+			host = "127.0.0.1"
+		}
+		httpBase = fmt.Sprintf("http://%s:%d", host, cfg.Server.Port)
+	}
+	assetStore.HTTPBase = httpBase
+	if key, err := assets.LoadOrCreateSignKey(cfg.Data.Dir); err != nil {
+		log.Printf("asset signing key init failed (remote asset pull disabled): %v", err)
+	} else {
+		assetStore.SignKey = key
+	}
 	nodeSvc := service.NewNodeService(database, bus)
 	nodeSvc.SetAssetStore(assetStore)
 	if n, err := nodeSvc.MigrateLegacyFiles(); err != nil {
@@ -150,6 +167,7 @@ func newAppServices(cfg *config.Config) (*appServices, func(), error) {
 		workflowSvc:   workflowSvc,
 		auditSvc:      auditSvc,
 		backupSvc:     backupSvc,
+		assetStore:    assetStore,
 	}, cleanup, nil
 }
 
@@ -224,6 +242,8 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	// 健康检查免认证（监控探针 / server status 探测用），不含敏感数据
 	handler.NewHealthHandler(svcs.database, cfg.Data.DBPath, version).RegisterRoutes(srv.Router())
+	// 节点资产拉取免认证（签名 URL 自校验，供 docker/k8s 执行器 curl 引导）
+	handler.NewAssetHandler(svcs.assetStore).RegisterRoutes(srv.Router())
 	configHandler := handler.NewConfigHandler(svcs.database)
 	configHandler.SetAudit(svcs.auditSvc)
 	configHandler.RegisterRoutes(api)

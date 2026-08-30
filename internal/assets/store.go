@@ -34,9 +34,12 @@ type FileData struct {
 	Kind    string // KindRuntime | KindUI
 }
 
-// Store 节点资产存储，根目录 <dataDir>/assets/nodes
+// Store 节点资产存储，根目录 <dataDir>/assets/nodes。
+// HTTPBase/SignKey 用于为远程执行器生成签名拉取 URL（P3）。
 type Store struct {
-	Root string
+	Root     string
+	HTTPBase string // 例：http://192.168.1.10:8080（需执行器网络可达）
+	SignKey  []byte
 }
 
 // NewStore 创建资产存储。dataDir 为 flowx-studio 数据目录。
