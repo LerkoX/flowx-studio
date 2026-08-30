@@ -50,6 +50,39 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 - `ask` 的回答从 stdout 以 `key=value` 形式输出；`info` 为纯终端卡片，两者都不访问 server。
 - `pipeline update` 省略的字段会保留原值（CLI 自动合并）。
 
+## 节点编写指南（创建/修改节点包时必读）
+
+节点包 = 一个目录：`flowx.json`（清单，必需）+ 入口代码 + 可选 `ui/`（自定义画布组件）。完整规范见仓库 `docs/11-node-package.md`，以下为速查：
+
+### flowx.json 规范
+
+- 必填：`name`（字母开头，snake_case/kebab-case）、`language`、`entry`（文件必须存在）、`parameters`（可为空数组）
+- 每个参数的 `description` 必须详细说明所需数据（格式/单位/取值），这是 pipeline 接线的依据；推荐加 `source: { nodeRef, output }` 标注推荐来源节点包
+- 参数注入优先 `env`（`{"CITY": "{{ Param.city }}"}`），模板只允许 `{{ Param.* }}` 或字面量，禁止引用节点实例 ID
+- 输出用 `extract: {"type": "codec-block"}`（代码打印 ```flowx-yaml 块）或 `regex`
+- Mock 测试：`mock: {enabled: true, entry: "mock.py"}`，可用 `FLOWX_PARAM_*` 或裸大写参数名读参
+
+### 自定义 UI 组件（可选，module 模式）
+
+画布节点可内嵌节点包自带的前端组件。flowx.json 声明：
+
+```json
+"ui": { "entry": "ui/node-widget.js", "width": 300, "height": 230, "collapsed": false, "apiVersion": 1 }
+```
+
+- `entry`：包内预编译单文件 `.js` bundle（≤10MB），格式不限——ESM 默认导出 `mount`，或 IIFE 调用 `window.FlowXNodeWidget.define(mount)`
+- 契约：`mount(el, props) => { update(props), unmount() }`；`props` 只读，含 `status`/`inputs`/`outputs`/`execution`（流水线实时 metadata，无运行实例为 null）
+- 参考实现：免构建原生 JS 示例 `tests/e2e/testdata/ui-demo-node/ui/node-widget.js`；React+Vite 工程模板 `templates/node-widget/`
+- 改组件后只需重新 `node import` 生效，无需重启 server；在「节点管理→测试」面板有 UI 预览
+- 安全：组件代码在 Studio 前端上下文执行，只导入可信来源
+
+### 导入与验证
+
+1. `node import --type folder --path <dir>`（校验失败按 stderr 修正重试）
+2. `node mock --id <N>` 验证节点逻辑（有 mock 时）
+3. 同名节点已存在时：`node delete --id <旧id>` 后重新导入（pipeline 按 nodeRef 名称引用，不受影响）
+4. 画布验证：pipeline YAML 用 `config.nodeRef: <name>` 引用后运行，浏览器查看内嵌 UI
+
 ## 典型流程
 
 0. `server status` 确认 server 运行中；若 `stopped` 则 `server start`
