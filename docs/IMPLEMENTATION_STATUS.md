@@ -1,7 +1,21 @@
 # FlowX Studio 实现状态跟踪文档
 
 > 本文档记录 FlowX Studio 各模块的实现状态，区分「已实现」和「待实现」功能。
-> 最后更新：2026-08-21
+> 最后更新：2026-08-30
+
+---
+
+## 近期重要变更（2026-08-30，节点资产外置存储 P1–P4）
+
+### 节点文件资产库（Node Asset Store，已落地）
+- 节点文件内容**不再存数据库**（迁移 009 删除 `nodes.files` 列，无 legacy 兼容），统一落盘 `<data.dir>/assets/nodes/<name>@<version>/`；DB 仅存索引 `nodes.file_assets`（迁移 008：`sha256/size/contentType/kind`，kind = runtime | ui）。
+- 新包 `internal/assets`：`Store`（原子 Put/Open/Read/Remove，防路径穿越，二进制安全）、`TarGz`/`UntarGz`（纯 Go）、签名 URL（HMAC-SHA256，密钥 `<data.dir>/asset_signing.key`）。
+- 导入：文件（含入口）全部入资产库；UI serving `/api/v1/nodes/:id/ui/*` 从磁盘流式返回 + ETag，前端 URL 契约不变。
+- 运行时展开（`node_expander.go`）：`mktemp` 独立工作目录 + trap 清理；local 走 `cp "$FLOWX_ASSETS_DIR/..."`，docker/k8s 走签名 URL `curl`（免认证端点 `GET /api/v1/assets/nodes/<name>@<version>/<path>?expires&sig`，配置项 `assets.http_base` / `FLOWX_STUDIO_ASSETS_HTTP_BASE`）；纯内联节点入口 heredoc；docker 带 runtime 依赖但无签名服务时展开报错。
+- Mock：`LoadRuntimeFiles` 从资产库读取 runtime 文件物化到沙箱。
+- 备份：`backup create` 配套生成 `<name>.assets.tar.gz`；`restore` 自动成对恢复并留 `.pre-restore` 回滚副本。
+- GC：启动时清理无节点引用的资产目录与 Put 崩溃遗留 tmp 目录（审计记录 `gc_assets`）。
+- 示例节点包收入仓库 `nodes/`：`earth-3d-viewer`（3D 地球真实日照画布节点）、`get-weather`、`send-feishu`。
 
 ---
 
@@ -9,7 +23,7 @@
 
 ### 节点自定义 UI 组件（module 模式，已落地）
 - `flowx.json` 新增可选 `ui` 字段（`entry`/`width`/`height`/`collapsed`/`apiVersion`），节点包可携带预编译单文件 JS bundle 作为画布节点内嵌 UI。契约与字段说明见 `docs/11-node-package.md` 11.13 节。
-- 后端：`NodePackage.UI`/`Node.UI` 模型（复用 `package_config` 列，无新迁移）；导入校验（entry 存在、单文件 .js、≤10MB、apiVersion=1、防路径穿越）；bundle 内容存入 `Node.Files`；新增 `GET /api/v1/nodes/:id/ui/*filepath` 静态服务（`?v=<updatedAt>` 缓存破坏 + immutable 长缓存）。
+- 后端：`NodePackage.UI`/`Node.UI` 模型（复用 `package_config` 列，无新迁移）；导入校验（entry 存在、单文件 .js、≤10MB、apiVersion=1、防路径穿越）；bundle 入资产库（2026-08-30 起，此前存 `Node.Files`）；新增 `GET /api/v1/nodes/:id/ui/*filepath` 静态服务（`?v=<updatedAt>` 缓存破坏 + immutable 长缓存）。
 - 前端：新增 `ModuleNodeWidget`（ESM 动态 import / IIFE `FlowXNodeWidget.define` 双格式加载、模块级缓存 + 串行加载队列、mount/update/unmount 生命周期、错误兜底）；`WorkflowCanvas` 新增 `parseNodeRefs` 提取 `config.nodeRef` 并注入 ui 配置；`GlowNode` 内嵌渲染组件并按 `ui.width/height` 撑开卡片（原生摘要折叠为「查看数据」开关）；`AutoLayout` 按组件尺寸动态布局；`NodeTestPanel` 新增「UI 预览」；`NodeDetailModal` 标记「自定义 UI 组件」。
 - 数据契约（apiVersion 1，只读）：节点状态/入参/输出 + 流水线执行实例实时 metadata（`executionStore.selectedExecution`，SSE 驱动）。
 - 配套：`templates/node-widget/` React + Vite starter；`tests/e2e/testdata/ui-demo-node/` 免构建原生 DOM 示例；Go 单元测试（导入校验 6 例）+ E2E 新增 3b 分组（98 用例全过）。
@@ -238,7 +252,7 @@ AI Provider（OpenAI/Anthropic/Ollama）与 AI Service 层已随架构调整全�
 ### ❌ 未实现（V2 或后续迭代）
 
 #### 1. 节点包规范（flowx.json）
-- [x] `model.Node.Files` 字段与数据库迁移
+- [x] ~~`model.Node.Files` 字段与数据库迁移~~（已废弃：2026-08-30 迁移 009 删除，文件内容统一入资产库）
 - [x] `model.Node.PackageConfig` 字段与数据库迁移
 - [x] `POST /api/v1/nodes/import` 接口
 - [x] git / folder 节点包导入服务

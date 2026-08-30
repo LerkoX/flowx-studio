@@ -45,8 +45,8 @@ CREATE TABLE nodes (
     source_type     TEXT DEFAULT 'manual',           -- 来源类型: git | manual
     source_url      TEXT,                            -- 来源 Git 仓库地址
     source_path     TEXT,                            -- 来源本地路径
-    files           TEXT,                            -- JSON: 节点包文件（迁移 005）
     package_config  TEXT,                            -- JSON: 完整 flowx.json 包配置（迁移 006）
+    file_assets     TEXT,                            -- JSON: 文件资产索引（迁移 008；内容在 assets store，不入库）
     tags            TEXT DEFAULT '[]',               -- 标签，JSON 数组
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -305,8 +305,8 @@ erDiagram
         text docker_config
         text mock_config
         string source_type
-        text files
         text package_config
+        text file_assets
         text tags
     }
 
@@ -376,8 +376,11 @@ migrations/
 ├── 002_remove_ai_mcp.sql            -- 移除 AI/MCP 相关表
 ├── 003_execution_nodes_unique.sql   -- execution_nodes 增加唯一索引
 ├── 004_execution_metadata.sql       -- executions 增加 metadata_json 字段
-├── 005_add_node_files.sql           -- nodes 增加 files 字段
-└── 006_add_node_package_config.sql  -- nodes 增加 package_config 字段
+├── 005_add_node_files.sql           -- nodes 增加 files 字段（已被 009 删除）
+├── 006_add_node_package_config.sql  -- nodes 增加 package_config 字段
+├── 007_audit_logs.sql               -- 审计日志表
+├── 008_add_node_file_assets.sql     -- nodes 增加 file_assets 资产索引字段
+└── 009_drop_node_files.sql          -- 删除 nodes.files（文件内容统一入 assets store）
 ```
 
 ### 3.5.2 迁移执行逻辑

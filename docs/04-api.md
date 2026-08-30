@@ -605,8 +605,8 @@ PUT /api/v1/config/system
 | `ask --key k --prompt ...` | 终端交互式提问（承接原 FAP `ask_input`，纯终端，不访问 server） | 无 |
 | `info --title t --message m` | 终端信息卡片（承接原 FAP `show_info`，纯终端，不访问 server） | 无 |
 | `audit list` | 查询审计日志（`--action`/`--resource-type` 过滤） | `GET /audit-logs` |
-| `backup create` / `backup list` / `backup download` | 数据库备份创建/列表/下载 | `POST /backups`、`GET /backups`、`GET /backups/:name/download` |
-| `backup restore --file f` | 恢复数据库（要求 server 已停止，自动保留 `.pre-restore` 回滚副本） | 无（直接操作数据库文件） |
+| `backup create` / `backup list` / `backup download` | 备份创建/列表/下载（`.db` + 配套 `.assets.tar.gz` 节点资产包） | `POST /backups`、`GET /backups`、`GET /backups/:name/download` |
+| `backup restore --file f` | 恢复备份（要求 server 已停止；`f` 旁存在 `.assets.tar.gz` 时自动恢复资产，自动保留 `.pre-restore` 回滚副本） | 无（直接操作数据库文件） |
 
 全局约定：所有查询类子命令支持 `--json` 输出结构化结果；数据写入类子命令支持 `--schema` 输出参数 JSON Schema；校验失败以非零退出码退出并在 stderr 给出重试指引。详见 [06-ai-service.md](./06-ai-service.md)。
 
@@ -648,8 +648,11 @@ PUT /api/v1/config/system
 │
 ├── /backups
 │   ├── GET    /          备份列表
-│   ├── POST   /          创建备份（VACUUM INTO）
-│   └── GET    /:name/download  下载备份文件
+│   ├── POST   /          创建备份（VACUUM INTO + 资产 tar.gz）
+│   └── GET    /:name/download  下载备份文件（.db 或 .assets.tar.gz）
+│
+├── /assets                    ※ 免认证（签名 URL 自校验，供 docker/k8s 执行器拉取节点资产）
+│   └── GET    /nodes/:nodeRef/*filepath?expires&sig  签名 URL 拉取节点文件（HMAC-SHA256 + 时效）
 │
 └── /config
     ├── GET    /system    获取系统配置

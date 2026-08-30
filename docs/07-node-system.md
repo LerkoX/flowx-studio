@@ -32,8 +32,9 @@ type Node struct {
     DockerConfig *NodeDockerConfig // Docker 配置
     MockConfig   *NodeMockConfig   // Mock 配置
 
-    // 节点包文件（文件名 -> 内容）
-    Files        map[string]string
+    // 节点包文件资产索引（文件名 -> sha256/size/contentType/kind）
+    // 文件内容存于 assets store（<data.dir>/assets/nodes/），不入库
+    FileAssets   map[string]NodeFileAsset
 
     // 完整的 flowx.json 包配置（运行时展开使用）
     PackageConfig *NodePackage
@@ -391,9 +392,13 @@ func ExpandNodeToConfig(node *model.Node) (*core.NodeConfig, error)
 
 **注入机制**：`ExpandNodeToConfig` 以节点的 `PackageConfig`（flowx.json）为依据，生成一段 shell 脚本放入**单个 step**（`name: run`）：
 
-1. `export KEY="{{ Param.xxx }}"` 注入环境变量（默认 `FLOWX_PARAM_{大写参数名}`；`flowx.json` 的 `env` 字段优先）
-2. `cat > {entry} << 'FLOWX_FILE_EOF'` heredoc 写入入口代码及 `files` 附加文件
-3. 追加运行命令（`flowx.json` 的 `run` 字段；缺省时按语言推断，如 `python3 main.py`）
+1. `mktemp -d` 创建独立临时工作目录 + `trap rm -rf EXIT` 清理（不再污染执行器 cwd）
+2. `export KEY="{{ Param.xxx }}"` 注入环境变量（默认 `FLOWX_PARAM_{大写参数名}`；`flowx.json` 的 `env` 字段优先）
+3. 文件物化（ui 类资产不进执行链路）：
+   - local 执行器：`cp "$FLOWX_ASSETS_DIR/<rel>"` 从资产库拷贝（脚本体积恒定，二进制安全）
+   - docker/k8s：`curl -fsSL "$FLOWX_ASSETS_URL/<rel>"`（签名 URL，见 11.15 节；未配置 `assets.http_base` 且有 runtime 依赖时展开报错）
+   - 纯内联节点：`cat > {entry} << 'FLOWX_FILE_EOF'` heredoc 写入入口代码
+4. 追加运行命令（`flowx.json` 的 `run` 字段；缺省时按语言推断，如 `python3 main.py`）
 
 同时以 `{nodeName}-executor` 为名向 `cfg.Executors` 写入执行器配置，类型来自 `flowx.json` 的 `executor.type`（缺省时：有 `image` 为 `docker`，否则 `local`）。未声明 `extract` 时默认 `codec-block`。
 
