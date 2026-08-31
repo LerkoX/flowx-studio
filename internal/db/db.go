@@ -30,11 +30,17 @@ func New(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("failed to create db directory: %w", err)
 	}
 
-	// 打开数据库
-	db, err := sqlx.Open("sqlite", dbPath+"?_fk=1")
+	// 打开数据库：DSN 级 _pragma 对连接池中的每个连接生效；
+	// MaxOpenConns(1) 串行化进程内写事务，彻底避免 SQLITE_BUSY 静默丢写
+	dsn := dbPath + "?_fk=1&_pragma=busy_timeout(5000)"
+	if !strings.Contains(dbPath, ":memory:") {
+		dsn += "&_pragma=journal_mode(WAL)"
+	}
+	db, err := sqlx.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
+	db.SetMaxOpenConns(1)
 
 	// 启用外键
 	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {

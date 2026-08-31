@@ -190,6 +190,7 @@ type Execution struct {
 	ErrorMessage *string    `json:"errorMessage,omitempty" db:"error_message"`
 	ErrorNodeID  *string    `json:"errorNodeId,omitempty" db:"error_node_id"`
 	MetadataJSON *string    `json:"metadata,omitempty" db:"metadata_json"`
+	RuntimeYAML  *string    `json:"-" db:"runtime_yaml"` // 运行时快照（仅供续跑恢复，不随 API 返回）
 	CreatedAt    time.Time  `json:"createdAt" db:"created_at"`
 }
 

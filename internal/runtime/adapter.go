@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/LerkoX/flowx"
+	"github.com/LerkoX/flowx/core"
 	"github.com/LerkoX/flowx/dag"
 	"github.com/LerkoX/flowx/logger"
+	"github.com/LerkoX/flowx/metadata"
 )
 
 // Adapter FlowX 运行时适配器
@@ -18,6 +21,9 @@ type Adapter struct {
 	logPusher *LogPusher
 	mu        sync.RWMutex
 }
+
+// exportHandler 执行完成时的快照导出回调（atomic 存储，启动时注册一次）
+var exportHandler atomic.Value // func(executionID int64, snapshotYAML string)
 
 // ExecutionEvent 执行事件
 type ExecutionEvent struct {
@@ -53,9 +59,9 @@ func (a *Adapter) OnLog(handler func(entry logger.Entry)) {
 	a.logPusher.OnLog(handler)
 }
 
-// ExecuteWorkflow 执行工作流
-// 使用 RunAsyncRetained：执行完成后 pipeline 实例保留在 runtime 中，
-// 支持后续 UpdateExecutionConfig 修改图（如追加节点）并 ContinueExecution 继续运行。
+// ExecuteWorkflow 执行工作流。
+// 实例在完成时即从 flowx Runtime 删除；PipelineFinish 事件回调内同步导出
+// 运行时快照（ExportConfig）并回调 exportHandler，供上层持久化以支持无状态续跑。
 func (a *Adapter) ExecuteWorkflow(ctx context.Context, executionID int64, configYAML string) error {
 	id := fmt.Sprintf("exec-%d", executionID)
 
@@ -65,8 +71,8 @@ func (a *Adapter) ExecuteWorkflow(ctx context.Context, executionID int64, config
 		executionID: executionID,
 	}
 
-	// 异步执行（保留实例）
-	pipeline, err := a.runtime.RunAsyncRetained(ctx, id, configYAML, listener)
+	// 异步执行
+	pipeline, err := a.runtime.RunAsync(ctx, id, configYAML, listener)
 	if err != nil {
 		return fmt.Errorf("failed to start workflow: %w", err)
 	}
@@ -76,6 +82,46 @@ func (a *Adapter) ExecuteWorkflow(ctx context.Context, executionID int64, config
 		a.logPusher.RegisterPipeline(pipeline.Id(), executionID)
 	}
 
+	return nil
+}
+
+// SetExportHandler 注册运行时快照导出回调（在执行完成的 PipelineFinish 事件内同步调用）
+func (a *Adapter) SetExportHandler(h func(executionID int64, snapshotYAML string)) {
+	exportHandler.Store(h)
+}
+
+// LoadExecution 从运行时快照 YAML 恢复已完成的执行实例（不运行），
+// 并注入历史 metadata（恢复下游节点 {{ NodeId.key }} 引用的数据来源）。
+// 用于续跑前重建实例；同 ID 旧实例存在时先移除（DB 快照总是最新的）。
+func (a *Adapter) LoadExecution(ctx context.Context, executionID int64, snapshotYAML string, metadataValues map[string]interface{}) error {
+	id := fmt.Sprintf("exec-%d", executionID)
+
+	// 同名旧实例（如同进程多次续跑）先释放；DB 快照在每次完成时更新，重建总是最新
+	a.runtime.Rm(id)
+
+	listener := &studioListener{
+		adapter:     a,
+		executionID: executionID,
+	}
+	pipeline, err := a.runtime.LoadPipeline(ctx, id, snapshotYAML, listener)
+	if err != nil {
+		return fmt.Errorf("failed to load execution snapshot: %w", err)
+	}
+
+	// 注入历史 metadata：flowx 渲染上下文（buildRenderContext）会合并
+	// InConfigMetadataStore 的全部数据，续跑中新提取的数据也会写回该 store
+	if len(metadataValues) > 0 {
+		store, err := metadata.NewInConfigMetadataStore(core.MetadataConfig{
+			Type: "in-config",
+			Data: metadataValues,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to build metadata store: %w", err)
+		}
+		pipeline.SetMetadata(store)
+	}
+
+	a.logPusher.RegisterPipeline(pipeline.Id(), executionID)
 	return nil
 }
 
@@ -153,6 +199,7 @@ func metadataToMap(m dag.Metadata) map[string]interface{} {
 
 // Handle 处理事件
 func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
+	fmt.Printf("[debug] listener exec-%d event=%s\n", l.executionID, event)
 	switch event {
 	case dag.PipelineStart:
 		l.adapter.PushEvent(ExecutionEvent{
@@ -165,6 +212,19 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 			},
 		})
 	case dag.PipelineFinish:
+		fmt.Printf("[debug] finish-case exec-%d entered\n", l.executionID)
+		// 实例在 Run 返回后即被 RunAsync 删除，快照导出必须在事件回调内同步完成
+		if h, ok := exportHandler.Load().(func(int64, string)); ok && h != nil {
+			id := fmt.Sprintf("exec-%d", l.executionID)
+			if snapshotYAML, err := l.adapter.runtime.ExportConfig(id); err == nil {
+				fmt.Printf("[debug] export ok exec-%d len=%d\n", l.executionID, len(snapshotYAML))
+				h(l.executionID, snapshotYAML)
+			} else {
+				fmt.Printf("[debug] export snapshot failed for exec-%d: %v\n", l.executionID, err)
+			}
+		} else {
+			fmt.Printf("[debug] no export handler registered (exec-%d)\n", l.executionID)
+		}
 		l.adapter.PushEvent(ExecutionEvent{
 			Type:        "execution_complete",
 			ExecutionID: l.executionID,

@@ -549,7 +549,10 @@ Content-Type: application/json
 - 续跑沿用同一执行 ID：状态回到 running，节点记录与日志追加到原实例
 - 仅影响该执行实例，不修改流水线定义（需要时用 `PUT /workflows/:id`）
 
-**注意**：执行实例的运行时状态保留在 server 进程内存中，server 重启后无法续跑（报 `pipeline with id exec-N not found`）。
+**无状态恢复**：执行结束时服务端会同步导出运行时快照（`flowx ExportConfig`，含各节点/步骤状态，
+不含大体积 metadata）存入 `executions.runtime_yaml`；续跑时经 `LoadPipeline` 从快照重建实例，
+并从 `metadata_json` 恢复节点输出数据（下游 `{{ NodeId.key }}` 引用不受影响）。
+**server 重启后仍可续跑**；仅快照功能上线前创建的旧执行（runtime_yaml 为空）无法续跑。
 
 **响应示例**：
 

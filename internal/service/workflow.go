@@ -44,7 +44,23 @@ func NewWorkflowService(database *db.DB, rt *runtime.Adapter, bus *event.Bus, no
 		metaCache: make(map[int64]map[string]interface{}),
 	}
 	rt.OnLog(svc.handleLogEntry)
+	// 执行完成时持久化运行时快照（含各节点/步骤状态），供无状态续跑恢复
+	rt.SetExportHandler(svc.saveRuntimeSnapshot)
 	return svc
+}
+
+// saveRuntimeSnapshot 在执行完成的 PipelineFinish 事件内同步保存快照 YAML
+func (s *WorkflowService) saveRuntimeSnapshot(execID int64, snapshotYAML string) {
+	fmt.Printf("[debug] saveRuntimeSnapshot exec=%d len=%d\n", execID, len(snapshotYAML))
+	if snapshotYAML == "" {
+		return
+	}
+	res, err := s.db.Exec("UPDATE executions SET runtime_yaml = ? WHERE id = ?", snapshotYAML, execID)
+	if err != nil {
+		fmt.Printf("[debug] saveRuntimeSnapshot exec=%d db error: %v\n", execID, err)
+	} else if n, _ := res.RowsAffected(); n == 0 {
+		fmt.Printf("[debug] saveRuntimeSnapshot exec=%d no rows affected\n", execID)
+	}
 }
 
 // SetAudit 注入审计服务（可选）；审计写入失败不影响主流程
@@ -234,11 +250,10 @@ func (s *WorkflowService) Run(id int64, params map[string]interface{}, dryRun bo
 	return execID, fmt.Sprintf("/api/v1/executions/%d/stream", execID), nil
 }
 
-// ContinueExecution 继续运行已结束的执行实例。
-// yamlContent 非空时先校验并展开 nodeRef，再由 flowx UpdateConfig 比对差异更新图
-//（已执行节点不可删除/替换；Version/Name 等不可变字段必须与原配置一致），
-// 随后触发 Rerun：已终结状态节点跳过，仅执行新增/未运行节点。
-// 执行记录沿用同一 execID：状态回到 running，日志与节点记录追加。
+// ContinueExecution 继续运行已结束的执行实例（无状态：从 DB 快照重建，server 重启后亦可续跑）。
+// 流程：读 executions.runtime_yaml（执行完成时导出的快照）→ LoadExecution 恢复实例
+// 并注入 metadata_json 中的历史节点输出 → 有 yaml 时 UpdateConfig 比对更新图 → Rerun
+// 增量执行（已终结节点跳过）。执行记录沿用同一 execID：状态回到 running，日志与节点记录追加。
 func (s *WorkflowService) ContinueExecution(execID int64, yamlContent string) error {
 	exec, err := s.GetExecution(execID)
 	if err != nil {
@@ -247,6 +262,16 @@ func (s *WorkflowService) ContinueExecution(execID int64, yamlContent string) er
 	switch exec.Status {
 	case "running", "pending":
 		return fmt.Errorf("execution %d is %s, cannot continue", execID, exec.Status)
+	}
+
+	// 读取运行时快照与历史 metadata
+	if exec.RuntimeYAML == nil || *exec.RuntimeYAML == "" {
+		return fmt.Errorf("execution %d has no runtime snapshot (创建于快照功能上线前)，无法续跑", execID)
+	}
+	metadataValues := s.executionMetadataValues(exec)
+
+	if err := s.runtime.LoadExecution(context.Background(), execID, *exec.RuntimeYAML, metadataValues); err != nil {
+		return err
 	}
 
 	if yamlContent != "" {
@@ -278,6 +303,22 @@ func (s *WorkflowService) ContinueExecution(execID int64, yamlContent string) er
 	s.auditRecord("continue_execution", fmt.Sprintf("%d", execID),
 		fmt.Sprintf("workflow=%d yaml_updated=%v", exec.WorkflowID, yamlContent != ""))
 	return nil
+}
+
+// executionMetadataValues 从执行记录的 metadata_json 中提取历史节点输出（扁平 NodeId.key 键值）
+func (s *WorkflowService) executionMetadataValues(exec *model.Execution) map[string]interface{} {
+	if exec.MetadataJSON == nil || *exec.MetadataJSON == "" {
+		return nil
+	}
+	var snap map[string]interface{}
+	if err := json.Unmarshal([]byte(*exec.MetadataJSON), &snap); err != nil {
+		return nil
+	}
+	meta, _ := snap["metadata"].(map[string]interface{})
+	if len(meta) == 0 {
+		return nil
+	}
+	return meta
 }
 
 // expandLookup 供 ExpandWorkflowConfig 按 nodeRef 名称查找节点，
@@ -401,7 +442,8 @@ func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 	durationMs := int(time.Since(startTime).Milliseconds())
 	var errorMsg string
 	if pipelineErr != nil {
-		// 如果 pipeline 已被清理，根据执行节点状态兜底判断
+		// 如果 pipeline 实例已从 runtime 删除（RunAsync 完成即删的正常竞态），
+		// 根据执行节点状态兜底判断；仅确实失败时才写错误日志
 		nodeStatus, nodeErrMsg := s.resolveFinalStatusFromNodes(execID)
 		if nodeStatus != "" {
 			finalStatus = nodeStatus
@@ -410,8 +452,8 @@ func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 			}
 		} else {
 			errorMsg = pipelineErr.Error()
+			s.logExecutionError(execID, "", "pipeline execution failed: "+errorMsg)
 		}
-		s.logExecutionError(execID, "", "pipeline execution failed: "+errorMsg)
 	}
 
 	s.db.Exec("UPDATE executions SET status = ?, completed_at = ?, duration_ms = ?, error_message = ? WHERE id = ?",
@@ -644,6 +686,7 @@ func (s *WorkflowService) handleLogEntry(entry logger.Entry) {
 
 // persistRuntimeEvent 持久化运行时事件并转发到事件总线
 func (s *WorkflowService) persistRuntimeEvent(evt runtime.ExecutionEvent) {
+	fmt.Printf("[debug] persist type=%s exec=%d\n", evt.Type, evt.ExecutionID)
 	data := map[string]interface{}{
 		"type":         evt.Type,
 		"execution_id": evt.ExecutionID,
