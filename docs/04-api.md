@@ -531,6 +531,36 @@ GET /api/v1/executions/:id/logs
 }
 ```
 
+### 4.5.6 续跑已结束的执行实例
+
+```http
+POST /api/v1/executions/:id/continue
+Content-Type: application/json
+
+{
+  "yaml": "Name: my-workflow\n..."  // 可选：新的 FlowX YAML
+}
+```
+
+对已结束（success/failed/cancelled）的执行实例增量续跑：
+
+- 不提供 `yaml`：直接重新运行，已终结状态（SUCCESS/FAILED/CANCELLED）的节点自动跳过
+- 提供 `yaml`：先由 FlowX `UpdateConfig` 比对差异更新执行实例的图（可追加节点、修改未运行节点；`Version`/`Name` 等不可变字段必须与原配置一致，已执行节点不可删除/替换），再继续运行
+- 续跑沿用同一执行 ID：状态回到 running，节点记录与日志追加到原实例
+- 仅影响该执行实例，不修改流水线定义（需要时用 `PUT /workflows/:id`）
+
+**注意**：执行实例的运行时状态保留在 server 进程内存中，server 重启后无法续跑（报 `pipeline with id exec-N not found`）。
+
+**响应示例**：
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": { "executionId": 42, "status": "running" }
+}
+```
+
 ## 4.6 全局事件流 API
 
 ### 4.6.1 订阅全局事件
@@ -598,6 +628,11 @@ PUT /api/v1/config/system
 | `pipeline update --id N --file wf.yaml` | 更新流水线/工作流 | `PUT /workflows/:id` |
 | `pipeline delete --id N` | 删除流水线/工作流 | `DELETE /workflows/:id` |
 | `pipeline run --id N [--follow]` | 运行流水线/工作流；`--follow` 跟随 SSE 日志 | `POST /workflows/:id/run`、`GET /executions/:id/stream` |
+| `execution list [--pipeline N] [--status S]` | 列出执行实例 | `GET /executions` |
+| `execution get --id E` | 执行详情（含 metadata/参数） | `GET /executions/:id` |
+| `execution nodes --id E` | 节点状态与返回数据 | `GET /executions/:id/nodes` |
+| `execution logs --id E [--node X] [--level L]` | 查询执行日志 | `GET /executions/:id/logs` |
+| `execution continue --id E [--file wf.yaml] [--follow]` | 续跑已结束的执行，可追加节点 | `POST /executions/:id/continue` |
 | `node list` | 列出节点 | `GET /nodes` |
 | `node create --file node.yaml` | 创建节点（承接原 FAP `create_node` 动作） | `POST /nodes` |
 | `node update --id N --file node.yaml` | 原地更新节点定义（保持节点 ID；全量替换） | `PUT /nodes/:id` |
@@ -645,7 +680,8 @@ PUT /api/v1/config/system
 │   ├── GET    /:id/nodes 获取执行节点状态
 │   ├── GET    /:id/stream 实时日志流 (SSE)
 │   ├── GET    /:id/logs  查询执行日志
-│   └── GET    /:id/logs/export?format=json|txt|markdown  导出执行日志
+│   ├── GET    /:id/logs/export?format=json|txt|markdown  导出执行日志
+│   └── POST   /:id/continue  续跑已结束的执行（可选携带新 YAML 追加节点）
 │
 ├── /events
 │   └── GET    /          全局事件流 (SSE)

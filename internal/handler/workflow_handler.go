@@ -44,6 +44,7 @@ func (h *WorkflowHandler) RegisterRoutes(r *gin.RouterGroup) {
 		executions.GET("/:id/logs", h.GetExecutionLogs)
 		executions.GET("/:id/logs/export", h.ExportExecutionLogs)
 		executions.GET("/:id/nodes", h.GetExecutionNodes)
+		executions.POST("/:id/continue", h.ContinueExecution)
 	}
 }
 
@@ -223,6 +224,31 @@ func (h *WorkflowHandler) GetExecution(c *gin.Context) {
 	}
 
 	Success(c, exec)
+}
+
+// ContinueExecution 继续运行已结束的执行实例
+// POST /executions/:id/continue，body 可选 {"yaml": "..."}：
+// 提供 yaml 时先更新执行实例的图（追加/修改未运行节点），随后增量续跑。
+func (h *WorkflowHandler) ContinueExecution(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		Error(c, http.StatusBadRequest, "invalid execution id")
+		return
+	}
+
+	var req struct {
+		YAML string `json:"yaml"`
+	}
+	if c.Request.Body != nil {
+		_ = c.ShouldBindJSON(&req) // 空 body 视为不提供 yaml
+	}
+
+	if err := h.service.ContinueExecution(id, req.YAML); err != nil {
+		Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	Success(c, gin.H{"executionId": id, "status": "running"})
 }
 
 // GetExecutionLogs 获取执行日志

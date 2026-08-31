@@ -50,6 +50,17 @@ var schemas = map[string]string{
   },
   "required": ["id"]
 }`,
+	"execution continue": `{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "flowx-studio execution continue",
+  "type": "object",
+  "properties": {
+    "id":     {"type": "integer", "description": "执行实例 ID（必填）；仅 success/failed/cancelled 状态的实例可续跑"},
+    "file":   {"type": "string", "description": "新的 FlowX YAML 文件路径，'-' 表示 stdin（可选）。提供时先比对差异更新执行实例的图（追加节点/修改未运行节点；Version/Name 等不可变字段必须与原配置一致），再增量续跑：已终结节点跳过，仅执行新增/未运行节点"},
+    "follow": {"type": "boolean", "default": false, "description": "跟随 SSE 日志流直到续跑结束"}
+  },
+  "required": ["id"]
+}`,
 	"node create": `{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "flowx-studio node create",

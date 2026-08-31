@@ -100,6 +100,7 @@ func main() {
 	rootCmd.AddCommand(cli.NewAuditCmd())    // audit list（审计日志查询）
 	rootCmd.AddCommand(cli.NewBackupCmd())   // backup create/list/download/restore
 	rootCmd.AddCommand(cli.NewExecutorCmd()) // executor list/create/update/delete/set-default
+	rootCmd.AddCommand(cli.NewExecutionCmd()) // execution list/get/nodes/logs/continue
 
 	if err := rootCmd.Execute(); err != nil {
 		var uerr *usageError

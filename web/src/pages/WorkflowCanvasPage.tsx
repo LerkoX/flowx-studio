@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronRight, ChevronLeft } from 'lucide-react'
+import { ChevronRight, ChevronLeft, Play, Loader2 } from 'lucide-react'
 import WorkflowCanvas from '@/features/workflow-canvas/WorkflowCanvas'
 import WorkflowConfigPanel from '@/features/workflow-canvas/WorkflowConfigPanel'
 import LogViewer from '@/components/LogViewer'
 import { useAppStore } from '@/stores/appStore'
+import { useWorkflowStore } from '@/stores/workflowStore'
+import { useExecutionStore } from '@/stores/executionStore'
+import { runWorkflow } from '@/services/workflowService'
 import { useIsMobile } from '@/hooks/useMediaQuery'
 
 type TabType = 'params' | 'yaml' | 'metadata' | 'history' | 'logs'
@@ -13,6 +16,45 @@ export default function WorkflowCanvasPage() {
   const [rightPanelTab, setRightPanelTab] = useState<TabType>('params')
   const { paramsPanelCollapsed, toggleParamsPanel, mobileParamsOpen, setMobileParamsOpen } = useAppStore()
   const isMobile = useIsMobile()
+  const currentWorkflow = useWorkflowStore((s) => s.currentWorkflow)
+  const params = useWorkflowStore((s) => s.params)
+  const isExecuting = useExecutionStore((s) => s.isExecuting)
+  const [starting, setStarting] = useState(false)
+
+  // 内页运行：携带参数面板中的参数触发执行，SSE 事件会驱动画布状态与日志，
+  // 运行后自动切到日志标签
+  const handleRun = async () => {
+    if (!currentWorkflow || starting || isExecuting) return
+    setStarting(true)
+    try {
+      const runParams: Record<string, unknown> = {}
+      Object.values(params).forEach((p) => {
+        runParams[p.key] = p.value
+      })
+      await runWorkflow(currentWorkflow.id, runParams)
+      setRightPanelTab('logs')
+      if (isMobile) setMobileParamsOpen(true)
+    } catch (err) {
+      console.error('Failed to run workflow:', err)
+    } finally {
+      setStarting(false)
+    }
+  }
+
+  const runButton = currentWorkflow ? (
+    <button
+      onClick={handleRun}
+      disabled={starting || isExecuting}
+      className="absolute top-3 right-3 z-40 flex items-center gap-1.5 px-4 py-2 rounded-xl
+                 bg-indigo-500/80 hover:bg-indigo-500 text-white text-sm font-medium
+                 backdrop-blur-xl border border-indigo-400/30 shadow-lg shadow-indigo-500/20
+                 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      title={isExecuting ? '执行中' : '运行流水线'}
+    >
+      {starting || isExecuting ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
+      {isExecuting ? '执行中' : '运行'}
+    </button>
+  ) : null
 
   const tabs: { key: TabType; label: string }[] = [
     { key: 'params', label: '参数' },
@@ -42,6 +84,7 @@ export default function WorkflowCanvasPage() {
         {/* 中央画布区域 */}
         <div className="flex-1 relative">
           <WorkflowCanvas />
+          {runButton}
         </div>
 
         {/* 移动端底部标签栏 */}
@@ -141,6 +184,7 @@ export default function WorkflowCanvasPage() {
       {/* 中央画布区域 */}
       <div className="flex-1 relative">
         <WorkflowCanvas />
+        {runButton}
       </div>
 
       {/* 右侧面板 */}

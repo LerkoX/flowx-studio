@@ -54,6 +54,8 @@ func (a *Adapter) OnLog(handler func(entry logger.Entry)) {
 }
 
 // ExecuteWorkflow 执行工作流
+// 使用 RunAsyncRetained：执行完成后 pipeline 实例保留在 runtime 中，
+// 支持后续 UpdateExecutionConfig 修改图（如追加节点）并 ContinueExecution 继续运行。
 func (a *Adapter) ExecuteWorkflow(ctx context.Context, executionID int64, configYAML string) error {
 	id := fmt.Sprintf("exec-%d", executionID)
 
@@ -63,8 +65,8 @@ func (a *Adapter) ExecuteWorkflow(ctx context.Context, executionID int64, config
 		executionID: executionID,
 	}
 
-	// 异步执行
-	pipeline, err := a.runtime.RunAsync(ctx, id, configYAML, listener)
+	// 异步执行（保留实例）
+	pipeline, err := a.runtime.RunAsyncRetained(ctx, id, configYAML, listener)
 	if err != nil {
 		return fmt.Errorf("failed to start workflow: %w", err)
 	}
@@ -74,6 +76,26 @@ func (a *Adapter) ExecuteWorkflow(ctx context.Context, executionID int64, config
 		a.logPusher.RegisterPipeline(pipeline.Id(), executionID)
 	}
 
+	return nil
+}
+
+// UpdateExecutionConfig 用新的 FlowX YAML 更新已完成/可修改状态的执行实例图结构。
+// 由 flowx UpdateConfig 自动比对差异：已执行节点不可删除/替换，仅允许修改未运行节点。
+func (a *Adapter) UpdateExecutionConfig(ctx context.Context, executionID int64, configYAML string) error {
+	id := fmt.Sprintf("exec-%d", executionID)
+	if err := a.runtime.UpdateConfig(ctx, id, configYAML); err != nil {
+		return fmt.Errorf("failed to update execution config: %w", err)
+	}
+	return nil
+}
+
+// ContinueExecution 重新运行已完成的执行实例（配合 UpdateExecutionConfig 追加节点后调用）。
+// 已终结状态的节点跳过，仅执行新增/未运行节点。
+func (a *Adapter) ContinueExecution(ctx context.Context, executionID int64) error {
+	id := fmt.Sprintf("exec-%d", executionID)
+	if err := a.runtime.Rerun(ctx, id); err != nil {
+		return fmt.Errorf("failed to continue execution: %w", err)
+	}
 	return nil
 }
 

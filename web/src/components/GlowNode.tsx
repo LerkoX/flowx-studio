@@ -2,7 +2,7 @@ import { memo, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
-import { useIsMobile } from '@/hooks/useMediaQuery'
+import { useIsMobile, useViewportWidth } from '@/hooks/useMediaQuery'
 import { useExecutionStore } from '@/stores/executionStore'
 import ModuleNodeWidget, { buildWidgetUrl } from '@/components/ModuleNodeWidget'
 import type { NodeWidgetExecution, NodeWidgetProps } from '@/types/nodeWidget'
@@ -63,8 +63,13 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
   const hasUI = !!(nodeData.ui?.entry && nodeData.nodeDbId)
   const uiWidth = nodeData.ui?.width || 260
   const uiHeight = nodeData.ui?.height || 120
-  // 移动端组件宽度按屏幕上限收窄，但跟随 ui.width 变化
-  const widgetWidth = isMobile ? Math.min(uiWidth, 300) : uiWidth
+  const viewportWidth = useViewportWidth()
+  // 移动端组件宽度按视口上限收窄（两侧留边距），仍跟随 ui.width 变化
+  const mobileMaxWidth = Math.max(180, viewportWidth - 64)
+  const widgetWidth = isMobile ? Math.min(uiWidth, mobileMaxWidth) : uiWidth
+  // 宽度被收窄时等比缩放组件，保证 UI 完整可见且宽高比不变
+  const widgetScale = widgetWidth / uiWidth
+  const widgetHeight = Math.round(uiHeight * widgetScale)
 
   // 移动端详情默认收起；带 UI 组件时可用 ui.collapsed 控制（默认收起）
   const [detailsExpanded, setDetailsExpanded] = useState(
@@ -204,12 +209,33 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
         {/* 内嵌自定义 UI 组件（桌面端常显；移动端随详情展开） */}
         {hasUI && (!isMobile || detailsExpanded) && (
           <div className="mt-2 pt-2 border-t border-white/10">
-            <ModuleNodeWidget
-              url={buildWidgetUrl(nodeData.nodeDbId!, nodeData.ui!.entry, nodeData.nodeUpdatedAt)}
-              width={widgetWidth}
-              height={uiHeight}
-              widgetProps={widgetProps}
-            />
+            {widgetScale < 1 ? (
+              // 移动端收窄：按原始尺寸挂载组件，再用 transform 等比缩小到节点宽度
+              <div style={{ width: widgetWidth, height: widgetHeight, overflow: 'hidden' }}>
+                <div
+                  style={{
+                    width: uiWidth,
+                    height: uiHeight,
+                    transform: `scale(${widgetScale})`,
+                    transformOrigin: 'top left',
+                  }}
+                >
+                  <ModuleNodeWidget
+                    url={buildWidgetUrl(nodeData.nodeDbId!, nodeData.ui!.entry, nodeData.nodeUpdatedAt)}
+                    width={uiWidth}
+                    height={uiHeight}
+                    widgetProps={widgetProps}
+                  />
+                </div>
+              </div>
+            ) : (
+              <ModuleNodeWidget
+                url={buildWidgetUrl(nodeData.nodeDbId!, nodeData.ui!.entry, nodeData.nodeUpdatedAt)}
+                width={widgetWidth}
+                height={uiHeight}
+                widgetProps={widgetProps}
+              />
+            )}
             {!isMobile && hasDetails && (
               <button
                 onClick={(e) => {

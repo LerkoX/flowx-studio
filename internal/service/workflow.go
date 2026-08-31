@@ -234,6 +234,52 @@ func (s *WorkflowService) Run(id int64, params map[string]interface{}, dryRun bo
 	return execID, fmt.Sprintf("/api/v1/executions/%d/stream", execID), nil
 }
 
+// ContinueExecution 继续运行已结束的执行实例。
+// yamlContent 非空时先校验并展开 nodeRef，再由 flowx UpdateConfig 比对差异更新图
+//（已执行节点不可删除/替换；Version/Name 等不可变字段必须与原配置一致），
+// 随后触发 Rerun：已终结状态节点跳过，仅执行新增/未运行节点。
+// 执行记录沿用同一 execID：状态回到 running，日志与节点记录追加。
+func (s *WorkflowService) ContinueExecution(execID int64, yamlContent string) error {
+	exec, err := s.GetExecution(execID)
+	if err != nil {
+		return err
+	}
+	switch exec.Status {
+	case "running", "pending":
+		return fmt.Errorf("execution %d is %s, cannot continue", execID, exec.Status)
+	}
+
+	if yamlContent != "" {
+		// 校验器要求 model.Workflow.Name 非空；续跑的 YAML Name 必须与执行实例
+		// 原配置一致（flowx UpdateConfig 不可变字段校验），此处取流水线名称兜底
+		wf := &model.Workflow{YAMLConfig: yamlContent}
+		if src, err := s.Get(exec.WorkflowID); err == nil {
+			wf.Name = src.Name
+		}
+		if err := s.validator.ValidateWorkflow(wf); err != nil {
+			return fmt.Errorf("workflow YAML invalid: %w", err)
+		}
+		if s.nodeSvc != nil {
+			expanded, err := runtime.ExpandWorkflowConfig(yamlContent, s.expandLookup, s.executorResolver())
+			if err != nil {
+				return fmt.Errorf("failed to expand nodeRef: %w", err)
+			}
+			yamlContent = expanded
+		}
+		if err := s.runtime.UpdateExecutionConfig(context.Background(), execID, yamlContent); err != nil {
+			return err
+		}
+	}
+
+	if err := s.runtime.ContinueExecution(context.Background(), execID); err != nil {
+		return err
+	}
+
+	s.auditRecord("continue_execution", fmt.Sprintf("%d", execID),
+		fmt.Sprintf("workflow=%d yaml_updated=%v", exec.WorkflowID, yamlContent != ""))
+	return nil
+}
+
 // expandLookup 供 ExpandWorkflowConfig 按 nodeRef 名称查找节点，
 // 并填充资产目录/签名 URL（展开器据此生成 cp/curl 引导脚本）。
 func (s *WorkflowService) expandLookup(name string) (*model.Node, error) {
@@ -620,7 +666,8 @@ func (s *WorkflowService) persistRuntimeEvent(evt runtime.ExecutionEvent) {
 
 	switch evt.Type {
 	case "execution_start":
-		_, _ = s.db.Exec("UPDATE executions SET status = ?, started_at = ? WHERE id = ?",
+		// 兼容续跑（ContinueExecution）：状态回到 running 并清空完成时间
+		_, _ = s.db.Exec("UPDATE executions SET status = ?, started_at = ?, completed_at = NULL WHERE id = ?",
 			"running", time.Now(), evt.ExecutionID)
 		if params, ok := evt.Data["params"].(map[string]interface{}); ok {
 			s.setExecutionMetadata(evt.ExecutionID, "running", "", params, nil, "")
