@@ -1,5 +1,4 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
 import { useExecutionStore, type LogLevel } from '@/stores/executionStore'
 import type { ExecutionLog } from '@/types/execution'
 
@@ -11,58 +10,101 @@ const levelColors: Record<LogLevel, string> = {
   FATAL: 'bg-purple-400/20 text-purple-400 border-purple-400/30',
 }
 
-const levelShortColors: Record<LogLevel, string> = {
-  INFO: 'text-emerald-400',
-  WARN: 'text-amber-400',
-  ERROR: 'text-rose-400',
-  DEBUG: 'text-slate-400',
-  FATAL: 'text-purple-400',
+interface LogSegment {
+  key: string
+  nodeName: string
+  logs: ExecutionLog[]
 }
 
 export default function LogViewer() {
-  const { executionLog, logFilter, setLogFilter } = useExecutionStore()
+  const {
+    executionLog,
+    logsTotal,
+    loadingOlder,
+    loadingLogs,
+    executionNodes,
+    logFilter,
+    setLogFilter,
+    loadOlderLogs,
+  } = useExecutionStore()
   const scrollRef = useRef<HTMLDivElement>(null)
   const [userScrolled, setUserScrolled] = useState(false)
+  // prepend 旧日志后保持视口停留在原内容的滚动补偿标记
+  const prependPendingRef = useRef(false)
+  const prevDistFromBottomRef = useRef(0)
 
-  const filteredLogs = useMemo(() => {
-    return executionLog.filter((log) => {
-      if (!logFilter.levels.includes(log.level)) return false
-      if (logFilter.nodeFilter && log.nodeName !== logFilter.nodeFilter) return false
-      if (logFilter.searchQuery) {
-        const query = logFilter.searchQuery.toLowerCase()
-        return (
-          log.message.toLowerCase().includes(query) ||
-          log.nodeName.toLowerCase().includes(query)
-        )
+  // 节点过滤与搜索已在服务端完成（分页懒加载下客户端过滤会漏数据），
+  // 客户端只按级别过滤已加载的日志
+  const filteredLogs = useMemo(
+    () => executionLog.filter((log) => logFilter.levels.includes(log.level)),
+    [executionLog, logFilter.levels]
+  )
+
+  // 按节点维度分段拼接：时间正序下节点名变化即开启新段，
+  // 每段以节点名称作为标题，段内为该节点的连续日志
+  const segments = useMemo(() => {
+    const segs: LogSegment[] = []
+    for (const log of filteredLogs) {
+      const last = segs[segs.length - 1]
+      if (last && last.nodeName === log.nodeName) {
+        last.logs.push(log)
+      } else {
+        segs.push({ key: `${log.nodeName}-${log.id}`, nodeName: log.nodeName, logs: [log] })
       }
-      return true
-    })
-  }, [executionLog, logFilter])
+    }
+    return segs
+  }, [filteredLogs])
 
-  // 自动滚动到底部
+  const hasMore = executionLog.length < logsTotal
+
+  // 日志变化时：prepend 旧日志 → 按「距底部距离不变」做滚动补偿；
+  // 否则在自动滚动开启且用户未上翻时滚到底部
   useEffect(() => {
-    if (logFilter.autoScroll && !userScrolled && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    const el = scrollRef.current
+    if (!el) return
+    if (prependPendingRef.current) {
+      el.scrollTop = el.scrollHeight - prevDistFromBottomRef.current
+      prependPendingRef.current = false
+      return
+    }
+    if (logFilter.autoScroll && !userScrolled) {
+      el.scrollTop = el.scrollHeight
     }
   }, [filteredLogs, logFilter.autoScroll, userScrolled])
 
   const handleScroll = useCallback(() => {
-    if (!scrollRef.current) return
-    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current
+    const el = scrollRef.current
+    if (!el) return
+    const { scrollTop, scrollHeight, clientHeight } = el
     const isNearBottom = scrollHeight - scrollTop - clientHeight < 50
     setUserScrolled(!isNearBottom)
-  }, [])
+    // 滚动到顶部附近时懒加载更旧的日志
+    if (scrollTop < 40 && hasMore && !loadingOlder) {
+      prependPendingRef.current = true
+      prevDistFromBottomRef.current = scrollHeight - scrollTop
+      loadOlderLogs()
+    }
+  }, [hasMore, loadingOlder, loadOlderLogs])
 
-  const uniqueNodes = useMemo(() => {
-    const nodes = new Set(executionLog.map((log) => log.nodeName))
-    return Array.from(nodes)
-  }, [executionLog])
+  // 节点过滤选项：优先用执行节点列表（完整），其次从已加载日志中提取
+  const nodeOptions = useMemo(() => {
+    const map = new Map<string, string>()
+    executionNodes.forEach((n) => {
+      if (n.nodeId) map.set(n.nodeId, n.nodeName || n.nodeId)
+    })
+    if (map.size === 0) {
+      executionLog.forEach((l) => {
+        if (l.nodeName) map.set(l.nodeName, l.nodeName)
+      })
+    }
+    return Array.from(map.entries())
+  }, [executionNodes, executionLog])
 
   return (
     <div className="flex flex-col h-full">
       {/* 工具栏 */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10">
-        {/* 搜索框 */}
+        {/* 搜索框（服务端过滤，覆盖未加载的旧日志） */}
         <div className="flex-1 relative">
           <svg
             className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30"
@@ -85,7 +127,7 @@ export default function LogViewer() {
           />
         </div>
 
-        {/* 级别过滤 */}
+        {/* 级别过滤（客户端过滤已加载部分） */}
         <div className="flex gap-1">
           {(['INFO', 'WARN', 'ERROR', 'DEBUG', 'FATAL'] as LogLevel[]).map((level) => (
             <button
@@ -108,8 +150,8 @@ export default function LogViewer() {
           ))}
         </div>
 
-        {/* 节点过滤 */}
-        {uniqueNodes.length > 0 && (
+        {/* 节点过滤（服务端过滤） */}
+        {nodeOptions.length > 0 && (
           <div className="flex items-center gap-1">
             <select
               value={logFilter.nodeFilter || ''}
@@ -118,12 +160,12 @@ export default function LogViewer() {
               }
               className="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5
                          text-xs text-white/80 focus:outline-none focus:border-white/30
-                         cursor-pointer"
+                         cursor-pointer max-w-[120px]"
             >
               <option value="" className="bg-[#1a1f3a]">全部节点</option>
-              {uniqueNodes.map((node) => (
-                <option key={node} value={node} className="bg-[#1a1f3a]">
-                  {node}
+              {nodeOptions.map(([value, label]) => (
+                <option key={value} value={value} className="bg-[#1a1f3a]">
+                  {label}
                 </option>
               ))}
             </select>
@@ -141,26 +183,45 @@ export default function LogViewer() {
         )}
       </div>
 
-      {/* 日志列表 */}
+      {/* 日志列表（按节点分段） */}
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-3 py-2 space-y-1"
+        className="flex-1 overflow-y-auto px-3 py-2"
       >
-        <AnimatePresence initial={false}>
-          {filteredLogs.map((log) => (
-            <LogEntryRow
-              key={log.id}
-              log={log}
+        {/* 顶部懒加载指示 */}
+        {loadingOlder && (
+          <div className="text-center py-2 text-white/40 text-xs">加载更早的日志…</div>
+        )}
+        {!loadingOlder && hasMore && (
+          <button
+            onClick={() => {
+              const el = scrollRef.current
+              if (el) {
+                prependPendingRef.current = true
+                prevDistFromBottomRef.current = el.scrollHeight - el.scrollTop
+              }
+              loadOlderLogs()
+            }}
+            className="w-full text-center py-1.5 mb-1 text-[11px] text-indigo-300/70
+                       hover:text-indigo-300 hover:bg-white/5 rounded-lg transition-colors"
+          >
+            加载更早的日志（还有 {logsTotal - executionLog.length} 条）
+          </button>
+        )}
+
+        {loadingLogs ? (
+          <div className="text-center py-8 text-white/30 text-xs">加载中...</div>
+        ) : segments.length === 0 ? (
+          <div className="text-center py-8 text-white/30 text-xs">暂无日志</div>
+        ) : (
+          segments.map((seg) => (
+            <NodeLogSegment
+              key={seg.key}
+              segment={seg}
               searchQuery={logFilter.searchQuery}
             />
-          ))}
-        </AnimatePresence>
-
-        {filteredLogs.length === 0 && (
-          <div className="text-center py-8 text-white/30 text-xs">
-            暂无日志
-          </div>
+          ))
         )}
       </div>
 
@@ -181,20 +242,55 @@ export default function LogViewer() {
             {logFilter.autoScroll ? '自动滚动' : '手动滚动'}
           </button>
         </div>
-        <span>共 {filteredLogs.length} 条日志</span>
+        <span>
+          已加载 {executionLog.length} / 共 {logsTotal} 条
+        </span>
       </div>
     </div>
   )
 }
 
-function LogEntryRow({
+// 单个节点的日志分段：节点名作为段标题，下面的文本均为该节点的日志
+function NodeLogSegment({
+  segment,
+  searchQuery,
+}: {
+  segment: LogSegment
+  searchQuery: string
+}) {
+  return (
+    <div className="mt-3 first:mt-0">
+      {/* 节点标题 */}
+      <div className="flex items-center gap-2 px-1 mb-1">
+        <span className="w-1 h-3.5 rounded-full bg-indigo-400/70 shrink-0" />
+        <span className="text-xs font-medium text-indigo-300 font-mono">
+          {segment.nodeName}
+        </span>
+        <span className="text-[10px] text-white/30">{segment.logs.length} 条</span>
+        <div className="flex-1 h-px bg-white/5" />
+      </div>
+
+      {/* 该节点的日志行 */}
+      <div className="ml-1 pl-2 border-l border-white/5 space-y-0.5">
+        {segment.logs.map((log) => (
+          <LogLine key={log.id} log={log} searchQuery={searchQuery} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// 单行日志：级别与时间小 label 置于行首，消息内容完整展示不截断
+function LogLine({
   log,
   searchQuery,
 }: {
   log: ExecutionLog
   searchQuery: string
 }) {
-  const isError = log.level === 'ERROR'
+  const isError = log.level === 'ERROR' || log.level === 'FATAL'
+  const hasDistinctOutput = !!log.output && log.output !== log.message
+
   const highlightedMessage = useMemo(() => {
     if (!searchQuery) return log.message
     const regex = new RegExp(`(${escapeRegExp(searchQuery)})`, 'gi')
@@ -213,33 +309,51 @@ function LogEntryRow({
   }, [log.message, searchQuery])
 
   return (
-    <motion.div
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.1 }}
-      className={`group flex gap-2 py-1 px-2 rounded-lg text-xs leading-relaxed
-        ${isError ? 'border-l-2 border-l-rose-400 bg-rose-400/5' : 'hover:bg-white/5'}`}
+    <div
+      className={`py-1 px-1.5 rounded
+        ${isError ? 'bg-rose-400/5' : 'hover:bg-white/5'}`}
     >
-      {/* 时间戳 */}
-      <span className="text-white/40 font-mono text-[10px] shrink-0 pt-0.5 w-[72px]">
-        {formatTime(log.timestamp)}
-      </span>
+      <div className="flex items-start gap-1.5">
+        {/* 级别 label */}
+        <span
+          className={`px-1.5 py-px rounded text-[10px] font-medium border shrink-0 ${levelColors[log.level]}`}
+        >
+          {log.level}
+        </span>
 
-      {/* 级别标签 */}
-      <span
-        className={`text-[10px] font-medium shrink-0 w-10 pt-0.5 ${levelShortColors[log.level]}`}
-      >
-        {log.level}
-      </span>
+        {/* 时间 label */}
+        <span className="text-white/40 font-mono text-[10px] shrink-0 pt-px">
+          {formatTime(log.timestamp)}
+        </span>
 
-      {/* 节点名 */}
-      <span className="text-indigo-400 font-mono text-[10px] shrink-0 pt-0.5 w-16 truncate">
-        [{log.nodeName}]
-      </span>
+        {/* 步骤名 label（可选） */}
+        {log.stepName && (
+          <span className="px-1.5 py-px rounded bg-white/5 border border-white/10
+                           text-white/50 text-[10px] shrink-0">
+            {log.stepName}
+          </span>
+        )}
 
-      {/* 消息内容 */}
-      <span className="text-white/80 break-all">{highlightedMessage}</span>
-    </motion.div>
+        {/* 消息内容：完整显示，自动换行 */}
+        <span className="flex-1 min-w-0 text-xs leading-relaxed text-white/85
+                         whitespace-pre-wrap break-all">
+          {highlightedMessage}
+        </span>
+      </div>
+
+      {/* 输出与消息不同时可展开查看 */}
+      {hasDistinctOutput && (
+        <details className="mt-1 ml-1">
+          <summary className="text-[10px] text-white/40 cursor-pointer hover:text-white/60 select-none">
+            输出内容
+          </summary>
+          <pre className="mt-1 p-2 rounded bg-black/30 text-[11px] leading-relaxed
+                          text-white/70 whitespace-pre-wrap break-all">
+            {log.output}
+          </pre>
+        </details>
+      )}
+    </div>
   )
 }
 

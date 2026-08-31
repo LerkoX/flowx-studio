@@ -79,13 +79,23 @@ func (s *Server) RegisterStatic() {
 			cleanPath = "index.html"
 		}
 		_, err := distFS.Open(cleanPath)
-		if err != nil {
-			// 文件不存在，返回 index.html（SPA fallback）
-			c.Request.URL.Path = "/index.html"
-		}
-		// 返回 SPA 页面时种下认证 cookie，Web UI 后续 API 请求自动携带
-		if c.Request.URL.Path == "/index.html" || cleanPath == "index.html" {
+		if err != nil || cleanPath == "index.html" {
+			// 文件不存在时返回 index.html（SPA fallback）。
+			// 注意：不能改写 URL.Path 后交给 http.FileServer——它会把
+			// "/index.html" 301 重定向到 "/"，导致浏览器刷新 /canvas 等
+			// 前端路由时被跳回列表页。此处直接输出文件内容。
+			data, readErr := fs.ReadFile(distFS, "index.html")
+			if readErr != nil {
+				c.Status(http.StatusNotFound)
+				return
+			}
+			// 返回 SPA 页面时种下认证 cookie，Web UI 后续 API 请求自动携带
 			SetAuthCookie(c, s.authToken)
+			c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+			c.Header("Pragma", "no-cache")
+			c.Header("Expires", "0")
+			c.Data(http.StatusOK, "text/html; charset=utf-8", data)
+			return
 		}
 		c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
 		c.Header("Pragma", "no-cache")

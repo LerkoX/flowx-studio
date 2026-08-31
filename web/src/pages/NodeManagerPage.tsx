@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Search, Plus, Tag, Code, Container, Filter, X } from 'lucide-react'
 import { useNodeStore } from '@/stores/nodeStore'
@@ -21,13 +21,20 @@ export default function NodeManagerPage() {
     setSelectedLanguage,
     setSelectedNodeType,
     addNode,
-    removeNode,
+    deleteNode,
     setIsAdding,
     setAddError,
     getFilteredNodes,
     getAllTags,
     getAllLanguages,
+    loadNodes,
   } = useNodeStore()
+
+  // 进入节点管理页时加载节点列表（store 为内存态，刷新页面后必须重新拉取）
+  useEffect(() => {
+    loadNodes()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const [showImportModal, setShowImportModal] = useState(false)
   const [selectedNode, setSelectedNode] = useState<NodeDefinition | null>(null)
@@ -75,7 +82,7 @@ export default function NodeManagerPage() {
 
   const handleDeleteNode = (nodeId: string) => {
     if (confirm('确定要删除这个节点吗？')) {
-      removeNode(nodeId)
+      deleteNode(nodeId)
     }
   }
 

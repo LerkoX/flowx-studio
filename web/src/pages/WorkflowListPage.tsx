@@ -71,7 +71,7 @@ export default function WorkflowListPage() {
             {workflows.map((wf) => (
               <Link
                 key={wf.id}
-                to="/canvas"
+                to={`/canvas/${wf.id}`}
                 onClick={() => setCurrentWorkflow(wf)}
                 className="glass-panel p-4 rounded-xl flex items-center justify-between
                            hover:bg-white/5 transition-colors group"

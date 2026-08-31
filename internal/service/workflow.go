@@ -571,7 +571,11 @@ func (s *WorkflowService) GetExecution(id int64) (*model.Execution, error) {
 }
 
 // GetExecutionLogs 获取执行日志
-func (s *WorkflowService) GetExecutionLogs(id int64, nodeID, level string, limit, offset int) (map[string]interface{}, error) {
+// order 支持 asc/desc（默认 asc），desc 用于前端「取最后 N 条 + 向上懒加载更旧日志」。
+// 排序按 id（自增主键，与写入顺序严格一致），避免同毫秒 timestamp 导致分页错位。
+// nodeID 同时匹配 node_id 与 node_name（节点包可能把展示名写入 node_name）。
+// search 对 message 做 LIKE 模糊匹配，让搜索覆盖未加载的旧日志。
+func (s *WorkflowService) GetExecutionLogs(id int64, nodeID, level, search, order string, limit, offset int) (map[string]interface{}, error) {
 	if limit < 1 || limit > 1000 {
 		limit = 100
 	}
@@ -583,12 +587,16 @@ func (s *WorkflowService) GetExecutionLogs(id int64, nodeID, level string, limit
 	args = append(args, id)
 
 	if nodeID != "" {
-		conditions = append(conditions, "node_id = ?")
-		args = append(args, nodeID)
+		conditions = append(conditions, "(node_id = ? OR node_name = ?)")
+		args = append(args, nodeID, nodeID)
 	}
 	if level != "" {
 		conditions = append(conditions, "level = ?")
 		args = append(args, level)
+	}
+	if search != "" {
+		conditions = append(conditions, "message LIKE ?")
+		args = append(args, "%"+search+"%")
 	}
 
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")
@@ -598,7 +606,11 @@ func (s *WorkflowService) GetExecutionLogs(id int64, nodeID, level string, limit
 		return nil, fmt.Errorf("failed to count logs: %w", err)
 	}
 
-	query := "SELECT * FROM execution_logs " + whereClause + " ORDER BY timestamp ASC LIMIT ? OFFSET ?"
+	sortOrder := "ASC"
+	if strings.EqualFold(order, "desc") {
+		sortOrder = "DESC"
+	}
+	query := "SELECT * FROM execution_logs " + whereClause + " ORDER BY id " + sortOrder + " LIMIT ? OFFSET ?"
 	args = append(args, limit, offset)
 
 	var logs []model.ExecutionLog

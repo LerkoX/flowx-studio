@@ -13,21 +13,25 @@ interface LogFilter {
 
 interface ExecutionState {
   isExecuting: boolean
+  runningExecutionId: string | null
   executions: ExecutionStatus[]
   selectedExecutionId: string | null
   selectedExecution: ExecutionStatus | null
   executionNodes: ExecutionNode[]
   executionLog: ExecutionLog[]
+  logsTotal: number
   loadingHistory: boolean
   loadingNodes: boolean
   loadingLogs: boolean
+  loadingOlder: boolean
   loadingSelected: boolean
   logFilter: LogFilter
 
   loadExecutions: (workflowId: string) => Promise<void>
   selectExecution: (id: string | null) => Promise<void>
   loadExecutionNodes: (executionId: string) => Promise<void>
-  loadExecutionLogs: (executionId: string, nodeId?: string | null) => Promise<void>
+  loadLatestLogs: (executionId: string) => Promise<void>
+  loadOlderLogs: () => Promise<void>
   startExecution: (id: string) => void
   stopExecution: () => void
   updateExecutionStatus: (executionId: string, status: ExecutionStatus['status']) => void
@@ -39,16 +43,25 @@ interface ExecutionState {
   exportLogs: (format: 'json' | 'txt' | 'markdown') => string
 }
 
+// 日志分页大小：初始加载最后 300 条，向上滚动时按 300 条一页懒加载更旧的日志
+const LOG_PAGE_SIZE = 300
+
+// 过滤条件变化时防抖重载日志
+let filterDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
 export const useExecutionStore = create<ExecutionState>((set, get) => ({
   isExecuting: false,
+  runningExecutionId: null,
   executions: [],
   selectedExecutionId: null,
   selectedExecution: null,
   executionNodes: [],
   executionLog: [],
+  logsTotal: 0,
   loadingHistory: false,
   loadingNodes: false,
   loadingLogs: false,
+  loadingOlder: false,
   loadingSelected: false,
   logFilter: {
     levels: ['INFO', 'WARN', 'ERROR', 'DEBUG'],
@@ -81,11 +94,14 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       set({ executionNodes: [], executionLog: [], loadingSelected: false })
       return
     }
+    // 正在实时执行的实例：日志由 SSE 逐条推送，此时若从 DB 重载，
+    // 异步响应返回时会覆盖已到达的实时日志（竞态），故跳过日志重载
+    const isLiveExecution = get().isExecuting && get().runningExecutionId === id
     try {
       const [execResp] = await Promise.all([
         getExecution(id),
         get().loadExecutionNodes(id),
-        get().loadExecutionLogs(id),
+        isLiveExecution ? Promise.resolve() : get().loadLatestLogs(id),
       ])
       if (execResp.code === 200 && execResp.data) {
         set({ selectedExecution: normalizeExecution(execResp.data) })
@@ -110,33 +126,70 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
     }
   },
 
-  loadExecutionLogs: async (executionId, nodeId = null) => {
+  // 加载最后 N 条日志（desc 取回后反转为时间正序展示）
+  loadLatestLogs: async (executionId) => {
     set({ loadingLogs: true })
     try {
+      const { logFilter } = get()
       const resp = await getExecutionLogs(executionId, {
-        node_id: nodeId || undefined,
-        limit: 200,
+        node_id: logFilter.nodeFilter || undefined,
+        search: logFilter.searchQuery || undefined,
+        order: 'desc',
+        limit: LOG_PAGE_SIZE,
         offset: 0,
       })
       if (resp.code === 200 && resp.data) {
-        const logs = (resp.data.items || []).map(normalizeLog)
-        set({ executionLog: logs, loadingLogs: false })
+        const logs = (resp.data.items || []).map(normalizeLog).reverse()
+        set({ executionLog: logs, logsTotal: resp.data.total, loadingLogs: false })
       }
     } catch (error) {
       set({ loadingLogs: false })
-      console.error('Failed to load execution logs', error)
+      console.error('Failed to load latest logs', error)
+    }
+  },
+
+  // 懒加载更旧的日志：desc 序下 offset = 已加载条数，取回后 prepend 到头部
+  loadOlderLogs: async () => {
+    const { selectedExecutionId, executionLog, logsTotal, loadingOlder, loadingLogs, logFilter } = get()
+    if (!selectedExecutionId || loadingOlder || loadingLogs) return
+    if (executionLog.length >= logsTotal) return
+    set({ loadingOlder: true })
+    try {
+      const resp = await getExecutionLogs(selectedExecutionId, {
+        node_id: logFilter.nodeFilter || undefined,
+        search: logFilter.searchQuery || undefined,
+        order: 'desc',
+        limit: LOG_PAGE_SIZE,
+        offset: executionLog.length,
+      })
+      if (resp.code === 200 && resp.data) {
+        const older = (resp.data.items || []).map(normalizeLog).reverse()
+        const existingIds = new Set(executionLog.map((l) => l.id))
+        set((state) => ({
+          executionLog: [...older.filter((l) => !existingIds.has(l.id)), ...state.executionLog],
+          logsTotal: resp.data.total,
+          loadingOlder: false,
+        }))
+      } else {
+        set({ loadingOlder: false })
+      }
+    } catch (error) {
+      set({ loadingOlder: false })
+      console.error('Failed to load older logs', error)
     }
   },
 
   startExecution: (id) =>
     set({
       isExecuting: true,
+      runningExecutionId: id,
       selectedExecutionId: id,
       executionLog: [],
+      logsTotal: 0,
       executionNodes: [],
     }),
 
-  stopExecution: () => set({ isExecuting: false }),
+  stopExecution: () => set({ isExecuting: false, runningExecutionId: null }),
 
   updateExecutionStatus: (executionId, status) => {
     set((state) => {
@@ -177,14 +230,30 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   appendRealtimeLog: (entry) =>
     set((state) => ({
       executionLog: [...state.executionLog, normalizeLog(entry)],
+      logsTotal: state.logsTotal + 1,
     })),
 
-  setLogFilter: (filter) =>
+  setLogFilter: (filter) => {
+    const prev = get().logFilter
     set((state) => ({
       logFilter: { ...state.logFilter, ...filter },
-    })),
+    }))
+    // 节点过滤与搜索改为服务端过滤（分页懒加载下客户端过滤会漏未加载的旧日志），
+    // 条件变化时防抖重载最后一页日志。实时执行期间不重载，避免覆盖 SSE 推送的日志。
+    const serverFilterChanged =
+      (filter.nodeFilter !== undefined && filter.nodeFilter !== prev.nodeFilter) ||
+      (filter.searchQuery !== undefined && filter.searchQuery !== prev.searchQuery)
+    if (!serverFilterChanged) return
+    const { selectedExecutionId, isExecuting, runningExecutionId } = get()
+    if (!selectedExecutionId) return
+    if (isExecuting && runningExecutionId === selectedExecutionId) return
+    if (filterDebounceTimer) clearTimeout(filterDebounceTimer)
+    filterDebounceTimer = setTimeout(() => {
+      get().loadLatestLogs(selectedExecutionId)
+    }, 300)
+  },
 
-  clearLogs: () => set({ executionLog: [] }),
+  clearLogs: () => set({ executionLog: [], logsTotal: 0 }),
 
   exportLogs: (format) => {
     const { executionLog } = get()

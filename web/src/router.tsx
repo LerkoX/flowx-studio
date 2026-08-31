@@ -12,7 +12,7 @@ const router = createBrowserRouter([
     element: <Layout />,
     children: [
       { path: '/', element: <WorkflowListPage /> },
-      { path: '/canvas', element: <WorkflowCanvasPage /> },
+      { path: '/canvas/:id?', element: <WorkflowCanvasPage /> },
       { path: '/nodes', element: <NodeManagerPage /> },
       { path: '/executors', element: <ExecutorConfigPage /> },
       { path: '/settings', element: <SettingsPage /> },

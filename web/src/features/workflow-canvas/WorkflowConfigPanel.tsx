@@ -5,12 +5,11 @@ import GlassPanel from '@/components/GlassPanel'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import { updateWorkflow } from '@/services/workflowService'
-import ExecutionHistoryPanel from '@/features/workflow-canvas/ExecutionHistoryPanel'
 import type { PipelineParam, Workflow } from '@/types/workflow'
 import type { ExecutionStatus } from '@/types/execution'
 
 interface WorkflowConfigPanelProps {
-  view: 'params' | 'yaml' | 'metadata' | 'history'
+  view: 'params' | 'yaml' | 'metadata'
 }
 
 export default function WorkflowConfigPanel({ view }: WorkflowConfigPanelProps) {
@@ -104,19 +103,6 @@ export default function WorkflowConfigPanel({ view }: WorkflowConfigPanelProps) 
         className="space-y-3"
       >
         <MetadataView currentWorkflow={currentWorkflow} />
-      </motion.div>
-    )
-  }
-
-  if (view === 'history') {
-    return (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.2 }}
-        className="h-full"
-      >
-        <ExecutionHistoryPanel workflowId={currentWorkflow?.id} />
       </motion.div>
     )
   }
@@ -269,21 +255,13 @@ function formatDate(date: Date | string): string {
   })
 }
 
+// 元数据视图按执行上下文显式区分：回放态（选中了执行）展示该执行的运行时元数据，
+// 编辑态（未选中执行）展示流水线定义的静态元数据，不再隐式回退到最新一次执行
 function MetadataView({ currentWorkflow }: { currentWorkflow: Workflow | null }) {
   const selectedExecution = useExecutionStore((s) => s.selectedExecution)
-  const executions = useExecutionStore((s) => s.executions)
-  const loadExecutions = useExecutionStore((s) => s.loadExecutions)
 
-  useEffect(() => {
-    if (currentWorkflow?.id && executions.length === 0) {
-      loadExecutions(currentWorkflow.id)
-    }
-  }, [currentWorkflow?.id, executions.length, loadExecutions])
-
-  const execution = selectedExecution || (executions.length > 0 ? executions[0] : null)
-
-  if (execution) {
-    return <RuntimeMetadataPanel execution={execution} />
+  if (selectedExecution) {
+    return <RuntimeMetadataPanel execution={selectedExecution} />
   }
 
   return <StaticMetadataPanel workflow={currentWorkflow} />

@@ -1,8 +1,8 @@
 {
   "name": "send-feishu",
   "displayName": "发送飞书通知",
-  "description": "通过飞书 API 发送天气通知卡片消息（Markdown 格式）",
-  "version": "1.1.0",
+  "description": "通用飞书通知节点：通过飞书开放平台应用凭证向指定群聊发送卡片消息（内容支持 lark_md Markdown 格式），与具体业务内容无关",
+  "version": "1.2.0",
   "author": "flowx-team",
   "tags": ["feishu", "notification"],
   "icon": "💬",
@@ -37,74 +37,26 @@
       "required": true
     },
     {
-      "name": "weatherCity",
+      "name": "title",
       "type": "string",
-      "description": "天气报告对应的城市名（中文），如 深圳",
+      "description": "卡片标题（纯文本），不传时默认为「通知」",
+      "required": false,
+      "default": "通知"
+    },
+    {
+      "name": "content",
+      "type": "string",
+      "description": "要发送的消息正文（Markdown 文本，使用飞书 lark_md 语法渲染，支持 **加粗**、换行、列表等）",
       "required": true,
-      "source": { "nodeRef": "get-weather", "output": "city", "description": "天气查询节点的城市名输出" }
-    },
-    {
-      "name": "weatherTemp",
-      "type": "string",
-      "description": "当前温度，纯数字字符串，单位 °C",
-      "required": true,
-      "source": { "nodeRef": "get-weather", "output": "temp" }
-    },
-    {
-      "name": "weatherFeelsLike",
-      "type": "string",
-      "description": "体感温度，纯数字字符串，单位 °C",
-      "required": false,
-      "source": { "nodeRef": "get-weather", "output": "feelsLike" }
-    },
-    {
-      "name": "weatherWeather",
-      "type": "string",
-      "description": "天气描述文字，如 晴朗 / 多云 / 中雨",
-      "required": false,
-      "source": { "nodeRef": "get-weather", "output": "weather" }
-    },
-    {
-      "name": "weatherHumidity",
-      "type": "string",
-      "description": "相对湿度，纯数字字符串，单位 %",
-      "required": false,
-      "source": { "nodeRef": "get-weather", "output": "humidity" }
-    },
-    {
-      "name": "weatherWindspeed",
-      "type": "string",
-      "description": "风速，纯数字字符串，单位 km/h",
-      "required": false,
-      "source": { "nodeRef": "get-weather", "output": "windspeed" }
-    },
-    {
-      "name": "weatherUpdateTime",
-      "type": "string",
-      "description": "天气数据更新时间，如 2026-07-19 18:00",
-      "required": false,
-      "source": { "nodeRef": "get-weather", "output": "updateTime" }
-    },
-    {
-      "name": "weatherForecasts",
-      "type": "array",
-      "description": "未来 N 天预报数组，元素含 date/weekday/minTemp/maxTemp/weather/chanceofrain 字段",
-      "required": false,
-      "source": { "nodeRef": "get-weather", "output": "forecasts", "description": "未来7天预报数组" }
+      "source": { "nodeRef": "get-weather", "output": "text", "description": "上游节点组织好的文本输出，如天气报告" }
     }
   ],
   "env": {
     "FEISHU_APP_ID": "{{ Param.feishuAppId }}",
     "FEISHU_APP_SECRET": "{{ Param.feishuAppSecret }}",
     "FEISHU_CHAT_ID": "{{ Param.feishuChatId }}",
-    "WEATHER_CITY": "{{ Param.weatherCity }}",
-    "WEATHER_TEMP": "{{ Param.weatherTemp }}",
-    "WEATHER_FEELS_LIKE": "{{ Param.weatherFeelsLike }}",
-    "WEATHER_WEATHER": "{{ Param.weatherWeather }}",
-    "WEATHER_HUMIDITY": "{{ Param.weatherHumidity }}",
-    "WEATHER_WINDSPEED": "{{ Param.weatherWindspeed }}",
-    "WEATHER_UPDATE_TIME": "{{ Param.weatherUpdateTime }}",
-    "WEATHER_FORECASTS": "{{ Param.weatherForecasts | toYaml }}"
+    "FEISHU_TITLE": "{{ Param.title }}",
+    "FEISHU_CONTENT": "{{ Param.content }}"
   },
   "run": "python3 main.py",
   "outputs": [

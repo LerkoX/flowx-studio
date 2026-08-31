@@ -34,7 +34,7 @@ const statusMap: Record<string, string> = {
   failed: 'failed',
 }
 
-function WorkflowCanvasInner() {
+function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [direction, setDirection] = useState<'TB' | 'LR'>('TB')
@@ -392,9 +392,10 @@ function WorkflowCanvasInner() {
           />
         )}
 
-        {/* 状态面板 */}
+        {/* 状态面板（含运行按钮、流水线名、方向切换） */}
         <Panel position="top-right" className={`${isMobile ? 'm-2' : 'm-4'}`}>
           <div className="flex items-center gap-2">
+            {action}
             <div className={`glass-panel px-3 py-1.5 text-white/60 ${isMobile ? 'text-[10px]' : 'text-xs'}`}>
               {currentWorkflow?.name || '未选择工作流'}
             </div>
@@ -416,10 +417,10 @@ function WorkflowCanvasInner() {
   )
 }
 
-export default function WorkflowCanvas() {
+export default function WorkflowCanvas({ action }: { action?: React.ReactNode }) {
   return (
     <ReactFlowProvider>
-      <WorkflowCanvasInner />
+      <WorkflowCanvasInner action={action} />
     </ReactFlowProvider>
   )
 }

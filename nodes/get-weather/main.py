@@ -122,21 +122,36 @@ try:
         print(f"  {date} ({weekday}): {min_t}~{max_t}°C, {forecast['weather']}, 降水概率 {forecast['chanceofrain']}%")
 
     print()
-    # 输出完整 YAML 数据供下一节点通过 metadata 引用
+
+    # 组织天气报告为 Markdown 文本（唯一输出，供下游直接使用）
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    lines = []
+    lines.append(f"**🌤️ {city_name} 天气报告**")
+    lines.append("")
+    lines.append("**📊 当前天气**")
+    lines.append(f"- 温度: {current.get('temperature_2m', '-')}°C (体感 {current.get('apparent_temperature', '-')}°C)")
+    lines.append(f"- 天气: {get_weather_desc(current.get('weather_code', 0))}")
+    lines.append(f"- 湿度: {current.get('relative_humidity_2m', '-')}%")
+    lines.append(f"- 风速: {current.get('wind_speed_10m', '-')} km/h")
+    lines.append(f"- 气压: {current.get('pressure_msl', '-')} hPa")
+    lines.append("")
+    if forecasts:
+        lines.append(f"**📅 未来 {len(forecasts)} 天预报**")
+        lines.append("")
+        for f in forecasts:
+            lines.append(
+                f"- **{f['date']} ({f['weekday']})**: "
+                f"{f['minTemp']}~{f['maxTemp']}°C, {f['weather']}, 降水 {f['chanceofrain']}%"
+            )
+        lines.append("")
+    lines.append(f"🕒 报告生成时间: {now}")
+    report_text = "\n".join(lines)
+
+    print("=== 天气报告文本 ===")
+    print(report_text)
+    print()
     print('```flowx-yaml')
-    output = {
-        "city": city_name,
-        "temp": str(current.get('temperature_2m', '-')),
-        "feelsLike": str(current.get('apparent_temperature', '-')),
-        "weather": get_weather_desc(current.get('weather_code', 0)),
-        "humidity": str(current.get('relative_humidity_2m', '-')),
-        "windspeed": str(current.get('wind_speed_10m', '-')),
-        "winddir": "-",
-        "pressure": str(current.get('pressure_msl', '-')),
-        "updateTime": datetime.now().strftime("%H:%M"),
-        "forecasts": forecasts
-    }
-    print(yaml.dump(output, allow_unicode=True, default_flow_style=False))
+    print(yaml.dump({"text": report_text}, allow_unicode=True, default_flow_style=False))
     print('```')
 
 except Exception as e:

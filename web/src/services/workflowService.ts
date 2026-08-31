@@ -121,6 +121,8 @@ export async function getExecutionLogs(
   params?: {
     node_id?: string
     level?: string
+    search?: string
+    order?: 'asc' | 'desc'
     limit?: number
     offset?: number
   }

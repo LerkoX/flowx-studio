@@ -261,10 +261,12 @@ func (h *WorkflowHandler) GetExecutionLogs(c *gin.Context) {
 
 	nodeID := c.Query("node_id")
 	level := c.Query("level")
+	search := c.Query("search")
+	order := c.Query("order")
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 
-	result, err := h.service.GetExecutionLogs(id, nodeID, level, limit, offset)
+	result, err := h.service.GetExecutionLogs(id, nodeID, level, search, order, limit, offset)
 	if err != nil {
 		Error(c, http.StatusInternalServerError, err.Error())
 		return

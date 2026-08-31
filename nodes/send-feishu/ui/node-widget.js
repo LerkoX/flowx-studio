@@ -103,7 +103,7 @@ export default function mount(container, props) {
     resultText.style.color = STATUS_COLORS[p.status] || STATUS_COLORS.idle
     resultSub.textContent = o.status
       ? `飞书返回: ${o.status}`
-      : p.status === 'idle' ? '等待上游天气数据与执行' : ''
+      : p.status === 'idle' ? '等待上游文本内容与执行' : ''
 
     meta.textContent = ''
     meta.append(metaChip(`${(p.inputs || []).length} 个入参`))
