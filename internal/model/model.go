@@ -185,7 +185,7 @@ type Execution struct {
 	Trigger      string     `json:"trigger" db:"trigger"` // manual | schedule | api
 	StartedAt    *time.Time `json:"startedAt,omitempty" db:"started_at"`
 	CompletedAt  *time.Time `json:"completedAt,omitempty" db:"completed_at"`
-	DurationMs   int        `json:"durationMs,omitempty" db:"duration_ms"`
+	DurationMs   *int       `json:"durationMs,omitempty" db:"duration_ms"`
 	Result       *string    `json:"result,omitempty" db:"result"`
 	ErrorMessage *string    `json:"errorMessage,omitempty" db:"error_message"`
 	ErrorNodeID  *string    `json:"errorNodeId,omitempty" db:"error_node_id"`

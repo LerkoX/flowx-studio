@@ -732,6 +732,10 @@ func (s *WorkflowService) persistRuntimeEvent(evt runtime.ExecutionEvent) {
 		if nodeName == "" {
 			nodeName = evt.NodeID
 		}
+		started := evt.Timestamp
+		if started.IsZero() {
+			started = time.Now()
+		}
 		_, _ = s.db.Exec(`
 			INSERT INTO execution_nodes (execution_id, node_id, node_name, status, started_at)
 			VALUES (?, ?, ?, ?, ?)
@@ -740,22 +744,29 @@ func (s *WorkflowService) persistRuntimeEvent(evt runtime.ExecutionEvent) {
 				started_at = excluded.started_at,
 				completed_at = NULL,
 				duration_ms = NULL
-		`, evt.ExecutionID, evt.NodeID, nodeName, "running", time.Now())
+		`, evt.ExecutionID, evt.NodeID, nodeName, "running", started)
 	case "node_complete":
 		status := evt.Status
 		if status == "" {
 			status = "success"
 		}
+		// 用事件产生时刻（而非消费时刻）计算耗时，事件桥积压时不会虚高
+		completed := evt.Timestamp
+		if completed.IsZero() {
+			completed = time.Now()
+		}
 		var startedAt time.Time
 		if err := s.db.Get(&startedAt,
 			"SELECT started_at FROM execution_nodes WHERE execution_id = ? AND node_id = ?",
 			evt.ExecutionID, evt.NodeID); err == nil {
-			duration := int(time.Since(startedAt).Milliseconds())
+			duration := int(completed.Sub(startedAt).Milliseconds())
+			// 仅当存在进行中的运行记录时才收尾：循环图后续迭代中，上游已终结节点
+			// 被跳过时会再次触发 node_complete（无对应 node_start），不能覆盖首轮耗时
 			_, _ = s.db.Exec(`
 				UPDATE execution_nodes
 				SET status = ?, completed_at = ?, duration_ms = ?
-				WHERE execution_id = ? AND node_id = ?
-			`, status, time.Now(), duration, evt.ExecutionID, evt.NodeID)
+				WHERE execution_id = ? AND node_id = ? AND status = 'running'
+			`, status, completed, duration, evt.ExecutionID, evt.NodeID)
 		}
 	case "execution_complete":
 		status := evt.Status

@@ -328,8 +328,12 @@ func (s *NodeService) MockTest(id int64, parameters map[string]string, timeout i
 	}
 
 	code := node.Code
+	entry := node.Entry
 	if node.MockConfig != nil && node.MockConfig.Enabled && node.MockConfig.Code != "" {
 		code = node.MockConfig.Code
+		if strings.TrimSpace(node.MockConfig.Entry) != "" {
+			entry = node.MockConfig.Entry
+		}
 	}
 
 	if strings.TrimSpace(code) == "" {
@@ -367,11 +371,13 @@ func (s *NodeService) MockTest(id int64, parameters map[string]string, timeout i
 	if err != nil {
 		return nil, err
 	}
+	// 资产中的同名入口文件会覆盖沙箱写入的 code（mock 代码），需排除
+	delete(runtimeFiles, entry)
 
 	result := s.executor.Execute(sandbox.ExecuteOptions{
 		Code:     code,
 		Language: node.Language,
-		Entry:    node.Entry,
+		Entry:    entry,
 		EnvVars:  envVars,
 		Files:    runtimeFiles,
 	})
