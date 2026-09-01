@@ -1,0 +1,48 @@
+{
+  "name": "echo",
+  "displayName": "回声",
+  "description": "打印一条日志消息，可选先 sleep 指定秒数再输出；常用于调试、占位与演示并行/回环流水线拓扑",
+  "version": "1.0.0",
+  "author": "flowx-team",
+  "tags": ["utility", "debug", "log"],
+  "icon": "📣",
+  "language": "bash",
+  "entry": "main.sh",
+  "executor": {
+    "type": "local"
+  },
+  "parameters": [
+    {
+      "name": "message",
+      "type": "string",
+      "description": "要输出的日志消息文本，任意字符串，最终会作为 text 输出字段返回",
+      "required": false,
+      "default": "hello"
+    },
+    {
+      "name": "sleep",
+      "type": "float",
+      "description": "输出日志前先休眠的秒数，支持小数（如 0.5 表示 500 毫秒），0 表示不休眠；用于模拟耗时任务",
+      "required": false,
+      "default": 0
+    }
+  ],
+  "env": {
+    "ECHO_MESSAGE": "{{ Param.message }}",
+    "ECHO_SLEEP": "{{ Param.sleep }}"
+  },
+  "outputs": [
+    { "name": "text", "type": "string", "description": "原样回显的 message 文本" }
+  ],
+  "extract": {
+    "type": "regex",
+    "patterns": {
+      "text": "text=([^\n]*)"
+    }
+  },
+  "mock": {
+    "enabled": true,
+    "entry": "mock.sh"
+  },
+  "timeout": 120
+}
