@@ -33,7 +33,9 @@ type DataConfig struct {
 
 // RetentionConfig 数据保留配置
 type RetentionConfig struct {
-	LogDays   int `mapstructure:"log_days"`   // execution_logs 保留天数，0 表示不清理
+	// 已废弃：execution_logs 保留天数迁移到系统配置 log_retention_days（设置页可编辑），
+	// 此字段仅保留用于兼容旧配置文件，不再生效
+	LogDays   int `mapstructure:"log_days"`
 	AuditDays int `mapstructure:"audit_days"` // audit_logs 保留天数，0 表示不清理
 }
 

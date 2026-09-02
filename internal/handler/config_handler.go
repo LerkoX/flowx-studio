@@ -4,21 +4,19 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/LerkoX/flowx-studio/internal/db"
-	"github.com/LerkoX/flowx-studio/internal/model"
 	"github.com/LerkoX/flowx-studio/internal/service"
 	"github.com/gin-gonic/gin"
 )
 
 // ConfigHandler 配置处理器
 type ConfigHandler struct {
-	db    *db.DB
+	cfg   *service.SystemConfigService
 	audit *service.AuditService
 }
 
 // NewConfigHandler 创建配置处理器
-func NewConfigHandler(database *db.DB) *ConfigHandler {
-	return &ConfigHandler{db: database}
+func NewConfigHandler(cfg *service.SystemConfigService) *ConfigHandler {
+	return &ConfigHandler{cfg: cfg}
 }
 
 // SetAudit 注入审计服务（可选）
@@ -37,17 +35,11 @@ func (h *ConfigHandler) RegisterRoutes(r *gin.RouterGroup) {
 
 // GetSystemConfig 获取系统配置
 func (h *ConfigHandler) GetSystemConfig(c *gin.Context) {
-	var configs []model.SystemConfig
-	if err := h.db.Select(&configs, "SELECT * FROM system_configs"); err != nil {
-		Error(c, http.StatusInternalServerError, "failed to get system config")
+	result, err := h.cfg.All()
+	if err != nil {
+		Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	result := make(map[string]string)
-	for _, cfg := range configs {
-		result[cfg.Key] = cfg.Value
-	}
-
 	Success(c, result)
 }
 
@@ -58,15 +50,9 @@ func (h *ConfigHandler) UpdateSystemConfig(c *gin.Context) {
 		return
 	}
 
-	for key, value := range req {
-		_, err := h.db.Exec(`
-			INSERT INTO system_configs (key, value) VALUES (?, ?)
-			ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-		`, key, value)
-		if err != nil {
-			Error(c, http.StatusInternalServerError, "failed to update system config: "+err.Error())
-			return
-		}
+	if err := h.cfg.Set(req); err != nil {
+		Error(c, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	if h.audit != nil {

@@ -1,7 +1,10 @@
 import { motion } from 'framer-motion'
+import { useTranslation } from 'react-i18next'
 import SystemSettingsTab from '@/features/settings/SystemSettingsTab'
 
 export default function SettingsPage() {
+  const { t } = useTranslation()
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -10,8 +13,8 @@ export default function SettingsPage() {
     >
       <div className="max-w-4xl mx-auto p-6 space-y-6">
         <div>
-          <h1 className="text-2xl font-bold text-white/90">设置</h1>
-          <p className="text-white/40 text-sm mt-1">配置系统偏好</p>
+          <h1 className="text-2xl font-bold text-white/90">{t('settings.title')}</h1>
+          <p className="text-white/40 text-sm mt-1">{t('settings.subtitle')}</p>
         </div>
 
         <SystemSettingsTab />

@@ -1,17 +1,20 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Server, Container, Plus, Star, Trash2 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import ExecutorForm from '@/features/executor-config/ExecutorForm'
 import GlassPanel from '@/components/GlassPanel'
 import { useExecutorStore } from '@/stores/executorStore'
 import { useEventStream } from '@/services/eventService'
 import { useIsMobile } from '@/hooks/useMediaQuery'
+import { useConfirm } from '@/hooks/useConfirm'
 import type { Executor } from '@/types/executor'
 
 const typeIcon = { local: Server, docker: Container }
-const typeDesc = { local: '本地 Shell 执行器', docker: 'Docker 容器执行器' }
 
 export default function ExecutorConfigPage() {
+  const { t } = useTranslation()
+  const { confirm, dialog } = useConfirm()
   const { executors, isLoading, error, loadExecutors, create, update, remove, setDefault } =
     useExecutorStore()
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -43,7 +46,7 @@ export default function ExecutorConfigPage() {
       await op()
       setCreating(false)
     } catch (err) {
-      setOpError(err instanceof Error ? err.message : '操作失败')
+      setOpError(err instanceof Error ? err.message : t('executor.opFailed'))
     } finally {
       setSaving(false)
     }
@@ -88,7 +91,7 @@ export default function ExecutorConfigPage() {
                     <Star size={12} className="text-amber-400 fill-amber-400 flex-shrink-0" />
                   )}
                 </div>
-                <div className="text-white/40 text-xs mt-0.5">{typeDesc[executor.type]}</div>
+                <div className="text-white/40 text-xs mt-0.5">{t(`executor.typeDesc.${executor.type}`)}</div>
               </div>
             </div>
           </motion.button>
@@ -116,8 +119,8 @@ export default function ExecutorConfigPage() {
             <Plus size={compact ? 16 : 20} className="text-white/50" />
           </div>
           <div>
-            <div className="text-white/70 font-medium text-sm">新增 Docker 执行器</div>
-            <div className="text-white/40 text-xs mt-0.5">可配置远程 daemon 地址</div>
+            <div className="text-white/70 font-medium text-sm">{t('executor.addDocker')}</div>
+            <div className="text-white/40 text-xs mt-0.5">{t('executor.addDockerHint')}</div>
           </div>
         </div>
       </motion.button>
@@ -150,38 +153,43 @@ export default function ExecutorConfigPage() {
                          text-white/70 text-xs hover:bg-white/10 hover:text-white transition-all
                          disabled:opacity-40 flex items-center gap-1.5"
             >
-              <Star size={12} /> 设为默认执行器
+              <Star size={12} /> {t('executor.setDefault')}
             </button>
           )}
           {selected.isDefault && (
             <span className="text-amber-400/80 text-xs flex items-center gap-1.5">
-              <Star size={12} className="fill-amber-400" /> 当前默认执行器
+              <Star size={12} className="fill-amber-400" /> {t('executor.currentDefault')}
             </span>
           )}
           {selected.type === 'docker' && !selected.isDefault && (
             <button
-              onClick={() => {
-                if (window.confirm(`确定删除执行器 "${selected.name}" 吗？引用它的节点将无法运行。`)) {
-                  runOp(() => remove(selected.id))
-                }
+              onClick={async () => {
+                const ok = await confirm({
+                  title: t('executor.deleteConfirmTitle'),
+                  message: t('executor.deleteConfirmMessage', { name: selected.name }),
+                  confirmText: t('common.delete'),
+                  danger: true,
+                })
+                if (ok) runOp(() => remove(selected.id))
               }}
               disabled={saving}
               className="px-3 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20
                          text-rose-300 text-xs hover:bg-rose-500/20 transition-all
                          disabled:opacity-40 flex items-center gap-1.5"
             >
-              <Trash2 size={12} /> 删除
+              <Trash2 size={12} /> {t('common.delete')}
             </button>
           )}
         </GlassPanel>
       )}
+      {dialog}
     </div>
   )
 
   if (isMobile) {
     return (
       <div className="h-full overflow-auto p-4 space-y-4">
-        <h2 className="text-white/90 font-semibold text-lg">执行器</h2>
+        <h2 className="text-white/90 font-semibold text-lg">{t('executor.title')}</h2>
         {error && <p className="text-rose-400 text-xs">{error}</p>}
         <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">{executorList(true)}</div>
         {detailPanel}
@@ -192,10 +200,10 @@ export default function ExecutorConfigPage() {
   return (
     <div className="h-full flex p-6 gap-6">
       <div className="w-80 flex-shrink-0 space-y-3">
-        <h2 className="text-white/90 font-semibold text-lg mb-4">执行器</h2>
+        <h2 className="text-white/90 font-semibold text-lg mb-4">{t('executor.title')}</h2>
         {error && <p className="text-rose-400 text-xs">{error}</p>}
         {isLoading && executors.length === 0 ? (
-          <p className="text-white/40 text-sm">加载中…</p>
+          <p className="text-white/40 text-sm">{t('common.loading')}</p>
         ) : (
           executorList(false)
         )}

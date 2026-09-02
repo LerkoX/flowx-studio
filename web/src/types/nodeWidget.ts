@@ -37,8 +37,8 @@ export interface NodeWidgetProps {
   outputs: Record<string, string>
   /** 流水线执行实例实时 metadata；无运行实例时为 null */
   execution: NodeWidgetExecution | null
-  /** 当前主题，固定 dark，预留 */
-  theme: 'dark'
+  /** 当前主题 */
+  theme: 'dark' | 'light'
   /** 语言环境，预留 */
   locale: string
 }

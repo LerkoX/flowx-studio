@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import { GitBranch, Container, Code, Trash2, Eye, Play } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import type { NodeDefinition } from '@/types/node'
 
 interface NodeCardProps {
@@ -10,6 +11,7 @@ interface NodeCardProps {
 }
 
 export default function NodeCard({ node, onView, onTest, onDelete }: NodeCardProps) {
+  const { t } = useTranslation()
   const isImageNode = node.nodeType === 'image'
 
   return (
@@ -34,7 +36,7 @@ export default function NodeCard({ node, onView, onTest, onDelete }: NodeCardPro
             {node.displayName || node.name}
           </h3>
           <p className="text-white/40 text-xs mt-0.5 line-clamp-2">
-            {node.description || '暂无描述'}
+            {node.description || t('node.noDescription')}
           </p>
         </div>
       </div>
@@ -45,7 +47,7 @@ export default function NodeCard({ node, onView, onTest, onDelete }: NodeCardPro
           <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full 
                            bg-blue-500/10 text-blue-400 border border-blue-500/20">
             <Container size={10} />
-            镜像节点
+            {t('node.imageNode')}
           </span>
         ) : (
           <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full 
@@ -99,7 +101,7 @@ export default function NodeCard({ node, onView, onTest, onDelete }: NodeCardPro
                      transition-all"
         >
           <Eye size={12} />
-          查看
+          {t('node.view')}
         </button>
         {!isImageNode && (
           <button
@@ -109,7 +111,7 @@ export default function NodeCard({ node, onView, onTest, onDelete }: NodeCardPro
                        transition-all"
           >
             <Play size={12} />
-            测试
+            {t('node.test')}
           </button>
         )}
         <button
@@ -119,7 +121,7 @@ export default function NodeCard({ node, onView, onTest, onDelete }: NodeCardPro
                      transition-all ml-auto"
         >
           <Trash2 size={12} />
-          删除
+          {t('common.delete')}
         </button>
       </div>
     </motion.div>

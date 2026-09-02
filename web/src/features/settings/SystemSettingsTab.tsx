@@ -1,55 +1,110 @@
-import { useState } from 'react'
-import { Monitor, Moon, Sun, Globe, Bell, Shield, Save, RotateCcw } from 'lucide-react'
-import { useSettingsStore } from '@/stores/settingsStore'
+import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Monitor, Moon, Sun, Globe, Bell, Shield, Save, RotateCcw, AlertCircle } from 'lucide-react'
+import { useSettingsStore, defaultSystemSettings } from '@/stores/settingsStore'
+import { toast } from '@/stores/toastStore'
 import GlassPanel from '@/components/GlassPanel'
 
+function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!value)}
+      // !min-h-0/!min-w-0：覆盖全局移动端触摸优化（button min-height:36px），
+      // 保持开关的 44x24 设计尺寸
+      className={`w-11 h-6 !min-h-0 !min-w-0 rounded-full transition-all relative flex-shrink-0
+        ${value ? 'bg-indigo-500' : 'bg-white/10'}`}
+    >
+      <div
+        className={`absolute top-0.5 w-5 h-5 rounded-full bg-on-accent shadow transition-all
+          ${value ? 'left-[22px]' : 'left-0.5'}`}
+      />
+    </button>
+  )
+}
+
+function SectionTitle({ icon: Icon, children }: { icon: typeof Monitor; children: React.ReactNode }) {
+  return (
+    <h3 className="text-white/90 font-semibold text-sm mb-4 flex items-center gap-2">
+      <Icon size={16} className="text-indigo-400" />
+      {children}
+    </h3>
+  )
+}
+
 export default function SystemSettingsTab() {
-  const { systemSettings, updateSystemSettings } = useSettingsStore()
+  const { t } = useTranslation()
+  const { systemSettings, updateSystemSettings, loadSystemSettings, error } = useSettingsStore()
   const [formData, setFormData] = useState(systemSettings)
+  const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
-  const handleSave = () => {
-    updateSystemSettings(formData)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+  // 挂载时拉取最新配置；store 变化（含首次加载完成）时同步到表单
+  useEffect(() => {
+    loadSystemSettings()
+  }, [loadSystemSettings])
+
+  useEffect(() => {
+    setFormData(systemSettings)
+  }, [systemSettings])
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      await updateSystemSettings(formData)
+      setSaved(true)
+      toast.success(t('settings.savedToast'))
+      setTimeout(() => setSaved(false), 2000)
+    } catch (e) {
+      toast.error(t('settings.saveFailed', { message: e instanceof Error ? e.message : String(e) }))
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleReset = () => {
-    if (confirm('确定要重置为默认设置吗？')) {
-      setFormData({
-        theme: 'dark',
-        language: 'zh-CN',
-        autoSave: true,
-        autoSaveInterval: 30,
-        showNotifications: true,
-        confirmBeforeDelete: true,
-        defaultNodeTimeout: 300,
-        maxConcurrentExecutions: 5,
-        logRetentionDays: 7,
-      })
+    if (confirm(t('settings.resetConfirm'))) {
+      setFormData(defaultSystemSettings)
+    }
+  }
+
+  // 主题/语言为即时生效项：选择即保存并应用，无需点「保存设置」；
+  // 失败时回滚到 store 中的当前值
+  const applyImmediate = async (patch: Partial<typeof formData>) => {
+    const prev = systemSettings
+    setFormData({ ...formData, ...patch })
+    try {
+      await updateSystemSettings(patch)
+    } catch (e) {
+      toast.error(t('settings.saveFailed', { message: e instanceof Error ? e.message : String(e) }))
+      setFormData(prev)
     }
   }
 
   return (
     <div className="space-y-6">
       <GlassPanel className="p-6">
+        {error && (
+          <div className="mb-4 flex items-center gap-2 px-3 py-2 rounded-xl
+                          bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs">
+            <AlertCircle size={14} />
+            {error}
+          </div>
+        )}
         <div className="space-y-6">
           {/* 外观 */}
           <div>
-            <h3 className="text-white/90 font-semibold text-sm mb-4 flex items-center gap-2">
-              <Monitor size={16} className="text-indigo-400" />
-              外观
-            </h3>
+            <SectionTitle icon={Monitor}>{t('settings.appearance')}</SectionTitle>
             <div className="grid grid-cols-3 gap-3">
               {[
-                { value: 'dark', label: '深色', icon: Moon },
-                { value: 'light', label: '浅色', icon: Sun },
-                { value: 'system', label: '跟随系统', icon: Monitor },
+                { value: 'dark', label: t('settings.themeDark'), icon: Moon },
+                { value: 'light', label: t('settings.themeLight'), icon: Sun },
+                { value: 'system', label: t('settings.themeSystem'), icon: Monitor },
               ].map(({ value, label, icon: Icon }) => (
                 <button
                   key={value}
                   type="button"
-                  onClick={() => setFormData({ ...formData, theme: value as typeof formData.theme })}
+                  onClick={() => applyImmediate({ theme: value as typeof formData.theme })}
                   className={`flex flex-col items-center gap-2 py-4 rounded-xl border transition-all
                     ${formData.theme === value
                       ? 'bg-white/10 border-indigo-500/30 text-white'
@@ -67,19 +122,16 @@ export default function SystemSettingsTab() {
 
           {/* 语言 */}
           <div>
-            <h3 className="text-white/90 font-semibold text-sm mb-4 flex items-center gap-2">
-              <Globe size={16} className="text-indigo-400" />
-              语言
-            </h3>
+            <SectionTitle icon={Globe}>{t('settings.language')}</SectionTitle>
             <select
               value={formData.language}
-              onChange={(e) => setFormData({ ...formData, language: e.target.value })}
+              onChange={(e) => applyImmediate({ language: e.target.value })}
               className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10
                        text-white/90 text-sm focus:outline-none focus:border-white/20
                        cursor-pointer"
             >
-              <option value="zh-CN" className="bg-[#1a1f3a]">简体中文</option>
-              <option value="en-US" className="bg-[#1a1f3a]">English</option>
+              <option value="zh-CN" className="bg-panel">简体中文</option>
+              <option value="en-US" className="bg-panel">English</option>
             </select>
           </div>
 
@@ -87,31 +139,20 @@ export default function SystemSettingsTab() {
 
           {/* 编辑器 */}
           <div>
-            <h3 className="text-white/90 font-semibold text-sm mb-4 flex items-center gap-2">
-              <Save size={16} className="text-indigo-400" />
-              编辑器
-            </h3>
+            <SectionTitle icon={Save}>{t('settings.editor')}</SectionTitle>
             <div className="space-y-4">
               <label className="flex items-center justify-between cursor-pointer">
-                <span className="text-white/60 text-sm">自动保存</span>
-                <button
-                  type="button"
-                  onClick={() => setFormData({ ...formData, autoSave: !formData.autoSave })}
-                  className={`w-11 h-6 rounded-full transition-all relative
-                    ${formData.autoSave ? 'bg-indigo-500' : 'bg-white/10'}`}
-                >
-                  <div
-                    className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow
-                      transition-all
-                      ${formData.autoSave ? 'left-[22px]' : 'left-0.5'}`}
-                  />
-                </button>
+                <span className="text-white/60 text-sm">{t('settings.autoSave')}</span>
+                <Toggle
+                  value={formData.autoSave}
+                  onChange={(v) => setFormData({ ...formData, autoSave: v })}
+                />
               </label>
 
               {formData.autoSave && (
                 <div>
                   <label className="block text-white/60 text-xs mb-1.5">
-                    自动保存间隔（秒）
+                    {t('settings.autoSaveInterval')}
                   </label>
                   <input
                     type="number"
@@ -132,24 +173,13 @@ export default function SystemSettingsTab() {
 
           {/* 通知 */}
           <div>
-            <h3 className="text-white/90 font-semibold text-sm mb-4 flex items-center gap-2">
-              <Bell size={16} className="text-indigo-400" />
-              通知
-            </h3>
+            <SectionTitle icon={Bell}>{t('settings.notifications')}</SectionTitle>
             <label className="flex items-center justify-between cursor-pointer">
-              <span className="text-white/60 text-sm">显示通知</span>
-              <button
-                type="button"
-                onClick={() => setFormData({ ...formData, showNotifications: !formData.showNotifications })}
-                className={`w-11 h-6 rounded-full transition-all relative
-                  ${formData.showNotifications ? 'bg-indigo-500' : 'bg-white/10'}`}
-              >
-                <div
-                  className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow
-                    transition-all
-                    ${formData.showNotifications ? 'left-[22px]' : 'left-0.5'}`}
-                />
-              </button>
+              <span className="text-white/60 text-sm">{t('settings.showNotifications')}</span>
+              <Toggle
+                value={formData.showNotifications}
+                onChange={(v) => setFormData({ ...formData, showNotifications: v })}
+              />
             </label>
           </div>
 
@@ -157,26 +187,13 @@ export default function SystemSettingsTab() {
 
           {/* 安全 */}
           <div>
-            <h3 className="text-white/90 font-semibold text-sm mb-4 flex items-center gap-2">
-              <Shield size={16} className="text-indigo-400" />
-              安全
-            </h3>
+            <SectionTitle icon={Shield}>{t('settings.security')}</SectionTitle>
             <label className="flex items-center justify-between cursor-pointer">
-              <span className="text-white/60 text-sm">删除前确认</span>
-              <button
-                type="button"
-                onClick={() =>
-                  setFormData({ ...formData, confirmBeforeDelete: !formData.confirmBeforeDelete })
-                }
-                className={`w-11 h-6 rounded-full transition-all relative
-                  ${formData.confirmBeforeDelete ? 'bg-indigo-500' : 'bg-white/10'}`}
-              >
-                <div
-                  className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow
-                    transition-all
-                    ${formData.confirmBeforeDelete ? 'left-[22px]' : 'left-0.5'}`}
-                />
-              </button>
+              <span className="text-white/60 text-sm">{t('settings.confirmBeforeDelete')}</span>
+              <Toggle
+                value={formData.confirmBeforeDelete}
+                onChange={(v) => setFormData({ ...formData, confirmBeforeDelete: v })}
+              />
             </label>
           </div>
 
@@ -184,13 +201,12 @@ export default function SystemSettingsTab() {
 
           {/* 执行器 */}
           <div>
-            <h3 className="text-white/90 font-semibold text-sm mb-4 flex items-center gap-2">
-              <RotateCcw size={16} className="text-indigo-400" />
-              执行器
-            </h3>
+            <SectionTitle icon={RotateCcw}>{t('settings.executorSection')}</SectionTitle>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-white/60 text-xs mb-1.5">默认节点超时（秒）</label>
+                <label className="block text-white/60 text-xs mb-1.5">
+                  {t('settings.defaultNodeTimeout')}
+                </label>
                 <input
                   type="number"
                   min="10"
@@ -205,7 +221,9 @@ export default function SystemSettingsTab() {
                 />
               </div>
               <div>
-                <label className="block text-white/60 text-xs mb-1.5">最大并发执行数</label>
+                <label className="block text-white/60 text-xs mb-1.5">
+                  {t('settings.maxConcurrentExecutions')}
+                </label>
                 <input
                   type="number"
                   min="1"
@@ -226,9 +244,11 @@ export default function SystemSettingsTab() {
 
           {/* 日志 */}
           <div>
-            <h3 className="text-white/90 font-semibold text-sm mb-4">日志</h3>
+            <SectionTitle icon={RotateCcw}>{t('settings.logSection')}</SectionTitle>
             <div>
-              <label className="block text-white/60 text-xs mb-1.5">日志保留天数</label>
+              <label className="block text-white/60 text-xs mb-1.5">
+                {t('settings.logRetentionDays')}
+              </label>
               <input
                 type="number"
                 min="1"
@@ -253,18 +273,19 @@ export default function SystemSettingsTab() {
             className="px-4 py-2.5 rounded-xl bg-white/5 text-white/60
                      text-sm hover:bg-white/10 hover:text-white transition-all"
           >
-            重置默认
+            {t('settings.resetDefaults')}
           </button>
           <button
             type="button"
             onClick={handleSave}
+            disabled={saving}
             className={`px-6 py-2.5 rounded-xl text-sm font-medium transition-all
               ${saved
                 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                : 'bg-gradient-to-br from-indigo-500 to-purple-500 text-white hover:shadow-lg hover:shadow-indigo-500/30'
+                : 'bg-gradient-to-br from-indigo-500 to-purple-500 text-on-accent hover:shadow-lg hover:shadow-indigo-500/30 disabled:opacity-50'
               }`}
           >
-            {saved ? '已保存' : '保存设置'}
+            {saved ? t('common.saved') : t('settings.saveSettings')}
           </button>
         </div>
       </GlassPanel>

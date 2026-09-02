@@ -4,6 +4,13 @@ module.exports = {
   theme: {
     extend: {
       colors: {
+        // 主题翻转核心：white 映射到 --color-ink 变量，
+        // data-theme=light 时全部 white/xx 工具类自动变为深色
+        white: 'rgb(var(--color-ink) / <alpha-value>)',
+        // 彩色/渐变按钮上的文字：两主题下都保持纯白
+        'on-accent': '#ffffff',
+        // 实心面板底色（模态框/抽屉/下拉），随主题切换
+        panel: 'rgb(var(--color-panel) / <alpha-value>)',
         brand: {
           indigo: '#6366f1',
           purple: '#a855f7',

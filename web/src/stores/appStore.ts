@@ -2,7 +2,6 @@ import { create } from 'zustand'
 
 interface AppState {
   sidebarCollapsed: boolean
-  theme: 'dark'
   paramsPanelCollapsed: boolean
   mobileParamsOpen: boolean
   mobileSidebarOpen: boolean
@@ -14,7 +13,6 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set) => ({
   sidebarCollapsed: false,
-  theme: 'dark',
   paramsPanelCollapsed: false,
   mobileParamsOpen: false,
   mobileSidebarOpen: false,

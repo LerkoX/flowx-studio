@@ -6,6 +6,11 @@ interface WorkflowState {
   currentWorkflow: Workflow | null
   workflows: Workflow[]
   nodeStatuses: Record<string, string>
+  // 节点完成时间戳（客户端收到 node_complete 的时间），用于判断运行中节点的
+  // 哪条入边真正触发了本轮执行（循环图中区分正向边与回边）
+  nodeCompletedAt: Record<string, number>
+  // 节点本轮启动前的上次完成时间（node_start 时从 nodeCompletedAt 快照）
+  nodePrevCompletedAt: Record<string, number>
   params: Record<string, PipelineParam>
   nodeRuntimeData: Record<string, NodeRuntimeData>
   setCurrentWorkflow: (workflow: Workflow | null) => void
@@ -40,6 +45,8 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
     test: 'idle',
     deploy: 'idle',
   },
+  nodeCompletedAt: {},
+  nodePrevCompletedAt: {},
   params: {},
   nodeRuntimeData: {
     build: {
@@ -80,11 +87,35 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
     workflows: [...state.workflows, workflow],
   })),
 
-  updateNodeStatus: (nodeId, status) => set((state) => ({
-    nodeStatuses: { ...state.nodeStatuses, [nodeId]: status },
-  })),
+  updateNodeStatus: (nodeId, status) => set((state) => {
+    if (status === 'running') {
+      // 本轮启动：快照上次完成时间，供入边判断本轮前驱
+      return {
+        nodeStatuses: { ...state.nodeStatuses, [nodeId]: status },
+        nodePrevCompletedAt: {
+          ...state.nodePrevCompletedAt,
+          [nodeId]: state.nodeCompletedAt[nodeId] ?? 0,
+        },
+      }
+    }
+    // 循环迭代中上游已终结节点会被跳过并再次触发 node_complete（无对应 node_start）；
+    // 仅真实运行（running → 终态）才刷新完成时间，否则跳过事件会污染入边高亮判断
+    if (state.nodeStatuses[nodeId] !== 'running') {
+      return { nodeStatuses: { ...state.nodeStatuses, [nodeId]: status } }
+    }
+    return {
+      nodeStatuses: { ...state.nodeStatuses, [nodeId]: status },
+      nodeCompletedAt: { ...state.nodeCompletedAt, [nodeId]: Date.now() },
+    }
+  }),
 
-  setNodeStatuses: (statuses) => set({ nodeStatuses: statuses }),
+  // 整体重置状态（新执行开始/切换历史执行）时一并清空时间戳，
+  // 画布高亮在无时间戳数据时回退为「目标节点运行即亮」
+  setNodeStatuses: (statuses) => set({
+    nodeStatuses: statuses,
+    nodeCompletedAt: {},
+    nodePrevCompletedAt: {},
+  }),
 
   syncParamsFromYAML: (yamlConfig: string) => {
     try {

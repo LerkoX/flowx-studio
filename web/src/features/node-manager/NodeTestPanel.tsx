@@ -1,7 +1,10 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Play, Terminal, Loader2, AlertCircle, CheckCircle, Clock, Code, LayoutGrid } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import type { NodeDefinition } from '@/types/node'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { getCurrentTheme } from '@/utils/theme'
 import type { NodeWidgetProps } from '@/types/nodeWidget'
 import { mockTestNode } from '@/services/nodeService'
 import ModuleNodeWidget, { buildWidgetUrl } from '@/components/ModuleNodeWidget'
@@ -14,8 +17,12 @@ interface NodeTestPanelProps {
 }
 
 export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelProps) {
+  const { t } = useTranslation()
   const [paramValues, setParamValues] = useState<Record<string, string>>({})
-  const [timeout, setTimeout] = useState(30)
+  // 默认超时取系统偏好 defaultNodeTimeout（用户可在面板内临时调整）
+  const [timeout, setTimeout] = useState(
+    () => useSettingsStore.getState().systemSettings.defaultNodeTimeout
+  )
   const [isRunning, setIsRunning] = useState(false)
   const [result, setResult] = useState<{
     status: string
@@ -43,7 +50,7 @@ export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelPr
       Object.entries(result?.output || {}).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)])
     ),
     execution: null,
-    theme: 'dark',
+    theme: getCurrentTheme(),
     locale: typeof navigator !== 'undefined' ? navigator.language : 'zh-CN',
   }
 
@@ -129,7 +136,7 @@ export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelPr
             exit={{ opacity: 0, x: 100 }}
             transition={{ type: 'spring', stiffness: 300, damping: 25 }}
             className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-lg 
-                       bg-[#0f172a]/95 backdrop-blur-2xl border-l border-white/10
+                       bg-panel/95 backdrop-blur-2xl border-l border-white/10
                        flex flex-col"
           >
             {/* 头部 */}
@@ -137,7 +144,7 @@ export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelPr
               <div className="flex items-center gap-3">
                 <Terminal size={18} className="text-indigo-400" />
                 <div>
-                  <h2 className="text-white/90 font-semibold text-sm">测试节点</h2>
+                  <h2 className="text-white/90 font-semibold text-sm">{t('node.testTitle')}</h2>
                   <p className="text-white/40 text-xs">{node.displayName || node.name}</p>
                 </div>
               </div>
@@ -157,7 +164,7 @@ export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelPr
                 <GlassPanel className="p-4 bg-amber-500/10 border-amber-500/20">
                   <div className="flex items-center gap-2 text-amber-400 text-sm">
                     <AlertCircle size={16} />
-                    <span>镜像节点暂不支持测试</span>
+                    <span>{t('node.imageNodeNotTestable')}</span>
                   </div>
                 </GlassPanel>
               )}
@@ -167,7 +174,7 @@ export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelPr
                 <div className="space-y-3">
                   <h3 className="text-white/70 font-medium text-sm flex items-center gap-2">
                     <Code size={14} />
-                    输入参数
+                    {t('node.inputParams')}
                   </h3>
                   {node.parameters.map((param) => (
                     <GlassPanel key={param.name} className="p-3">
@@ -179,7 +186,7 @@ export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelPr
                             {param.type}
                           </span>
                           {param.required && (
-                            <span className="text-[10px] text-rose-400">必填</span>
+                            <span className="text-[10px] text-rose-400">{t('node.required')}</span>
                           )}
                         </div>
                         <p className="text-white/30 text-xs mt-1">{param.description}</p>
@@ -190,7 +197,7 @@ export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelPr
                         onChange={(e) => 
                           setParamValues(prev => ({ ...prev, [param.name]: e.target.value }))
                         }
-                        placeholder={param.default !== undefined ? String(param.default) : '输入值...'}
+                        placeholder={param.default !== undefined ? String(param.default) : t('node.inputValuePlaceholder')}
                         className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2
                                  text-white/80 text-sm placeholder:text-white/20
                                  focus:outline-none focus:border-indigo-500/50 focus:ring-1 
@@ -204,7 +211,7 @@ export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelPr
               {/* 超时设置 */}
               <GlassPanel className="p-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-white/60 text-sm">执行超时</span>
+                  <span className="text-white/60 text-sm">{t('node.execTimeout')}</span>
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
@@ -214,7 +221,7 @@ export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelPr
                                text-white/80 text-sm text-center
                                focus:outline-none focus:border-indigo-500/50"
                     />
-                    <span className="text-white/40 text-xs">秒</span>
+                    <span className="text-white/40 text-xs">{t('node.seconds')}</span>
                   </div>
                 </div>
               </GlassPanel>
@@ -224,7 +231,7 @@ export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelPr
                 <div className="space-y-3">
                   <h3 className="text-white/70 font-medium text-sm flex items-center gap-2">
                     <LayoutGrid size={14} />
-                    UI 预览
+                    {t('node.uiPreview')}
                   </h3>
                   <GlassPanel className="p-3">
                     <ModuleNodeWidget
@@ -234,7 +241,7 @@ export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelPr
                       widgetProps={previewProps}
                     />
                     {!result && (
-                      <p className="text-white/30 text-[10px] mt-2">运行测试后组件将收到真实输出数据</p>
+                      <p className="text-white/30 text-[10px] mt-2">{t('node.uiPreviewHint')}</p>
                     )}
                   </GlassPanel>
                 </div>
@@ -247,18 +254,18 @@ export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelPr
                 className={`w-full py-3 rounded-xl font-medium text-sm flex items-center justify-center gap-2 transition-all ${
                     isRunning || !isCodeNode
                       ? 'bg-white/5 text-white/30 cursor-not-allowed'
-                      : 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white hover:from-indigo-400 hover:to-purple-400 shadow-lg shadow-indigo-500/20'
+                      : 'bg-gradient-to-r from-indigo-500 to-purple-500 text-on-accent hover:from-indigo-400 hover:to-purple-400 shadow-lg shadow-indigo-500/20'
                   }`}
               >
                 {isRunning ? (
                   <>
                     <Loader2 size={16} className="animate-spin" />
-                    <span>执行中...</span>
+                    <span>{t('node.running')}</span>
                   </>
                 ) : (
                   <>
                     <Play size={16} />
-                    <span>运行测试</span>
+                    <span>{t('node.runTest')}</span>
                   </>
                 )}
               </button>
@@ -280,8 +287,8 @@ export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelPr
                       <div className="flex items-center gap-2">
                         {getStatusIcon()}
                         <span className={`text-sm font-medium ${getStatusColor()}`}>
-                          {result.status === 'success' ? '执行成功' :
-                           result.status === 'timeout' ? '执行超时' : '执行失败'}
+                          {result.status === 'success' ? t('node.execSuccess') :
+                           result.status === 'timeout' ? t('node.execTimeoutStatus') : t('node.execFailed')}
                         </span>
                       </div>
                       <span className="text-white/30 text-xs">
@@ -296,7 +303,7 @@ export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelPr
                   {/* 输出 */}
                   {(result.stdout || result.stderr) && (
                     <GlassPanel className="p-3">
-                      <h4 className="text-white/60 text-xs font-medium mb-2">标准输出</h4>
+                      <h4 className="text-white/60 text-xs font-medium mb-2">{t('node.stdout')}</h4>
                       {result.stdout && (
                         <pre className="text-emerald-400 text-xs font-mono bg-black/30 rounded-lg p-3 
                                       overflow-x-auto whitespace-pre-wrap">
@@ -315,7 +322,7 @@ export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelPr
                   {/* 解析的输出 */}
                   {result.output && Object.keys(result.output).length > 0 && (
                     <GlassPanel className="p-3">
-                      <h4 className="text-white/60 text-xs font-medium mb-2">解析输出</h4>
+                      <h4 className="text-white/60 text-xs font-medium mb-2">{t('node.parsedOutput')}</h4>
                       <pre className="text-indigo-400 text-xs font-mono bg-black/30 rounded-lg p-3 
                                     overflow-x-auto">
                         {JSON.stringify(result.output, null, 2)}
@@ -326,7 +333,7 @@ export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelPr
                   {/* 执行日志 */}
                   {result.logs && (
                     <GlassPanel className="p-3">
-                      <h4 className="text-white/60 text-xs font-medium mb-2">执行日志</h4>
+                      <h4 className="text-white/60 text-xs font-medium mb-2">{t('node.execLogs')}</h4>
                       <pre className="text-white/50 text-xs font-mono bg-black/30 rounded-lg p-3 
                                     overflow-x-auto whitespace-pre-wrap max-h-60 overflow-y-auto">
                         {result.logs}

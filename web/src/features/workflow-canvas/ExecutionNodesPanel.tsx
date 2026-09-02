@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useExecutionStore } from '@/stores/executionStore'
 
 interface ExecutionNodesPanelProps {
@@ -8,6 +9,7 @@ interface ExecutionNodesPanelProps {
 // 回放态「节点」tab：展示所选执行的节点状态列表，
 // 点击节点可按节点过滤日志（后端 node_id 过滤同时匹配 node_id 与 node_name）
 export default function ExecutionNodesPanel({ onNodeFiltered }: ExecutionNodesPanelProps) {
+  const { t } = useTranslation()
   const executionNodes = useExecutionStore((s) => s.executionNodes)
   const loadingNodes = useExecutionStore((s) => s.loadingNodes)
   const nodeFilter = useExecutionStore((s) => s.logFilter.nodeFilter)
@@ -24,13 +26,13 @@ export default function ExecutionNodesPanel({ onNodeFiltered }: ExecutionNodesPa
   }
 
   if (loadingNodes) {
-    return <div className="text-center py-8 text-white/30 text-xs">加载中...</div>
+    return <div className="text-center py-8 text-white/30 text-xs">{t('common.loading')}</div>
   }
 
   if (executionNodes.length === 0) {
     return (
       <div className="text-center py-8 text-white/30 text-xs">
-        暂无节点数据
+        {t('canvas.noNodeData')}
       </div>
     )
   }
@@ -38,7 +40,7 @@ export default function ExecutionNodesPanel({ onNodeFiltered }: ExecutionNodesPa
   return (
     <div className="space-y-1.5">
       <div className="text-[11px] text-white/30 px-1 pb-1">
-        点击节点可过滤该节点的日志
+        {t('canvas.nodeFilterHint')}
       </div>
       {executionNodes.map((node) => {
         const filtered = nodeFilter === node.nodeId
@@ -51,7 +53,7 @@ export default function ExecutionNodesPanel({ onNodeFiltered }: ExecutionNodesPa
                 ? 'bg-indigo-500/15 border-indigo-500/30'
                 : 'bg-white/5 border-transparent hover:bg-white/10'
             }`}
-            title={filtered ? '清除日志过滤' : '过滤该节点日志'}
+            title={filtered ? t('canvas.clearLogFilter') : t('canvas.filterNodeLogs')}
           >
             <span className="text-xs text-white/80 truncate">{node.nodeName}</span>
             <div className="flex items-center gap-2 shrink-0">

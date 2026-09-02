@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useExecutionStore, type LogLevel } from '@/stores/executionStore'
 import type { ExecutionLog } from '@/types/execution'
 
@@ -17,6 +18,7 @@ interface LogSegment {
 }
 
 export default function LogViewer() {
+  const { t } = useTranslation()
   const {
     executionLog,
     logsTotal,
@@ -118,7 +120,7 @@ export default function LogViewer() {
           </svg>
           <input
             type="text"
-            placeholder="搜索日志..."
+            placeholder={t('logs.searchPlaceholder')}
             value={logFilter.searchQuery}
             onChange={(e) => setLogFilter({ searchQuery: e.target.value })}
             className="w-full bg-white/5 border border-white/10 rounded-lg pl-7 pr-2 py-1.5
@@ -162,9 +164,9 @@ export default function LogViewer() {
                          text-xs text-white/80 focus:outline-none focus:border-white/30
                          cursor-pointer max-w-[120px]"
             >
-              <option value="" className="bg-[#1a1f3a]">全部节点</option>
+              <option value="" className="bg-panel">{t('logs.allNodes')}</option>
               {nodeOptions.map(([value, label]) => (
-                <option key={value} value={value} className="bg-[#1a1f3a]">
+                <option key={value} value={value} className="bg-panel">
                   {label}
                 </option>
               ))}
@@ -174,9 +176,9 @@ export default function LogViewer() {
                 onClick={() => setLogFilter({ nodeFilter: null })}
                 className="px-1.5 py-1 rounded text-[10px] bg-white/10 text-white/70
                            hover:bg-white/20 hover:text-white transition-colors"
-                title="清除节点过滤"
+                title={t('logs.clearNodeFilter')}
               >
-                清除
+                {t('logs.clear')}
               </button>
             )}
           </div>
@@ -191,7 +193,7 @@ export default function LogViewer() {
       >
         {/* 顶部懒加载指示 */}
         {loadingOlder && (
-          <div className="text-center py-2 text-white/40 text-xs">加载更早的日志…</div>
+          <div className="text-center py-2 text-white/40 text-xs">{t('logs.loadingOlder')}</div>
         )}
         {!loadingOlder && hasMore && (
           <button
@@ -206,14 +208,14 @@ export default function LogViewer() {
             className="w-full text-center py-1.5 mb-1 text-[11px] text-indigo-300/70
                        hover:text-indigo-300 hover:bg-white/5 rounded-lg transition-colors"
           >
-            加载更早的日志（还有 {logsTotal - executionLog.length} 条）
+            {t('logs.loadOlder', { count: logsTotal - executionLog.length })}
           </button>
         )}
 
         {loadingLogs ? (
-          <div className="text-center py-8 text-white/30 text-xs">加载中...</div>
+          <div className="text-center py-8 text-white/30 text-xs">{t('common.loading')}</div>
         ) : segments.length === 0 ? (
-          <div className="text-center py-8 text-white/30 text-xs">暂无日志</div>
+          <div className="text-center py-8 text-white/30 text-xs">{t('logs.empty')}</div>
         ) : (
           segments.map((seg) => (
             <NodeLogSegment
@@ -239,11 +241,11 @@ export default function LogViewer() {
                 logFilter.autoScroll ? 'bg-emerald-400' : 'bg-white/20'
               }`}
             />
-            {logFilter.autoScroll ? '自动滚动' : '手动滚动'}
+            {logFilter.autoScroll ? t('logs.autoScroll') : t('logs.manualScroll')}
           </button>
         </div>
         <span>
-          已加载 {executionLog.length} / 共 {logsTotal} 条
+          {t('logs.loadedCount', { loaded: executionLog.length, total: logsTotal })}
         </span>
       </div>
     </div>
@@ -258,6 +260,7 @@ function NodeLogSegment({
   segment: LogSegment
   searchQuery: string
 }) {
+  const { t } = useTranslation()
   return (
     <div className="mt-3 first:mt-0">
       {/* 节点标题 */}
@@ -266,7 +269,7 @@ function NodeLogSegment({
         <span className="text-xs font-medium text-indigo-300 font-mono">
           {segment.nodeName}
         </span>
-        <span className="text-[10px] text-white/30">{segment.logs.length} 条</span>
+        <span className="text-[10px] text-white/30">{t('logs.lineCount', { count: segment.logs.length })}</span>
         <div className="flex-1 h-px bg-white/5" />
       </div>
 
@@ -290,6 +293,7 @@ function LogLine({
 }) {
   const isError = log.level === 'ERROR' || log.level === 'FATAL'
   const hasDistinctOutput = !!log.output && log.output !== log.message
+  const { t } = useTranslation()
 
   const highlightedMessage = useMemo(() => {
     if (!searchQuery) return log.message
@@ -345,7 +349,7 @@ function LogLine({
       {hasDistinctOutput && (
         <details className="mt-1 ml-1">
           <summary className="text-[10px] text-white/40 cursor-pointer hover:text-white/60 select-none">
-            输出内容
+            {t('logs.outputContent')}
           </summary>
           <pre className="mt-1 p-2 rounded bg-black/30 text-[11px] leading-relaxed
                           text-white/70 whitespace-pre-wrap break-all">

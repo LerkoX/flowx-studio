@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, GitBranch, Container, Code, Tag, FileCode, Box, Clock, User } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import type { NodeDefinition } from '@/types/node'
 import GlassPanel from '@/components/GlassPanel'
 
@@ -11,6 +12,7 @@ interface NodeDetailModalProps {
 }
 
 export default function NodeDetailModal({ node, isOpen, onClose }: NodeDetailModalProps) {
+  const { t, i18n } = useTranslation()
   const [activeTab, setActiveTab] = useState<'overview' | 'params' | 'outputs'>('overview')
 
   if (!node) return null
@@ -38,7 +40,7 @@ export default function NodeDetailModal({ node, isOpen, onClose }: NodeDetailMod
             transition={{ type: 'spring', stiffness: 300, damping: 25 }}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
           >
-            <div className="w-full max-w-2xl max-h-[85vh] bg-[#0f172a]/95 backdrop-blur-2xl 
+            <div className="w-full max-w-2xl max-h-[85vh] bg-panel/95 backdrop-blur-2xl 
                             border border-white/10 rounded-2xl overflow-hidden flex flex-col pointer-events-auto"
             >
               {/* 头部 */}
@@ -51,8 +53,8 @@ export default function NodeDetailModal({ node, isOpen, onClose }: NodeDetailMod
                     {node.ui?.entry && (
                       <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-full
                                        bg-purple-500/10 text-purple-300 border border-purple-500/20 text-[10px]"
-                            title={`该节点包含自定义 UI 组件（${node.ui.entry}），组件代码将在 FlowX Studio 前端上下文中执行，请确保节点来源可信`}>
-                        自定义 UI 组件
+                            title={t('node.customUiTooltip', { entry: node.ui.entry })}>
+                        {t('node.customUi')}
                       </span>
                     )}
                   </div>
@@ -69,9 +71,9 @@ export default function NodeDetailModal({ node, isOpen, onClose }: NodeDetailMod
               {/* 标签切换 */}
               <div className="flex border-b border-white/10 flex-shrink-0">
                 {[
-                  { key: 'overview' as const, label: '概览', icon: Box },
-                  { key: 'params' as const, label: '参数', icon: FileCode },
-                  ...(node.outputs ? [{ key: 'outputs' as const, label: '输出', icon: Code }] : []),
+                  { key: 'overview' as const, label: t('node.tabOverview'), icon: Box },
+                  { key: 'params' as const, label: t('node.tabParams'), icon: FileCode },
+                  ...(node.outputs ? [{ key: 'outputs' as const, label: t('node.tabOutputs'), icon: Code }] : []),
                 ].map((tab) => (
                   <button
                     key={tab.key}
@@ -100,21 +102,21 @@ export default function NodeDetailModal({ node, isOpen, onClose }: NodeDetailMod
                   <div className="space-y-4">
                     {/* 基本信息 */}
                     <GlassPanel className="p-4">
-                      <h3 className="text-white/70 font-medium text-sm mb-3">基本信息</h3>
+                      <h3 className="text-white/70 font-medium text-sm mb-3">{t('node.basicInfo')}</h3>
                       <div className="grid grid-cols-2 gap-3">
-                        <InfoItem icon={Tag} label="名称" value={node.name} />
-                        <InfoItem icon={Code} label="版本" value={node.version || '1.0.0'} />
+                        <InfoItem icon={Tag} label={t('node.nameLabel')} value={node.name} />
+                        <InfoItem icon={Code} label={t('node.versionLabel')} value={node.version || '1.0.0'} />
                         <InfoItem 
                           icon={isImageNode ? Container : Code} 
-                          label="类型" 
-                          value={isImageNode ? '镜像节点' : `代码节点 (${node.language})`} 
+                          label={t('node.typeLabel')} 
+                          value={isImageNode ? t('node.imageNode') : t('node.codeNodeWithLang', { lang: node.language })} 
                         />
-                        <InfoItem icon={User} label="作者" value={node.author || '未知'} />
+                        <InfoItem icon={User} label={t('node.authorLabel')} value={node.author || t('node.unknown')} />
                         {node.createdAt && (
                           <InfoItem 
                             icon={Clock} 
-                            label="创建时间" 
-                            value={new Date(node.createdAt).toLocaleDateString('zh-CN')} 
+                            label={t('node.createdAt')} 
+                            value={new Date(node.createdAt).toLocaleDateString(i18n.language)} 
                           />
                         )}
                       </div>
@@ -123,7 +125,7 @@ export default function NodeDetailModal({ node, isOpen, onClose }: NodeDetailMod
                     {/* 镜像/代码信息 */}
                     {isImageNode ? (
                       <GlassPanel className="p-4">
-                        <h3 className="text-white/70 font-medium text-sm mb-3">镜像信息</h3>
+                        <h3 className="text-white/70 font-medium text-sm mb-3">{t('node.imageInfo')}</h3>
                         <div className="flex items-center gap-2 p-3 rounded-lg bg-white/5">
                           <Container size={16} className="text-blue-400" />
                           <span className="text-blue-400 font-mono text-sm">{node.image}</span>
@@ -133,7 +135,7 @@ export default function NodeDetailModal({ node, isOpen, onClose }: NodeDetailMod
                       <>
                         {node.entry && (
                           <GlassPanel className="p-4">
-                            <h3 className="text-white/70 font-medium text-sm mb-3">入口文件</h3>
+                            <h3 className="text-white/70 font-medium text-sm mb-3">{t('node.entryFile')}</h3>
                             <div className="flex items-center gap-2 p-3 rounded-lg bg-white/5">
                               <FileCode size={16} className="text-emerald-400" />
                               <span className="text-emerald-400 font-mono text-sm">{node.entry}</span>
@@ -142,7 +144,7 @@ export default function NodeDetailModal({ node, isOpen, onClose }: NodeDetailMod
                         )}
                         {node.sourceURL && (
                           <GlassPanel className="p-4">
-                            <h3 className="text-white/70 font-medium text-sm mb-3">来源</h3>
+                            <h3 className="text-white/70 font-medium text-sm mb-3">{t('node.source')}</h3>
                             <div className="flex items-center gap-2 p-3 rounded-lg bg-white/5">
                               <GitBranch size={16} className="text-white/40" />
                               <span className="text-white/60 font-mono text-sm truncate">{node.sourceURL}</span>
@@ -155,7 +157,7 @@ export default function NodeDetailModal({ node, isOpen, onClose }: NodeDetailMod
                     {/* 标签 */}
                     {node.tags && node.tags.length > 0 && (
                       <GlassPanel className="p-4">
-                        <h3 className="text-white/70 font-medium text-sm mb-3">标签</h3>
+                        <h3 className="text-white/70 font-medium text-sm mb-3">{t('node.tagsLabel')}</h3>
                         <div className="flex gap-2 flex-wrap">
                           {node.tags.map((tag) => (
                             <span
@@ -176,7 +178,7 @@ export default function NodeDetailModal({ node, isOpen, onClose }: NodeDetailMod
                   <div className="space-y-3">
                     {node.parameters.length === 0 ? (
                       <div className="text-center py-8 text-white/30 text-sm">
-                        该节点没有定义参数
+                        {t('node.noParams')}
                       </div>
                     ) : (
                       node.parameters.map((param) => (
@@ -190,13 +192,13 @@ export default function NodeDetailModal({ node, isOpen, onClose }: NodeDetailMod
                                   {param.type}
                                 </span>
                                 {param.required && (
-                                  <span className="text-[10px] text-rose-400">必填</span>
+                                  <span className="text-[10px] text-rose-400">{t('node.required')}</span>
                                 )}
                               </div>
                               <p className="text-white/40 text-xs">{param.description}</p>
                               {param.default !== undefined && (
                                 <p className="text-white/30 text-[11px] mt-2">
-                                  默认值: {String(param.default)}
+                                  {t('node.defaultValue')}: {String(param.default)}
                                 </p>
                               )}
                             </div>
@@ -211,7 +213,7 @@ export default function NodeDetailModal({ node, isOpen, onClose }: NodeDetailMod
                   <div className="space-y-3">
                     {node.outputs.length === 0 ? (
                       <div className="text-center py-8 text-white/30 text-sm">
-                        该节点没有定义输出
+                        {t('node.noOutputs')}
                       </div>
                     ) : (
                       node.outputs.map((output) => (

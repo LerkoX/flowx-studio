@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import GlassPanel from '@/components/GlassPanel'
 import type { Executor, ExecutorCreateInput, ExecutorType, ExecutorUpdateInput } from '@/types/executor'
 
@@ -107,6 +108,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 }
 
 export default function ExecutorForm({ executor, saving, error, onSave, onCancelCreate }: ExecutorFormProps) {
+  const { t } = useTranslation()
   const isCreate = executor === null
   const type: ExecutorType = executor?.type ?? 'docker'
   const [form, setForm] = useState<FormState>(() => toFormState(executor))
@@ -130,12 +132,12 @@ export default function ExecutorForm({ executor, saving, error, onSave, onCancel
   return (
     <GlassPanel className="p-6">
       <h3 className="text-white/90 font-semibold text-sm mb-4">
-        {isCreate ? '新增 Docker 执行器' : `${type === 'local' ? 'Local' : 'Docker'} 执行器配置`}
+        {isCreate ? t('executor.addDocker') : t('executor.configTitle', { type: type === 'local' ? 'Local' : 'Docker' })}
       </h3>
 
       <div className="space-y-4">
         {isCreate && (
-          <Field label="实例名称" hint="字母开头，可含字母/数字/_/-；节点包通过 executor.ref 引用此名称">
+          <Field label={t('executor.instanceName')} hint={t('executor.instanceNameHint')}>
             <input
               className={inputCls}
               placeholder="docker-remote"
@@ -145,10 +147,10 @@ export default function ExecutorForm({ executor, saving, error, onSave, onCancel
           </Field>
         )}
 
-        <Field label="描述">
+        <Field label={t('executor.description')}>
           <input
             className={inputCls}
-            placeholder={type === 'local' ? '本机 Shell 执行器' : '如：办公室构建机'}
+            placeholder={type === 'local' ? t('executor.localDescPlaceholder') : t('executor.dockerDescPlaceholder')}
             value={form.description}
             onChange={(e) => set('description', e.target.value)}
           />
@@ -157,8 +159,8 @@ export default function ExecutorForm({ executor, saving, error, onSave, onCancel
         {type === 'docker' && (
           <>
             <Field
-              label="Daemon 地址（host）"
-              hint="留空使用本机/DOCKER_HOST；远程示例：tcp://192.168.1.10:2375 或 ssh://user@host"
+              label={t('executor.hostLabel')}
+              hint={t('executor.hostHint')}
             >
               <input
                 className={inputCls}
@@ -177,12 +179,12 @@ export default function ExecutorForm({ executor, saving, error, onSave, onCancel
                 className="accent-indigo-500"
               />
               <label htmlFor="tlsVerify" className="text-white/60 text-xs">
-                TLS 校验（tcp:// 远程 daemon 建议开启）
+                {t('executor.tlsVerify')}
               </label>
             </div>
 
             {form.tlsVerify && (
-              <Field label="TLS 证书目录" hint="目录内需含 ca.pem / cert.pem / key.pem，默认 ~/.docker">
+              <Field label={t('executor.tlsCertPath')} hint={t('executor.tlsCertHint')}>
                 <input
                   className={inputCls}
                   placeholder="~/.docker"
@@ -192,7 +194,7 @@ export default function ExecutorForm({ executor, saving, error, onSave, onCancel
               </Field>
             )}
 
-            <Field label="镜像仓库（registry）">
+            <Field label={t('executor.registryLabel')}>
               <input
                 className={inputCls}
                 placeholder="docker.io"
@@ -201,7 +203,7 @@ export default function ExecutorForm({ executor, saving, error, onSave, onCancel
               />
             </Field>
 
-            <Field label="网络模式（network）">
+            <Field label={t('executor.networkLabel')}>
               <input
                 className={inputCls}
                 placeholder="bridge"
@@ -211,8 +213,8 @@ export default function ExecutorForm({ executor, saving, error, onSave, onCancel
             </Field>
 
             <Field
-              label="卷挂载（volumes）"
-              hint="每行一条 host:container[:ro]；注意远程 daemon 时 host 路径是远端机器上的路径"
+              label={t('executor.volumesLabel')}
+              hint={t('executor.volumesHint')}
             >
               <textarea
                 className={inputCls + ' h-20 resize-y'}
@@ -234,7 +236,7 @@ export default function ExecutorForm({ executor, saving, error, onSave, onCancel
                 onChange={(e) => set('shell', e.target.value)}
               />
             </Field>
-            <Field label="默认超时（timeout）" hint="如 30s / 5m">
+            <Field label={t('executor.timeoutLabel')} hint={t('executor.timeoutHint')}>
               <input
                 className={inputCls}
                 placeholder="30s"
@@ -251,13 +253,13 @@ export default function ExecutorForm({ executor, saving, error, onSave, onCancel
                 className="accent-indigo-500"
               />
               <label htmlFor="pty" className="text-white/60 text-xs">
-                启用伪终端（PTY）
+                {t('executor.pty')}
               </label>
             </div>
           </>
         )}
 
-        <Field label="工作目录（workdir）">
+        <Field label={t('executor.workdirLabel')}>
           <input
             className={inputCls}
             placeholder={type === 'local' ? '/tmp' : '/app'}
@@ -266,7 +268,7 @@ export default function ExecutorForm({ executor, saving, error, onSave, onCancel
           />
         </Field>
 
-        <Field label="环境变量（env）" hint="每行一条 KEY=VALUE，注入到所有经此执行器运行的节点">
+        <Field label={t('executor.envLabel')} hint={t('executor.envHint')}>
           <textarea
             className={inputCls + ' h-20 resize-y'}
             placeholder={'HTTP_PROXY=http://proxy:8080'}
@@ -283,10 +285,10 @@ export default function ExecutorForm({ executor, saving, error, onSave, onCancel
           onClick={handleSubmit}
           disabled={saving || (isCreate && form.name.trim() === '')}
           className="px-4 py-2 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500
-                     text-white text-sm font-medium hover:shadow-lg hover:shadow-indigo-500/30
+                     text-on-accent text-sm font-medium hover:shadow-lg hover:shadow-indigo-500/30
                      transition-all disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          {saving ? '保存中…' : isCreate ? '创建执行器' : '保存配置'}
+          {saving ? t('executor.saving') : isCreate ? t('executor.createExecutor') : t('executor.saveConfig')}
         </button>
         {isCreate && onCancelCreate && (
           <button
@@ -294,7 +296,7 @@ export default function ExecutorForm({ executor, saving, error, onSave, onCancel
             className="px-4 py-2 rounded-xl bg-white/5 border border-white/10
                        text-white/60 text-sm hover:bg-white/10 hover:text-white transition-all"
           >
-            取消
+            {t('common.cancel')}
           </button>
         )}
       </div>

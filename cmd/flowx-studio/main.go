@@ -44,6 +44,7 @@ type appServices struct {
 	auditSvc      *service.AuditService
 	backupSvc     *service.BackupService
 	executorSvc   *service.ExecutorService
+	sysCfgSvc     *service.SystemConfigService
 	assetStore    *assets.Store
 }
 
@@ -145,6 +146,8 @@ func newAppServices(cfg *config.Config) (*appServices, func(), error) {
 	}
 	nodeSvc := service.NewNodeService(database, bus)
 	nodeSvc.SetAssetStore(assetStore)
+	sysCfgSvc := service.NewSystemConfigService(database)
+	nodeSvc.SetSystemConfig(sysCfgSvc)
 	// P4：清理无引用的资产目录（删除节点遗留/版本变更/崩溃残留的临时目录）
 	if removed, err := nodeSvc.GCAssets(); err != nil {
 		log.Printf("asset GC failed: %v", err)
@@ -153,6 +156,7 @@ func newAppServices(cfg *config.Config) (*appServices, func(), error) {
 	}
 	nodeImportSvc := service.NewNodeImportService(nodeSvc)
 	workflowSvc := service.NewWorkflowService(database, rt, bus, nodeSvc)
+	workflowSvc.SetSystemConfig(sysCfgSvc)
 	auditSvc := service.NewAuditService(database)
 	nodeSvc.SetAudit(auditSvc)
 	workflowSvc.SetAudit(auditSvc)
@@ -176,6 +180,7 @@ func newAppServices(cfg *config.Config) (*appServices, func(), error) {
 		auditSvc:      auditSvc,
 		backupSvc:     backupSvc,
 		executorSvc:   executorSvc,
+		sysCfgSvc:     sysCfgSvc,
 		assetStore:    assetStore,
 	}, cleanup, nil
 }
@@ -226,8 +231,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	svcs.workflowSvc.StartEventBridge(ctx)
 
-	// 按保留天数自动清理历史日志（retention.log_days / retention.audit_days，0 表示不清理）
-	service.NewCleanupService(svcs.database, cfg.Retention.LogDays, cfg.Retention.AuditDays).Start(ctx)
+	// 按保留天数自动清理历史日志：执行日志读系统配置 log_retention_days（设置页可改），
+	// 审计日志读配置文件 retention.audit_days；0 表示不清理
+	service.NewCleanupService(svcs.database, svcs.sysCfgSvc, cfg.Retention.AuditDays).Start(ctx)
 
 	// 启动时自动备份（backup.on_startup，backup.keep 控制保留个数）
 	if cfg.Backup.OnStartup {
@@ -253,7 +259,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	handler.NewHealthHandler(svcs.database, cfg.Data.DBPath, version).RegisterRoutes(srv.Router())
 	// 节点资产拉取免认证（签名 URL 自校验，供 docker/k8s 执行器 curl 引导）
 	handler.NewAssetHandler(svcs.assetStore).RegisterRoutes(srv.Router())
-	configHandler := handler.NewConfigHandler(svcs.database)
+	configHandler := handler.NewConfigHandler(svcs.sysCfgSvc)
 	configHandler.SetAudit(svcs.auditSvc)
 	configHandler.RegisterRoutes(api)
 	handler.NewWorkflowHandler(svcs.workflowSvc).RegisterRoutes(api)

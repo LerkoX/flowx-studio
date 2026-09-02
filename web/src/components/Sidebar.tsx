@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Link, useLocation } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import {
   Box,
   Settings,
   Sparkles,
-  Menu,
+  ChevronRight,
   X,
   Cog,
 } from 'lucide-react'
@@ -13,13 +14,14 @@ import { useIsMobile } from '@/hooks/useMediaQuery'
 import { useAppStore } from '@/stores/appStore'
 
 const navItems = [
-  { path: '/', icon: Sparkles, label: '工作流' },
-  { path: '/nodes', icon: Box, label: '节点管理' },
-  { path: '/executors', icon: Settings, label: '执行器' },
-  { path: '/settings', icon: Cog, label: '设置' },
+  { path: '/', icon: Sparkles, labelKey: 'nav.workflows' },
+  { path: '/nodes', icon: Box, labelKey: 'nav.nodes' },
+  { path: '/executors', icon: Settings, labelKey: 'nav.executors' },
+  { path: '/settings', icon: Cog, labelKey: 'nav.settings' },
 ]
 
 export default function Sidebar() {
+  const { t } = useTranslation()
   const location = useLocation()
   const isMobile = useIsMobile()
   const { mobileSidebarOpen, setMobileSidebarOpen } = useAppStore()
@@ -29,17 +31,21 @@ export default function Sidebar() {
   if (isMobile) {
     return (
       <>
-        {/* 移动端顶部汉堡按钮 */}
-        <button
-          onClick={() => setMobileSidebarOpen(true)}
-          className="fixed top-3 left-3 z-50 w-10 h-10 rounded-xl
-                     bg-white/10 backdrop-blur-xl
-                     border border-white/10
+        {/* 移动端菜单拉手：左边缘垂直居中的贴边小方块，> 图标提示可拉出菜单。
+            抽屉展开时隐藏，避免与抽屉叠加 */}
+        {!mobileSidebarOpen && (
+          <button
+            onClick={() => setMobileSidebarOpen(true)}
+            className="fixed left-0 top-1/2 -translate-y-1/2 z-50 w-6 h-16
+                     bg-white/5 backdrop-blur-xl
+                     border border-white/10 border-l-0 rounded-r-lg
                      flex items-center justify-center
-                     text-white/70 hover:text-white transition-colors"
-        >
-          <Menu size={20} />
-        </button>
+                     text-white/40 hover:text-white/70 transition-colors"
+            aria-label="打开菜单"
+          >
+            <ChevronRight size={16} />
+          </button>
+        )}
 
         <AnimatePresence>
           {mobileSidebarOpen && (
@@ -58,7 +64,7 @@ export default function Sidebar() {
               <motion.aside
                 key="sidebar-drawer"
                 className="fixed left-0 top-0 h-full z-50
-                           bg-[#0f172a]/95 backdrop-blur-2xl
+                           bg-panel/95 backdrop-blur-2xl
                            border-r border-white/10
                            flex flex-col w-[220px]"
                 initial={{ x: '-100%' }}
@@ -70,7 +76,7 @@ export default function Sidebar() {
                 <div className="h-14 flex items-center justify-between px-4 border-b border-white/10 flex-shrink-0">
                   <div className="flex items-center">
                     <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-500
-                                    flex items-center justify-center text-white font-bold text-xs">
+                                    flex items-center justify-center text-on-accent font-bold text-xs">
                       FX
                     </div>
                     <span className="ml-2 text-white/90 font-semibold text-sm">FlowX</span>
@@ -112,7 +118,7 @@ export default function Sidebar() {
                           />
                         )}
                         <Icon size={20} />
-                        <span className="text-sm font-medium">{item.label}</span>
+                        <span className="text-sm font-medium">{t(item.labelKey)}</span>
                       </Link>
                     )
                   })}
@@ -140,7 +146,7 @@ export default function Sidebar() {
       {/* Logo */}
       <div className="h-14 flex items-center px-3 border-b border-white/10 flex-shrink-0">
         <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-500
-                        flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
+                        flex items-center justify-center text-on-accent font-bold text-xs flex-shrink-0">
           FX
         </div>
         {!collapsed && (
@@ -191,7 +197,7 @@ export default function Sidebar() {
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -10 }}
                 >
-                  {item.label}
+                  {t(item.labelKey)}
                 </motion.span>
               )}
             </Link>

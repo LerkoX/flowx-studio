@@ -22,6 +22,7 @@ type NodeService struct {
 	eventBus *event.Bus
 	audit    *AuditService
 	assets   *assets.Store
+	sysCfg   *SystemConfigService
 }
 
 // NewNodeService 创建节点服务
@@ -36,6 +37,11 @@ func NewNodeService(database *db.DB, bus *event.Bus) *NodeService {
 // SetAssetStore 注入节点资产存储（可选）；注入后节点文件内容外置到磁盘
 func (s *NodeService) SetAssetStore(store *assets.Store) {
 	s.assets = store
+}
+
+// SetSystemConfig 注入系统配置服务（可选）；用于默认节点超时
+func (s *NodeService) SetSystemConfig(cfg *SystemConfigService) {
+	s.sysCfg = cfg
 }
 
 // Assets 返回资产存储（未注入时为 nil）
@@ -358,7 +364,11 @@ func (s *NodeService) MockTest(id int64, parameters map[string]string, timeout i
 		}
 	}
 
+	// 未显式指定超时时使用系统配置 default_node_timeout（默认 30 秒）
 	d := 30 * time.Second
+	if s.sysCfg != nil {
+		d = time.Duration(s.sysCfg.GetInt("default_node_timeout", 30)) * time.Second
+	}
 	if timeout > 0 {
 		d = time.Duration(timeout) * time.Second
 	}

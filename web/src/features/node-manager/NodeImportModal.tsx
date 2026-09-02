@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, GitBranch, Folder, Plus, Loader2 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 interface NodeImportModalProps {
   isOpen: boolean
@@ -10,6 +11,7 @@ interface NodeImportModalProps {
 }
 
 export default function NodeImportModal({ isOpen, onClose, onAdd, isAdding }: NodeImportModalProps) {
+  const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<'git' | 'folder'>('git')
   const [url, setUrl] = useState('')
 
@@ -28,18 +30,18 @@ export default function NodeImportModal({ isOpen, onClose, onAdd, isAdding }: No
 
   const tabConfig = {
     git: {
-      label: 'Git 仓库',
+      label: t('node.importGitTab'),
       icon: GitBranch,
       placeholder: 'https://github.com/username/repo',
-      helper: '支持公开 Git 仓库，系统将自动克隆并解析 flowx.json',
-      inputLabel: 'Git 仓库地址',
+      helper: t('node.importGitHelper'),
+      inputLabel: t('node.importGitLabel'),
     },
     folder: {
-      label: '本地文件夹',
+      label: t('node.importFolderTab'),
       icon: Folder,
       placeholder: '/path/to/node-folder',
-      helper: '指定包含节点定义的本地文件夹路径',
-      inputLabel: '文件夹路径',
+      helper: t('node.importFolderHelper'),
+      inputLabel: t('node.importFolderLabel'),
     },
   }
 
@@ -66,12 +68,12 @@ export default function NodeImportModal({ isOpen, onClose, onAdd, isAdding }: No
             transition={{ type: 'spring', stiffness: 300, damping: 25 }}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
           >
-            <div className="w-full max-w-lg bg-[#0f172a]/95 backdrop-blur-2xl 
+            <div className="w-full max-w-lg bg-panel/95 backdrop-blur-2xl 
                             border border-white/10 rounded-2xl overflow-hidden pointer-events-auto"
             >
               {/* 头部 */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
-                <h2 className="text-white/90 font-semibold text-sm">添加节点</h2>
+                <h2 className="text-white/90 font-semibold text-sm">{t('node.addNode')}</h2>
                 <button
                   onClick={handleClose}
                   className="w-8 h-8 rounded-lg flex items-center justify-center
@@ -135,14 +137,14 @@ export default function NodeImportModal({ isOpen, onClose, onAdd, isAdding }: No
                              text-sm hover:bg-white/10 hover:text-white transition-all
                              disabled:opacity-50"
                   >
-                    取消
+                    {t('common.cancel')}
                   </button>
                   <button
                     type="submit"
                     disabled={isAdding || !url.trim()}
                     className="flex-1 px-4 py-2.5 rounded-xl 
                              bg-gradient-to-br from-indigo-500 to-purple-500
-                             text-white text-sm font-medium
+                             text-on-accent text-sm font-medium
                              hover:shadow-lg hover:shadow-indigo-500/30
                              transition-all disabled:opacity-50 
                              disabled:cursor-not-allowed flex items-center justify-center gap-2"
@@ -150,12 +152,12 @@ export default function NodeImportModal({ isOpen, onClose, onAdd, isAdding }: No
                     {isAdding ? (
                       <>
                         <Loader2 size={14} className="animate-spin" />
-                        处理中...
+                        {t('node.importing')}
                       </>
                     ) : (
                       <>
                         <Plus size={14} />
-                        添加
+                        {t('node.add')}
                       </>
                     )}
                   </button>

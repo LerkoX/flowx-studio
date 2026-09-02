@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Search, Plus, Tag, Code, Container, Filter, X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { useNodeStore } from '@/stores/nodeStore'
 import { importNode } from '@/services/nodeService'
+import { useConfirm } from '@/hooks/useConfirm'
+import { toast } from '@/stores/toastStore'
 import NodeCard from '@/features/node-manager/NodeCard'
 import NodeImportModal from '@/features/node-manager/NodeImportModal'
 import NodeDetailModal from '@/features/node-manager/NodeDetailModal'
@@ -10,6 +13,8 @@ import NodeTestPanel from '@/features/node-manager/NodeTestPanel'
 import type { NodeDefinition } from '@/types/node'
 
 export default function NodeManagerPage() {
+  const { t } = useTranslation()
+  const { confirm, dialog } = useConfirm()
   const {
     searchQuery,
     selectedTags,
@@ -61,10 +66,10 @@ export default function NodeManagerPage() {
         addNode(newNode as NodeDefinition)
         setShowImportModal(false)
       } else {
-        setAddError(response.message || '导入失败')
+        setAddError(response.message || t('node.importFailed'))
       }
     } catch (err) {
-      setAddError(err instanceof Error ? err.message : '导入失败')
+      setAddError(err instanceof Error ? err.message : t('node.importFailed'))
     } finally {
       setIsAdding(false)
     }
@@ -80,9 +85,19 @@ export default function NodeManagerPage() {
     setShowTestPanel(true)
   }
 
-  const handleDeleteNode = (nodeId: string) => {
-    if (confirm('确定要删除这个节点吗？')) {
-      deleteNode(nodeId)
+  const handleDeleteNode = async (nodeId: string) => {
+    const ok = await confirm({
+      title: t('node.deleteConfirmTitle'),
+      message: t('node.deleteConfirmMessage'),
+      confirmText: t('common.delete'),
+      danger: true,
+    })
+    if (!ok) return
+    try {
+      await deleteNode(nodeId)
+      toast.success(t('workflow.deleted'))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -109,19 +124,19 @@ export default function NodeManagerPage() {
       <div className="flex-shrink-0 px-6 py-4 border-b border-white/10">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-white/90 font-semibold text-lg">节点管理</h1>
-            <p className="text-white/40 text-xs mt-1">管理你的工作流节点</p>
+            <h1 className="text-white/90 font-semibold text-lg">{t('node.managerTitle')}</h1>
+            <p className="text-white/40 text-xs mt-1">{t('node.managerSubtitle')}</p>
           </div>
           <button
             onClick={() => setShowImportModal(true)}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl
                      bg-gradient-to-br from-indigo-500 to-purple-500
-                     text-white text-sm font-medium
+                     text-on-accent text-sm font-medium
                      hover:shadow-lg hover:shadow-indigo-500/30
                      transition-all"
           >
             <Plus size={16} />
-            添加节点
+            {t('node.addNode')}
           </button>
         </div>
 
@@ -134,7 +149,7 @@ export default function NodeManagerPage() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜索节点..."
+              placeholder={t('node.searchPlaceholder')}
               className="w-full pl-9 pr-4 py-2 rounded-xl bg-white/5 border border-white/10
                        text-white/90 text-sm placeholder:text-white/20
                        focus:outline-none focus:border-white/20 focus:bg-white/[0.07]
@@ -159,7 +174,7 @@ export default function NodeManagerPage() {
                   ? 'bg-white/10 text-white' 
                   : 'text-white/40 hover:text-white/60'}`}
             >
-              全部
+              {t('common.all')}
             </button>
             <button
               onClick={() => setSelectedNodeType('code')}
@@ -169,7 +184,7 @@ export default function NodeManagerPage() {
                   : 'text-white/40 hover:text-white/60'}`}
             >
               <Code size={12} />
-              代码
+              {t('node.typeCode')}
             </button>
             <button
               onClick={() => setSelectedNodeType('image')}
@@ -179,7 +194,7 @@ export default function NodeManagerPage() {
                   : 'text-white/40 hover:text-white/60'}`}
             >
               <Container size={12} />
-              镜像
+              {t('node.typeImage')}
             </button>
           </div>
 
@@ -192,9 +207,9 @@ export default function NodeManagerPage() {
                        text-xs text-white/80 focus:outline-none focus:border-white/20
                        cursor-pointer"
             >
-              <option value="" className="bg-[#1a1f3a]">所有语言</option>
+              <option value="" className="bg-panel">{t('node.allLanguages')}</option>
               {allLanguages.map((lang) => (
-                <option key={lang} value={lang} className="bg-[#1a1f3a]">
+                <option key={lang} value={lang} className="bg-panel">
                   {lang}
                 </option>
               ))}
@@ -209,7 +224,7 @@ export default function NodeManagerPage() {
                        px-3 py-2 rounded-lg hover:bg-white/5 transition-all"
             >
               <Filter size={12} />
-              清除筛选
+              {t('node.clearFilters')}
             </button>
           )}
         </div>
@@ -242,7 +257,7 @@ export default function NodeManagerPage() {
             <div className="text-center">
               <div className="text-4xl mb-4 opacity-30">📦</div>
               <p className="text-white/40 text-sm">
-                {hasFilters ? '没有符合条件的节点' : '暂无节点，点击右上角添加'}
+                {hasFilters ? t('node.noMatchingNodes') : t('node.emptyHint')}
               </p>
             </div>
           </div>
@@ -250,7 +265,7 @@ export default function NodeManagerPage() {
           <>
             <div className="flex items-center justify-between mb-4">
               <span className="text-white/30 text-xs">
-                共 {filteredNodes.length} 个节点
+                {t('node.totalCount', { count: filteredNodes.length })}
               </span>
             </div>
             <motion.div 
@@ -300,6 +315,7 @@ export default function NodeManagerPage() {
           setSelectedNode(null)
         }}
       />
+      {dialog}
     </div>
   )
 }

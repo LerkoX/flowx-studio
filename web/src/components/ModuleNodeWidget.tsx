@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Loader2 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import type { NodeWidgetHandle, NodeWidgetMount, NodeWidgetProps } from '@/types/nodeWidget'
 
 /**
@@ -96,6 +97,7 @@ interface ModuleNodeWidgetProps {
 }
 
 const ModuleNodeWidget = memo(({ url, width, height, widgetProps }: ModuleNodeWidgetProps) => {
+  const { t } = useTranslation()
   const containerRef = useRef<HTMLDivElement>(null)
   const handleRef = useRef<NodeWidgetHandle | null>(null)
   const propsRef = useRef(widgetProps)
@@ -161,7 +163,7 @@ const ModuleNodeWidget = memo(({ url, width, height, widgetProps }: ModuleNodeWi
       >
         <AlertTriangle size={12} className="text-rose-400 flex-shrink-0" />
         <span className="text-[10px] text-rose-300/80 truncate" title={error}>
-          组件加载失败: {error}
+          {t('canvas.widgetLoadFailed')}: {error}
         </span>
       </div>
     )

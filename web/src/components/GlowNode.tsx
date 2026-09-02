@@ -2,8 +2,11 @@ import { memo, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { useIsMobile, useViewportWidth } from '@/hooks/useMediaQuery'
 import { useExecutionStore } from '@/stores/executionStore'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { getCurrentTheme } from '@/utils/theme'
 import ModuleNodeWidget, { buildWidgetUrl } from '@/components/ModuleNodeWidget'
 import type { NodeWidgetExecution, NodeWidgetProps } from '@/types/nodeWidget'
 import type { NodeUIConfig } from '@/types/node'
@@ -55,6 +58,7 @@ const statusConfig = {
 }
 
 const GlowNode = memo(({ data, selected }: NodeProps) => {
+  const { t } = useTranslation()
   const nodeData = data as unknown as GlowNodeData
   const { name, description, status, language, accentColor = '#6366f1' } = nodeData
   const config = statusConfig[status]
@@ -80,6 +84,8 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
 
   // 仅带 UI 组件的节点订阅执行实例 metadata，避免无关重渲染
   const selectedExecution = useExecutionStore((s) => (hasUI ? s.selectedExecution : null))
+  // 订阅主题偏好，切换主题时重渲染 widget
+  useSettingsStore((s) => s.systemSettings.theme)
 
   const widgetProps = useMemo<NodeWidgetProps>(
     () => ({
@@ -89,8 +95,9 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
       inputs: nodeData.inputs || [],
       outputs: nodeData.outputs || {},
       execution: toWidgetExecution(selectedExecution),
-      theme: 'dark',
+      theme: getCurrentTheme(),
       locale: typeof navigator !== 'undefined' ? navigator.language : 'zh-CN',
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }),
     [nodeData.id, nodeData.nodeRef, status, nodeData.inputs, nodeData.outputs, selectedExecution]
   )
@@ -140,8 +147,8 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
           // 带内嵌 UI 组件时按组件尺寸撑开节点卡片（移动端有上限）
           ...(hasUI ? { width: widgetWidth + 26 } : {}),
           boxShadow: selected
-            ? `0 0 20px ${config.color}40, inset 0 1px 0 rgba(255,255,255,0.05)`
-            : 'inset 0 1px 0 rgba(255,255,255,0.05)',
+            ? `0 0 20px ${config.color}40, inset 0 1px 0 rgb(var(--color-ink) / 0.05)`
+            : 'inset 0 1px 0 rgb(var(--color-ink) / 0.05)',
         }}
       >
         {/* 顶部彩色条 */}
@@ -166,7 +173,7 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
                         ${isMobile ? 'w-8 h-8' : 'w-10 h-10'}`}
             style={{ background: `linear-gradient(135deg, ${accentColor}, ${accentColor}80)` }}
           >
-            <span className={`text-white ${isMobile ? 'text-base' : 'text-lg'}`}>
+            <span className={`text-on-accent ${isMobile ? 'text-base' : 'text-lg'}`}>
               {nodeData.icon || '◆'}
             </span>
           </div>
@@ -245,7 +252,7 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
                 className="mt-1.5 flex items-center gap-1 text-[10px] text-white/30 hover:text-white/60 transition-colors"
               >
                 {rawDataExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                {rawDataExpanded ? '收起数据' : '查看数据'}
+                {rawDataExpanded ? t('canvas.collapseData') : t('canvas.viewData')}
               </button>
             )}
           </div>
@@ -265,9 +272,9 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
                   className="w-full flex items-center justify-between text-[10px] text-white/40 hover:text-white/60 transition-colors"
                 >
                   <span>
-                    {hasInputs && `入参 ${nodeData.inputs!.length}`}
+                    {hasInputs && t('canvas.inputsCount', { count: nodeData.inputs!.length })}
                     {hasInputs && hasOutputs && ' | '}
-                    {hasOutputs && `返回 ${Object.keys(nodeData.outputs!).length}`}
+                    {hasOutputs && t('canvas.outputsCount', { count: Object.keys(nodeData.outputs!).length })}
                   </span>
                   {detailsExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                 </button>
@@ -277,7 +284,7 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
                   <div className="mt-2">
                     {hasInputs && (
                       <div className="mb-2">
-                        <div className="text-[10px] text-white/30 uppercase tracking-wider mb-1">入参</div>
+                        <div className="text-[10px] text-white/30 uppercase tracking-wider mb-1">{t('canvas.inputs')}</div>
                         <div className="flex flex-wrap gap-1">
                           {nodeData.inputs!.map((input) => (
                             <span
@@ -292,7 +299,7 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
                     )}
                     {hasOutputs && (
                       <div>
-                        <div className="text-[10px] text-white/30 uppercase tracking-wider mb-1">返回</div>
+                        <div className="text-[10px] text-white/30 uppercase tracking-wider mb-1">{t('canvas.outputs')}</div>
                         <div className="space-y-1">
                           {Object.entries(nodeData.outputs!).map(([key, value]) => (
                             <div key={key} className="flex items-center gap-2 text-[10px]">
@@ -311,7 +318,7 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
               <>
                 {hasInputs && (
                   <div className="mb-2">
-                    <div className="text-[10px] text-white/30 uppercase tracking-wider mb-1">入参</div>
+                    <div className="text-[10px] text-white/30 uppercase tracking-wider mb-1">{t('canvas.inputs')}</div>
                     <div className="flex flex-wrap gap-1">
                       {nodeData.inputs!.map((input) => (
                         <span
@@ -326,7 +333,7 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
                 )}
                 {hasOutputs && (
                   <div>
-                    <div className="text-[10px] text-white/30 uppercase tracking-wider mb-1">返回</div>
+                    <div className="text-[10px] text-white/30 uppercase tracking-wider mb-1">{t('canvas.outputs')}</div>
                     <div className="space-y-1">
                       {Object.entries(nodeData.outputs!).map(([key, value]) => (
                         <div key={key} className="flex items-center gap-2 text-[10px]">

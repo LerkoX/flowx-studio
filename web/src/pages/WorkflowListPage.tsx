@@ -2,14 +2,19 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import { Play, Plus, Trash2, GitBranch } from 'lucide-react'
-import { getWorkflows, runWorkflow } from '@/services/workflowService'
+import { useTranslation } from 'react-i18next'
+import { getWorkflows, runWorkflow, deleteWorkflow } from '@/services/workflowService'
 import { useWorkflowStore } from '@/stores/workflowStore'
+import { toast } from '@/stores/toastStore'
+import { useConfirm } from '@/hooks/useConfirm'
 import type { Workflow } from '@/types/workflow'
 
 export default function WorkflowListPage() {
+  const { t } = useTranslation()
   const [workflows, setWorkflows] = useState<Workflow[]>([])
   const [loading, setLoading] = useState(true)
   const { setCurrentWorkflow } = useWorkflowStore()
+  const { confirm, dialog } = useConfirm()
 
   const load = async () => {
     setLoading(true)
@@ -32,8 +37,28 @@ export default function WorkflowListPage() {
     e.stopPropagation()
     try {
       await runWorkflow(id)
+      toast.success(t('workflow.runStarted'))
     } catch (err) {
-      console.error('Failed to run workflow:', err)
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const handleDelete = async (wf: Workflow, e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const ok = await confirm({
+      title: t('workflow.deleteConfirmTitle'),
+      message: t('workflow.deleteConfirmMessage', { name: wf.name }),
+      confirmText: t('common.delete'),
+      danger: true,
+    })
+    if (!ok) return
+    try {
+      await deleteWorkflow(wf.id)
+      setWorkflows((prev) => prev.filter((w) => w.id !== wf.id))
+      toast.success(t('workflow.deleted'))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -46,8 +71,8 @@ export default function WorkflowListPage() {
       <div className="max-w-5xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-white/90">工作流列表</h1>
-            <p className="text-white/40 text-sm mt-1">实时查看流水线</p>
+            <h1 className="text-2xl font-bold text-white/90">{t('workflow.listTitle')}</h1>
+            <p className="text-white/40 text-sm mt-1">{t('workflow.listSubtitle')}</p>
           </div>
           <Link
             to="/canvas"
@@ -56,15 +81,15 @@ export default function WorkflowListPage() {
                        hover:bg-white/20 transition-colors border border-white/10"
           >
             <Plus size={18} />
-            新建
+            {t('common.create')}
           </Link>
         </div>
 
         {loading ? (
-          <div className="text-white/40 text-sm">加载中...</div>
+          <div className="text-white/40 text-sm">{t('common.loading')}</div>
         ) : workflows.length === 0 ? (
           <div className="glass-panel p-8 text-center text-white/40">
-            暂无工作流，请通过 MCP 客户端创建
+            {t('workflow.empty')}
           </div>
         ) : (
           <div className="grid gap-3">
@@ -82,7 +107,7 @@ export default function WorkflowListPage() {
                   </div>
                   <div>
                     <h3 className="text-white/90 font-medium">{wf.name}</h3>
-                    <p className="text-white/40 text-sm">{wf.description || '无描述'}</p>
+                    <p className="text-white/40 text-sm">{wf.description || t('workflow.noDescription')}</p>
                   </div>
                 </div>
 
@@ -91,14 +116,15 @@ export default function WorkflowListPage() {
                     onClick={(e) => handleRun(wf.id, e)}
                     className="p-2 rounded-lg text-white/60 hover:text-white hover:bg-white/10
                                transition-colors"
-                    title="运行"
+                    title={t('common.run')}
                   >
                     <Play size={18} />
                   </button>
                   <button
+                    onClick={(e) => handleDelete(wf, e)}
                     className="p-2 rounded-lg text-white/60 hover:text-red-400 hover:bg-white/10
                                transition-colors"
-                    title="删除"
+                    title={t('common.delete')}
                   >
                     <Trash2 size={18} />
                   </button>
@@ -108,6 +134,7 @@ export default function WorkflowListPage() {
           </div>
         )}
       </div>
+      {dialog}
     </motion.div>
   )
 }

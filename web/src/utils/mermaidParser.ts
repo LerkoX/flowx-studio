@@ -9,6 +9,8 @@ export interface ParsedNode {
 export interface ParsedEdge {
   source: string
   target: string
+  /** 转移条件标签（如 loop 回环条件），已剥离 {{ }} 模板符号 */
+  label?: string
 }
 
 export interface ParsedGraph {
@@ -84,7 +86,7 @@ async function parseStateDiagram(graph: string): Promise<ParsedGraph> {
   // stateDiagram 的 db 提供 getStates()/getRelations()
   const db = diagram.db as {
     getStates(): Map<string, { id: string; type?: string; descriptions?: string[] }>
-    getRelations(): Array<{ id1: string; id2: string }>
+    getRelations(): Array<{ id1: string; id2: string; title?: string }>
   }
 
   const states = db.getStates()
@@ -116,8 +118,16 @@ async function parseStateDiagram(graph: string): Promise<ParsedGraph> {
   let hasStartEdge = false
   let hasEndEdge = false
 
+  // mermaid 转移标签形如 "{{ iteration < 3 }}"，剥离模板符号后作为条件展示
+  const extractLabel = (title?: string): string | undefined => {
+    if (!title) return undefined
+    const text = title.replace(/^\{\{\s*/, '').replace(/\s*\}\}$/, '').trim()
+    return text || undefined
+  }
+
   for (const rel of relations) {
     const { id1, id2 } = rel
+    const label = extractLabel(rel.title)
     if (isStart(id1) && isStart(id2)) continue
     if (isEnd(id1) && isEnd(id2)) continue
 
@@ -125,7 +135,7 @@ async function parseStateDiagram(graph: string): Promise<ParsedGraph> {
       // [*] --> X  ⇒  __start__ --> X
       if (nodesMap.has(id2)) {
         hasStartEdge = true
-        edges.push({ source: '__start__', target: id2 })
+        edges.push({ source: '__start__', target: id2, label })
       }
       continue
     }
@@ -133,12 +143,12 @@ async function parseStateDiagram(graph: string): Promise<ParsedGraph> {
       // X --> [*]  ⇒  X --> __end__
       if (nodesMap.has(id1)) {
         hasEndEdge = true
-        edges.push({ source: id1, target: '__end__' })
+        edges.push({ source: id1, target: '__end__', label })
       }
       continue
     }
     if (nodesMap.has(id1) && nodesMap.has(id2)) {
-      edges.push({ source: id1, target: id2 })
+      edges.push({ source: id1, target: id2, label })
     }
   }
 
