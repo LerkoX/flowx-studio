@@ -145,6 +145,13 @@ func (a *Adapter) ContinueExecution(ctx context.Context, executionID int64) erro
 	return nil
 }
 
+// ExportExecutionConfig 导出执行实例当前的配置快照（图结构 + 节点定义 + 运行时状态）。
+// 用于续跑修改图后立即持久化新快照，避免“改完未跑”期间 DB 快照落后于实例实际图
+func (a *Adapter) ExportExecutionConfig(executionID int64) (string, error) {
+	id := fmt.Sprintf("exec-%d", executionID)
+	return a.runtime.ExportConfig(id)
+}
+
 // GetEvents 获取事件通道
 func (a *Adapter) GetEvents() <-chan ExecutionEvent {
 	return a.eventCh

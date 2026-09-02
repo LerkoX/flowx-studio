@@ -1,8 +1,10 @@
 import { useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronDown, Pencil, X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { useExecutionStore } from '@/stores/executionStore'
 import { selectExecutionAndSync } from './executionSelection'
+import i18n from '@/i18n'
 
 interface ExecutionContextBarProps {
   workflowId?: string
@@ -17,6 +19,7 @@ export default function ExecutionContextBar({
   open,
   onOpenChange,
 }: ExecutionContextBarProps) {
+  const { t } = useTranslation()
   const executions = useExecutionStore((s) => s.executions)
   const selectedExecutionId = useExecutionStore((s) => s.selectedExecutionId)
   const selectedExecution = useExecutionStore((s) => s.selectedExecution)
@@ -50,7 +53,7 @@ export default function ExecutionContextBar({
           onClick={() => onOpenChange(!open)}
           className="flex-1 flex items-center gap-2 min-w-0 px-3 py-2.5
                      rounded-lg hover:bg-white/5 transition-colors text-left"
-          title="选择历史执行"
+          title={t('canvas.selectExecution')}
         >
           {selectedExecutionId ? (
             <>
@@ -63,7 +66,7 @@ export default function ExecutionContextBar({
                 {current?.startedAt ? formatDate(current.startedAt) : ''}
               </span>
               {current?.status === 'running' ? (
-                <span className="text-[11px] text-cyan-400 shrink-0">执行中</span>
+                <span className="text-[11px] text-cyan-400 shrink-0">{t('canvas.executing')}</span>
               ) : current?.durationMs ? (
                 <span className="text-[11px] text-white/30 shrink-0">
                   {formatDuration(current.durationMs)}
@@ -73,9 +76,9 @@ export default function ExecutionContextBar({
           ) : (
             <>
               <Pencil size={13} className="text-white/40 shrink-0" />
-              <span className="text-xs text-white/60 shrink-0">编辑态</span>
+              <span className="text-xs text-white/60 shrink-0">{t('canvas.editingMode')}</span>
               <span className="text-[11px] text-white/30 truncate">
-                选择历史执行可回放
+                {t('canvas.selectExecutionHint')}
               </span>
             </>
           )}
@@ -92,7 +95,7 @@ export default function ExecutionContextBar({
             disabled={loadingSelected}
             className="p-1.5 rounded-md text-white/40 hover:text-white/80
                        hover:bg-white/10 transition-colors disabled:opacity-50"
-            title="返回编辑态"
+            title={t('canvas.exitPlayback')}
           >
             <X size={13} />
           </button>
@@ -108,17 +111,17 @@ export default function ExecutionContextBar({
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.15 }}
             className="absolute inset-x-0 top-full z-30 max-h-72 overflow-y-auto
-                       bg-[#141a33]/95 backdrop-blur-2xl border-b border-white/10
+                       bg-panel/95 backdrop-blur-2xl border-b border-white/10
                        shadow-xl shadow-black/40 p-2 space-y-1.5"
           >
             {loadingHistory && executions.length === 0 && (
-              <div className="text-center py-6 text-white/30 text-xs">加载中...</div>
+              <div className="text-center py-6 text-white/30 text-xs">{t('common.loading')}</div>
             )}
             {!loadingHistory && executions.length === 0 && (
               <div className="text-center py-6 text-white/30 text-xs">
-                暂无执行记录
+                {t('canvas.noExecutions')}
                 <br />
-                <span className="text-white/20">点击运行按钮开始执行</span>
+                <span className="text-white/20">{t('canvas.noExecutionsHint')}</span>
               </div>
             )}
             {executions.map((execution) => (
@@ -157,6 +160,7 @@ export default function ExecutionContextBar({
 }
 
 function StatusBadge({ status }: { status: string }) {
+  const normalized = status.toLowerCase()
   const colors: Record<string, string> = {
     success: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
     failed: 'bg-rose-500/15 text-rose-400 border-rose-500/20',
@@ -166,7 +170,7 @@ function StatusBadge({ status }: { status: string }) {
   }
   return (
     <span
-      className={`text-[10px] px-1.5 py-0.5 rounded border shrink-0 ${colors[status] || colors.pending}`}
+      className={`text-[10px] px-1.5 py-0.5 rounded border shrink-0 ${colors[normalized] || colors.pending}`}
     >
       {status}
     </span>
@@ -183,14 +187,14 @@ function StatusDot({ status }: { status: string }) {
   }
   return (
     <span
-      className={`w-2 h-2 rounded-full shrink-0 ${colors[status] || colors.pending}`}
+      className={`w-2 h-2 rounded-full shrink-0 ${colors[status.toLowerCase()] || colors.pending}`}
     />
   )
 }
 
 function formatDate(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date
-  return d.toLocaleString('zh-CN', {
+  return d.toLocaleString(i18n.language, {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',

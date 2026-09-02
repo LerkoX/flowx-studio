@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 	"path"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -198,6 +199,12 @@ func ExpandWorkflowConfig(configYAML string, lookup func(name string) (*model.No
 		if ref == "" {
 			continue
 		}
+		// 已物化节点（带 steps，如执行快照中的历史节点）保持原样、跳过重展开：
+		// 展开结果依赖执行器注册表/节点包版本等可变状态，重展开会改写
+		// executor/steps 字段，导致与快照比对失败（Executors 不可变/已执行节点不可改）
+		if len(nodeCfg.Steps) > 0 {
+			continue
+		}
 
 		node, err := lookup(ref)
 		if err != nil {
@@ -281,6 +288,9 @@ func resolveNodeExecutor(node *model.Node, executors map[string]core.ExecutorCon
 		// 默认执行器是 docker 时复用其实例（继承 host/registry 等配置）；否则匿名 docker
 		if resolve != nil {
 			if def, err := resolve("", true); err == nil && def != nil && def.Type == "docker" {
+				if name := findCompatibleExecutor(executors, def.Type, def.Config); name != "" {
+					return name, "docker", nil
+				}
 				executors[def.Name] = core.ExecutorConfig{
 					Type:        def.Type,
 					Description: def.Description,
@@ -299,6 +309,9 @@ func resolveNodeExecutor(node *model.Node, executors map[string]core.ExecutorCon
 		if err != nil {
 			return "", "", err
 		}
+		if name := findCompatibleExecutor(executors, def.Type, def.Config); name != "" {
+			return name, def.Type, nil
+		}
 		executors[def.Name] = core.ExecutorConfig{
 			Type:        def.Type,
 			Description: def.Description,
@@ -311,6 +324,36 @@ func resolveNodeExecutor(node *model.Node, executors map[string]core.ExecutorCon
 	name := node.Name + "-executor"
 	executors[name] = core.ExecutorConfig{Type: "local"}
 	return name, "local", nil
+}
+
+// findCompatibleExecutor 在 executors 中查找与目标类型/配置完全一致的已有条目。
+// 续跑修改快照时，新节点的默认执行器解析优先复用快照中已有的同型同配条目，
+// 避免往 Executors（不可变字段，仅允许新增）里写入冗余条目。
+// 返回空串表示无可复用条目。多个命中时按名称排序取第一个，保证确定性。
+func findCompatibleExecutor(executors map[string]core.ExecutorConfig, execType string, config map[string]interface{}) string {
+	names := make([]string, 0, len(executors))
+	for name := range executors {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		ex := executors[name]
+		if ex.Type != execType {
+			continue
+		}
+		if reflect.DeepEqual(normalizeConfigMap(ex.Config), normalizeConfigMap(config)) {
+			return name
+		}
+	}
+	return ""
+}
+
+// normalizeConfigMap 将空 map 归一化为 nil，保证 DeepEqual 稳定
+func normalizeConfigMap(m map[string]interface{}) map[string]interface{} {
+	if len(m) == 0 {
+		return nil
+	}
+	return m
 }
 
 func buildEnvMap(node *model.Node, pkg *model.NodePackage) map[string]string {

@@ -54,10 +54,47 @@ func NewExecutionCmd() *cobra.Command {
 	cmd.AddCommand(
 		newExecutionListCmd(),
 		newExecutionGetCmd(),
+		newExecutionYAMLCmd(),
 		newExecutionNodesCmd(),
 		newExecutionLogsCmd(),
 		newExecutionContinueCmd(),
 	)
+	return cmd
+}
+
+// newExecutionYAMLCmd 输出执行实例的运行时快照 YAML（剥离 runtime 状态段）。
+// 快照是该执行的独立图定义（与流水线模板解耦），可导出后修改、
+// 再通过 execution continue --file 提交以追加/修改未运行节点
+func newExecutionYAMLCmd() *cobra.Command {
+	var id int64
+	cmd := &cobra.Command{
+		Use:   "yaml",
+		Short: "Print the execution's runtime snapshot YAML (edit it and pass to execution continue --file)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if id <= 0 {
+				return fmt.Errorf("--id is required")
+			}
+			data, err := do(cmd.Context(), http.MethodGet,
+				"/executions/"+strconv.FormatInt(id, 10)+"/yaml", nil, nil)
+			if err != nil {
+				return fail("get execution yaml", err, false)
+			}
+			var resp struct {
+				YAML        string `json:"yaml"`
+				HasSnapshot bool   `json:"hasSnapshot"`
+			}
+			if err := json.Unmarshal(data, &resp); err != nil {
+				return fail("parse response", err, false)
+			}
+			if !resp.HasSnapshot {
+				return fail("get execution yaml", fmt.Errorf("execution %d has no runtime snapshot (创建于快照功能上线前)", id), false)
+			}
+			// 原样输出到 stdout，便于重定向：execution yaml --id 97 > snap.yaml
+			fmt.Print(resp.YAML)
+			return nil
+		},
+	}
+	cmd.Flags().Int64Var(&id, "id", 0, "execution ID (required)")
 	return cmd
 }
 

@@ -23,7 +23,8 @@ import { useIsMobile } from '@/hooks/useMediaQuery'
 import { parseWorkflowGraph, parseNodeRefs } from '@/utils/mermaidParser'
 import { useEventStream } from '@/services/eventService'
 import type { ExecutionLog, ExecutionStatus } from '@/types/execution'
-import { ArrowUpDown, ArrowLeftRight } from 'lucide-react'
+import { ArrowUpDown, ArrowLeftRight, Eye, PencilLine } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 const nodeTypes = { glowNode: GlowNode, terminalNode: TerminalNode }
 const edgeTypes = { gradientEdge: GradientEdge }
@@ -34,14 +35,35 @@ const statusMap: Record<string, string> = {
   failed: 'failed',
 }
 
+// 判断边是否处于活跃（高亮）状态：目标节点 running 时，只有「目标上一轮结束后
+// 又完成过一次」的源节点入边才亮——循环图中可区分正向边与回边的真实触发来源；
+// 无时间戳数据（打开历史执行/中途进入运行）时回退为「目标运行即亮」
+function isEdgeActive(
+  edge: Edge,
+  statuses: Record<string, string>,
+  completedAt: Record<string, number>,
+  prevCompletedAt: Record<string, number>,
+): boolean {
+  if (statuses[edge.target] !== 'running') return false
+  if (Object.keys(completedAt).length === 0) return true
+  const sourceAt = completedAt[edge.source]
+  if (!sourceAt) return false
+  return sourceAt > (prevCompletedAt[edge.target] ?? 0)
+}
+
 function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
+  const { t } = useTranslation()
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [direction, setDirection] = useState<'TB' | 'LR'>('TB')
+  // preview：只能平移画布；edit：可拖动节点、切换布局方向
+  const [mode, setMode] = useState<'preview' | 'edit'>('preview')
   const [, setSelectedNode] = useState<string | null>(null)
   const {
     currentWorkflow,
     nodeStatuses,
+    nodeCompletedAt,
+    nodePrevCompletedAt,
     nodeRuntimeData,
     updateNodeStatus,
     setNodeStatuses,
@@ -49,6 +71,16 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
     resetNodeRuntimeData,
   } = useWorkflowStore()
   const { nodes: nodeDefs, loadNodes } = useNodeStore()
+  const selectedExecutionId = useExecutionStore((s) => s.selectedExecutionId)
+  const selectedExecutionYaml = useExecutionStore((s) => s.selectedExecutionYaml)
+
+  // 画布图数据源：回放态（选中执行且有快照）用该执行的运行时快照渲染——
+  // 快照是该执行的独立图定义（续跑追加节点后与模板已解耦）；
+  // 编辑态或无快照的旧执行回退用流水线模板
+  const sourceYaml =
+    selectedExecutionId && selectedExecutionYaml
+      ? selectedExecutionYaml
+      : currentWorkflow?.yamlConfig
 
   // 节点包列表用于按 nodeRef 匹配 ui 配置；每次进入画布都刷新，
   // 保证节点重新导入（ui 尺寸/bundle 更新）后能拿到最新定义
@@ -59,14 +91,14 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
 
   // 解析 YAML Graph 并渲染工作流
   useEffect(() => {
-    if (!currentWorkflow?.yamlConfig) {
+    if (!sourceYaml) {
       setNodes([])
       setEdges([])
       return
     }
 
     // 节点实例 ID → 节点包名 → 节点包定义（含 ui 配置）
-    const nodeRefs = parseNodeRefs(currentWorkflow.yamlConfig)
+    const nodeRefs = parseNodeRefs(sourceYaml)
     const matchNodeDef = (instanceId: string) => {
       const ref = nodeRefs[instanceId]
       if (!ref) return undefined
@@ -77,7 +109,7 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
     // 触发了新一轮解析，旧的慢解析结果不得覆盖新结果（否则子 UI 首次不显示）
     let cancelled = false
 
-    parseWorkflowGraph(currentWorkflow.yamlConfig)
+    parseWorkflowGraph(sourceYaml)
       .then(({ nodes: parsedNodes, edges: parsedEdges }) => {
         const rawNodes: Node[] = parsedNodes.map((n) => {
           const nodeDef = n.id === '__start__' || n.id === '__end__' ? undefined : matchNodeDef(n.id)
@@ -109,7 +141,15 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
           targetHandle: 'target',
           type: 'gradientEdge',
           data: {
-            animated: nodeStatuses[e.source] === 'running',
+            animated: isEdgeActive(
+              { source: e.source, target: e.target } as Edge,
+              nodeStatuses,
+              nodeCompletedAt,
+              nodePrevCompletedAt,
+            ),
+            traversed:
+              nodeStatuses[e.source] === 'success' && nodeStatuses[e.target] === 'success',
+            label: e.label,
           },
         }))
 
@@ -128,7 +168,7 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [currentWorkflow, direction, nodeDefs, setNodes, setEdges])
+  }, [sourceYaml, direction, nodeDefs, setNodes, setEdges])
 
   // 按实测尺寸重排：首帧布局只能按估算尺寸占位，组件挂载/详情展开后节点实际
   // 尺寸会变化（React Flow 自动测量到 node.measured），此处检测到变化后重跑 dagre，
@@ -171,12 +211,14 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
         ...edge,
         data: {
           ...edge.data,
-          animated: nodeStatuses[edge.source] === 'running',
+          animated: isEdgeActive(edge, nodeStatuses, nodeCompletedAt, nodePrevCompletedAt),
+          traversed:
+            nodeStatuses[edge.source] === 'success' && nodeStatuses[edge.target] === 'success',
           status: nodeStatuses[edge.target] === 'failed' ? 'failed' : 'normal',
         },
       }))
     )
-  }, [nodeStatuses, setNodes, setEdges])
+  }, [nodeStatuses, nodeCompletedAt, nodePrevCompletedAt, setNodes, setEdges])
 
   // 同步节点运行时数据（入参和返回）
   useEffect(() => {
@@ -310,6 +352,9 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
           params: payload.params || {},
           metadata: payload.metadata || {},
         })
+        // 续跑（continue）不产生 execution.completed 事件，此处兜底结束运行态；
+        // 普通运行该调用幂等（随后的 execution.completed 会重复设置，无副作用）
+        executionStore.stopExecution()
       }
       return
     }
@@ -347,7 +392,7 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
         fitViewOptions={{ padding: isMobile ? 0.1 : 0.2 }}
         minZoom={0.1}
         maxZoom={2}
-        nodesDraggable={true}
+        nodesDraggable={mode === 'edit'}
         nodesConnectable={false}
         elementsSelectable={true}
         panOnScroll={true}
@@ -357,7 +402,7 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
       >
         {/* 星空点阵背景 */}
         <Background
-          color="rgba(255,255,255,0.03)"
+          color="var(--canvas-dots)"
           gap={isMobile ? 16 : 24}
           size={1}
           style={{ background: 'transparent' }}
@@ -369,7 +414,7 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
             className="!bg-white/5 !border-white/10 !backdrop-blur-xl !rounded-xl"
             style={{
               // @ts-expect-error React Flow custom style
-              button: { background: 'transparent', color: 'rgba(255,255,255,0.6)', border: 'none' },
+              button: { background: 'transparent', color: 'rgb(var(--color-ink) / 0.6)', border: 'none' },
             }}
           />
         )}
@@ -388,21 +433,46 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
               }
               return colors[node.data?.status as string] || '#94a3b8'
             }}
-            maskColor="rgba(10, 14, 39, 0.7)"
+            maskColor="var(--minimap-mask)"
           />
         )}
 
-        {/* 状态面板（含运行按钮、流水线名、方向切换） */}
+        {/* 状态胶囊：运行按钮 + 流水线名 + 方向切换合并为一条胶囊工具条 */}
         <Panel position="top-right" className={`${isMobile ? 'm-2' : 'm-4'}`}>
-          <div className="flex items-center gap-2">
+          <div className="glass-panel !rounded-full flex items-center gap-0.5 p-1">
             {action}
-            <div className={`glass-panel px-3 py-1.5 text-white/60 ${isMobile ? 'text-[10px]' : 'text-xs'}`}>
-              {currentWorkflow?.name || '未选择工作流'}
+            <button
+              onClick={() => setMode((m) => (m === 'preview' ? 'edit' : 'preview'))}
+              className={`p-1.5 rounded-full flex-shrink-0 transition-colors ${
+                mode === 'edit'
+                  ? 'text-cyan-300 bg-cyan-400/15 hover:bg-cyan-400/25'
+                  : 'text-white/60 hover:text-white/80 hover:bg-white/10'
+              }`}
+              title={mode === 'preview' ? t('canvas.previewMode') : t('canvas.editMode')}
+            >
+              {mode === 'preview' ? (
+                <Eye className={isMobile ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
+              ) : (
+                <PencilLine className={isMobile ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
+              )}
+            </button>
+            <div
+              className={`text-white/60 truncate px-2 ${
+                isMobile ? 'text-[10px] max-w-[32vw]' : 'text-xs max-w-[200px]'
+              }`}
+            >
+              {currentWorkflow?.name || t('canvas.noWorkflowSelected')}
             </div>
+            <div className="w-px self-stretch my-1 bg-white/10 flex-shrink-0" />
             <button
               onClick={() => setDirection((d) => (d === 'TB' ? 'LR' : 'TB'))}
-              className="glass-panel p-1.5 rounded-lg text-white/60 hover:text-white/80 hover:bg-white/10 transition-colors"
-              title={direction === 'TB' ? '切换为横向布局' : '切换为竖向布局'}
+              disabled={mode !== 'edit'}
+              className={`p-1.5 rounded-full flex-shrink-0 transition-colors ${
+                mode !== 'edit'
+                  ? 'text-white/25 cursor-not-allowed'
+                  : 'text-white/60 hover:text-white/80 hover:bg-white/10'
+              }`}
+              title={direction === 'TB' ? t('canvas.switchToHorizontal') : t('canvas.switchToVertical')}
             >
               {direction === 'TB' ? (
                 <ArrowLeftRight className={isMobile ? 'w-3.5 h-3.5' : 'w-4 h-4'} />

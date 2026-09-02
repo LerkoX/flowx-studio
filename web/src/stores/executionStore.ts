@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { getExecutions, getExecution, getExecutionNodes, getExecutionLogs } from '@/services/workflowService'
+import { getExecutions, getExecution, getExecutionYaml, getExecutionNodes, getExecutionLogs } from '@/services/workflowService'
 import type { ExecutionStatus, ExecutionNode, ExecutionLog } from '@/types/execution'
 
 export type LogLevel = 'INFO' | 'WARN' | 'ERROR' | 'DEBUG' | 'FATAL'
@@ -17,6 +17,9 @@ interface ExecutionState {
   executions: ExecutionStatus[]
   selectedExecutionId: string | null
   selectedExecution: ExecutionStatus | null
+  // 选中执行的运行时快照 YAML（该执行的独立图定义，与流水线模板解耦）；
+  // null 表示无快照或未加载，画布回退用模板渲染
+  selectedExecutionYaml: string | null
   executionNodes: ExecutionNode[]
   executionLog: ExecutionLog[]
   logsTotal: number
@@ -34,6 +37,8 @@ interface ExecutionState {
   loadOlderLogs: () => Promise<void>
   startExecution: (id: string) => void
   stopExecution: () => void
+  // 续跑选中执行：仅标记运行中（保留已执行节点状态与历史日志，增量追加）
+  beginContinue: (id: string) => void
   updateExecutionStatus: (executionId: string, status: ExecutionStatus['status']) => void
   updateExecutionMetadata: (executionId: string, metadata: Record<string, unknown>) => void
   setExecutionNodes: (nodes: ExecutionNode[]) => void
@@ -55,6 +60,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   executions: [],
   selectedExecutionId: null,
   selectedExecution: null,
+  selectedExecutionYaml: null,
   executionNodes: [],
   executionLog: [],
   logsTotal: 0,
@@ -89,7 +95,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   },
 
   selectExecution: async (id) => {
-    set({ selectedExecutionId: id, selectedExecution: null, loadingSelected: true })
+    set({ selectedExecutionId: id, selectedExecution: null, selectedExecutionYaml: null, loadingSelected: true })
     if (!id) {
       set({ executionNodes: [], executionLog: [], loadingSelected: false })
       return
@@ -98,13 +104,18 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
     // 异步响应返回时会覆盖已到达的实时日志（竞态），故跳过日志重载
     const isLiveExecution = get().isExecuting && get().runningExecutionId === id
     try {
-      const [execResp] = await Promise.all([
+      const [execResp, yamlResp] = await Promise.all([
         getExecution(id),
+        // 快照获取失败（旧执行无快照/网络问题）不阻塞回放，画布回退模板渲染
+        getExecutionYaml(id).catch(() => null),
         get().loadExecutionNodes(id),
         isLiveExecution ? Promise.resolve() : get().loadLatestLogs(id),
       ])
       if (execResp.code === 200 && execResp.data) {
         set({ selectedExecution: normalizeExecution(execResp.data) })
+      }
+      if (yamlResp?.code === 200 && yamlResp.data?.hasSnapshot) {
+        set({ selectedExecutionYaml: yamlResp.data.yaml })
       }
     } catch (error) {
       console.error('Failed to select execution', error)
@@ -190,6 +201,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
     }),
 
   stopExecution: () => set({ isExecuting: false, runningExecutionId: null }),
+
+  beginContinue: (id) => set({ isExecuting: true, runningExecutionId: id }),
 
   updateExecutionStatus: (executionId, status) => {
     set((state) => {

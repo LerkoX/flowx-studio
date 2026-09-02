@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -44,6 +45,7 @@ func (h *WorkflowHandler) RegisterRoutes(r *gin.RouterGroup) {
 		executions.GET("/:id/logs", h.GetExecutionLogs)
 		executions.GET("/:id/logs/export", h.ExportExecutionLogs)
 		executions.GET("/:id/nodes", h.GetExecutionNodes)
+		executions.GET("/:id/yaml", h.GetExecutionYAML)
 		executions.POST("/:id/continue", h.ContinueExecution)
 	}
 }
@@ -157,6 +159,10 @@ func (h *WorkflowHandler) Run(c *gin.Context) {
 			Error(c, http.StatusNotFound, err.Error())
 			return
 		}
+		if errors.Is(err, service.ErrTooManyConcurrentExecutions) {
+			Error(c, http.StatusConflict, err.Error())
+			return
+		}
 		Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -249,6 +255,25 @@ func (h *WorkflowHandler) ContinueExecution(c *gin.Context) {
 	}
 
 	Success(c, gin.H{"executionId": id, "status": "running"})
+}
+
+// GetExecutionYAML 获取执行实例的运行时快照 YAML（剥离 runtime 状态段）
+// GET /executions/:id/yaml → {"yaml": "...", "hasSnapshot": true}
+// 无快照的旧执行返回 hasSnapshot=false，前端回退用流水线模板渲染
+func (h *WorkflowHandler) GetExecutionYAML(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		Error(c, http.StatusBadRequest, "invalid execution id")
+		return
+	}
+
+	yamlContent, err := h.service.GetExecutionYAML(id)
+	if err != nil {
+		Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	Success(c, gin.H{"yaml": yamlContent, "hasSnapshot": yamlContent != ""})
 }
 
 // GetExecutionLogs 获取执行日志

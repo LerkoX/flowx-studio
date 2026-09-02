@@ -83,6 +83,21 @@ export async function runWorkflow(
 }
 
 /**
+ * 续跑已结束的执行实例
+ * POST /api/v1/executions/:id/continue
+ * 提供 yaml 时先更新执行实例的图（追加/修改未运行节点），随后增量续跑
+ */
+export async function continueExecution(
+  executionId: string,
+  yaml?: string
+): Promise<ApiResponse<{ executionId: number; status: string }>> {
+  const response = await apiClient.post(`/api/v1/executions/${executionId}/continue`,
+    yaml ? { yaml } : {}
+  )
+  return response.data
+}
+
+/**
  * 获取执行历史
  * GET /api/v1/executions
  */
@@ -102,6 +117,19 @@ export async function getExecutions(params?: {
  */
 export async function getExecution(executionId: string): Promise<ApiResponse<ExecutionStatus>> {
   const response = await apiClient.get(`/api/v1/executions/${executionId}`)
+  return response.data
+}
+
+/**
+ * 获取执行实例的运行时快照 YAML（已剥离 runtime 状态段）。
+ * 快照是该执行的独立图定义（与流水线模板解耦），回放态画布按它渲染。
+ * hasSnapshot=false 表示快照功能上线前的旧执行，前端回退模板渲染。
+ * GET /api/v1/executions/:id/yaml
+ */
+export async function getExecutionYaml(
+  executionId: string
+): Promise<ApiResponse<{ yaml: string; hasSnapshot: boolean }>> {
+  const response = await apiClient.get(`/api/v1/executions/${executionId}/yaml`)
   return response.data
 }
 

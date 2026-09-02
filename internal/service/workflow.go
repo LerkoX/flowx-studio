@@ -27,6 +27,7 @@ type WorkflowService struct {
 	nodeSvc   *NodeService
 	audit     *AuditService
 	executors *ExecutorService
+	sysCfg    *SystemConfigService
 	logRing   *LogRingBuffer
 	metaMu    sync.Mutex
 	metaCache map[int64]map[string]interface{}
@@ -72,6 +73,11 @@ func (s *WorkflowService) SetAudit(a *AuditService) {
 // executor.ref 引用注册实例与全局默认执行器
 func (s *WorkflowService) SetExecutors(e *ExecutorService) {
 	s.executors = e
+}
+
+// SetSystemConfig 注入系统配置服务（可选）；用于最大并发执行数限制
+func (s *WorkflowService) SetSystemConfig(cfg *SystemConfigService) {
+	s.sysCfg = cfg
 }
 
 // executorResolver 供 ExpandWorkflowConfig 解析执行器实例；
@@ -221,6 +227,9 @@ func (s *WorkflowService) Delete(id int64) error {
 	return nil
 }
 
+// ErrTooManyConcurrentExecutions 达到系统配置 max_concurrent_executions 上限
+var ErrTooManyConcurrentExecutions = fmt.Errorf("too many concurrent executions")
+
 // Run 执行工作流
 func (s *WorkflowService) Run(id int64, params map[string]interface{}, dryRun bool) (int64, string, error) {
 	wf, err := s.Get(id)
@@ -230,6 +239,18 @@ func (s *WorkflowService) Run(id int64, params map[string]interface{}, dryRun bo
 
 	if err := s.validator.ValidateWorkflow(wf); err != nil {
 		return 0, "", fmt.Errorf("workflow YAML invalid: %w", err)
+	}
+
+	// 并发执行数限制：running 状态的执行达到上限时直接拒绝（HTTP 409）
+	if s.sysCfg != nil {
+		maxConcurrent := s.sysCfg.GetInt("max_concurrent_executions", 5)
+		var running int
+		if err := s.db.Get(&running, "SELECT COUNT(*) FROM executions WHERE status = 'running'"); err != nil {
+			return 0, "", fmt.Errorf("failed to count running executions: %w", err)
+		}
+		if running >= maxConcurrent {
+			return 0, "", fmt.Errorf("%w (limit %d)", ErrTooManyConcurrentExecutions, maxConcurrent)
+		}
 	}
 
 	result, err := s.db.Exec(`
@@ -275,15 +296,9 @@ func (s *WorkflowService) ContinueExecution(execID int64, yamlContent string) er
 	}
 
 	if yamlContent != "" {
-		// 校验器要求 model.Workflow.Name 非空；续跑的 YAML Name 必须与执行实例
-		// 原配置一致（flowx UpdateConfig 不可变字段校验），此处取流水线名称兜底
-		wf := &model.Workflow{YAMLConfig: yamlContent}
-		if src, err := s.Get(exec.WorkflowID); err == nil {
-			wf.Name = src.Name
-		}
-		if err := s.validator.ValidateWorkflow(wf); err != nil {
-			return fmt.Errorf("workflow YAML invalid: %w", err)
-		}
+		// 提交的 YAML 视为「快照的修改版」：已物化的旧节点（带 steps）被展开器
+		// 原样跳过，仅新节点（nodeRef 形式、无 steps）展开。展开结果依赖执行器
+		// 注册表等可变状态，旧节点不重展开是保证与快照比对一致的关键
 		if s.nodeSvc != nil {
 			expanded, err := runtime.ExpandWorkflowConfig(yamlContent, s.expandLookup, s.executorResolver())
 			if err != nil {
@@ -291,8 +306,21 @@ func (s *WorkflowService) ContinueExecution(execID int64, yamlContent string) er
 			}
 			yamlContent = expanded
 		}
+		// 校验放在展开之后：新节点的 executor 由展开器填充，物化旧节点自带 executor
+		wf := &model.Workflow{YAMLConfig: yamlContent}
+		if src, err := s.Get(exec.WorkflowID); err == nil {
+			wf.Name = src.Name
+		}
+		if err := s.validator.ValidateWorkflow(wf); err != nil {
+			return fmt.Errorf("workflow YAML invalid: %w", err)
+		}
 		if err := s.runtime.UpdateExecutionConfig(context.Background(), execID, yamlContent); err != nil {
 			return err
+		}
+		// 图更新成功后立即持久化新快照：快照是执行实例的单一事实来源，
+		// “改完未跑/运行中途”期间前端渲染与再次续跑都应看到新图
+		if snapshot, err := s.runtime.ExportExecutionConfig(execID); err == nil && snapshot != "" {
+			s.saveRuntimeSnapshot(execID, snapshot)
 		}
 	}
 
@@ -303,6 +331,20 @@ func (s *WorkflowService) ContinueExecution(execID int64, yamlContent string) er
 	s.auditRecord("continue_execution", fmt.Sprintf("%d", execID),
 		fmt.Sprintf("workflow=%d yaml_updated=%v", exec.WorkflowID, yamlContent != ""))
 	return nil
+}
+
+// GetExecutionYAML 返回执行实例的运行时快照 YAML（已剥离各节点 runtime 状态段）。
+// 快照是执行实例的单一事实来源：前端回放态按它渲染图结构与 nodeRef，
+// 而非流水线模板。无快照（快照功能上线前的旧执行）时返回空串。
+func (s *WorkflowService) GetExecutionYAML(execID int64) (string, error) {
+	exec, err := s.GetExecution(execID)
+	if err != nil {
+		return "", err
+	}
+	if exec.RuntimeYAML == nil || *exec.RuntimeYAML == "" {
+		return "", nil
+	}
+	return runtime.StripRuntimeSections(*exec.RuntimeYAML), nil
 }
 
 // executionMetadataValues 从执行记录的 metadata_json 中提取历史节点输出（扁平 NodeId.key 键值）
@@ -769,7 +811,9 @@ func (s *WorkflowService) persistRuntimeEvent(evt runtime.ExecutionEvent) {
 			`, status, completed, duration, evt.ExecutionID, evt.NodeID)
 		}
 	case "execution_complete":
-		status := evt.Status
+		// dag 库返回大写状态（SUCCESS/FAILED/CANCELLED），入库前统一归一化为小写，
+		// 与轮询收尾路径（runWorkflowAsync）及前端状态映射保持一致
+		status := strings.ToLower(evt.Status)
 		if status == "" {
 			status = "success"
 		}

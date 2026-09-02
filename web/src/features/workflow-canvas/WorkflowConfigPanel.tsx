@@ -1,10 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Save, RotateCcw, FileJson, AlertCircle } from 'lucide-react'
+import { Save, RotateCcw, FileJson, AlertCircle, Zap } from 'lucide-react'
+import yaml from 'js-yaml'
+import { useTranslation } from 'react-i18next'
 import GlassPanel from '@/components/GlassPanel'
+import YamlViewer from '@/components/YamlViewer'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { useExecutionStore } from '@/stores/executionStore'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { toast } from '@/stores/toastStore'
 import { updateWorkflow } from '@/services/workflowService'
+import i18n from '@/i18n'
 import type { PipelineParam, Workflow } from '@/types/workflow'
 import type { ExecutionStatus } from '@/types/execution'
 
@@ -13,6 +19,7 @@ interface WorkflowConfigPanelProps {
 }
 
 export default function WorkflowConfigPanel({ view }: WorkflowConfigPanelProps) {
+  const { t } = useTranslation()
   const currentWorkflow = useWorkflowStore((s) => s.currentWorkflow)
   const params = useWorkflowStore((s) => s.params)
   const syncParamsFromYAML = useWorkflowStore((s) => s.syncParamsFromYAML)
@@ -20,6 +27,8 @@ export default function WorkflowConfigPanel({ view }: WorkflowConfigPanelProps) 
 
   const [editingValues, setEditingValues] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
+  const autoSave = useSettingsStore((s) => s.systemSettings.autoSave)
+  const autoSaveInterval = useSettingsStore((s) => s.systemSettings.autoSaveInterval)
 
   useEffect(() => {
     if (currentWorkflow?.yamlConfig) {
@@ -65,10 +74,28 @@ export default function WorkflowConfigPanel({ view }: WorkflowConfigPanelProps) 
           status: latest.status,
         })
       }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
     } finally {
       setSaving(false)
     }
   }
+
+  // 自动保存（系统偏好 autoSave/autoSaveInterval）：参数编辑防抖后触发持久化，
+  // 仅参数 tab 生效；dirty 依据是编辑值与 store 当前值的差异
+  const dirty = Object.entries(editingValues).some(
+    ([key, value]) => params[key] && value !== String(params[key].value)
+  )
+  const dirtyRef = useRef(dirty)
+  dirtyRef.current = dirty
+  useEffect(() => {
+    if (!autoSave || view !== 'params' || !dirty) return
+    const timer = setTimeout(() => {
+      if (dirtyRef.current) handleSave()
+    }, Math.max(5, autoSaveInterval) * 1000)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingValues, autoSave, autoSaveInterval, view])
 
   const handleReset = () => {
     const initial: Record<string, string> = {}
@@ -85,11 +112,7 @@ export default function WorkflowConfigPanel({ view }: WorkflowConfigPanelProps) 
         animate={{ opacity: 1 }}
         transition={{ duration: 0.2 }}
       >
-        <GlassPanel className="p-4">
-          <pre className="text-xs text-white/70 font-mono whitespace-pre-wrap overflow-auto">
-            {currentWorkflow?.yamlConfig || defaultYAML}
-          </pre>
-        </GlassPanel>
+        <YamlTabView yamlConfig={currentWorkflow?.yamlConfig} />
       </motion.div>
     )
   }
@@ -115,7 +138,7 @@ export default function WorkflowConfigPanel({ view }: WorkflowConfigPanelProps) 
       className="space-y-4"
     >
       <div className="flex items-center justify-between">
-        <h3 className="text-white/90 font-semibold text-sm">流水线参数</h3>
+        <h3 className="text-white/90 font-semibold text-sm">{t('canvas.pipelineParams')}</h3>
         <div className="flex gap-2">
           <button
             onClick={handleReset}
@@ -124,7 +147,7 @@ export default function WorkflowConfigPanel({ view }: WorkflowConfigPanelProps) 
                        transition-colors"
           >
             <RotateCcw className="w-3 h-3" />
-            重置
+            {t('common.reset')}
           </button>
           <button
             onClick={handleSave}
@@ -134,7 +157,7 @@ export default function WorkflowConfigPanel({ view }: WorkflowConfigPanelProps) 
                        border border-indigo-500/30 transition-colors disabled:opacity-50"
           >
             <Save className="w-3 h-3" />
-            {saving ? '保存中...' : '保存'}
+            {saving ? t('executor.saving') : t('common.save')}
           </button>
         </div>
       </div>
@@ -142,10 +165,10 @@ export default function WorkflowConfigPanel({ view }: WorkflowConfigPanelProps) 
       {Object.keys(params).length === 0 ? (
         <GlassPanel className="p-4">
           <div className="text-white/40 text-sm text-center py-8">
-            当前流水线没有定义参数
+            {t('canvas.noParams')}
             <br />
             <span className="text-xs text-white/20 mt-1 block">
-              在 YAML 配置中添加 Param 字段
+              {t('canvas.noParamsHint')}
             </span>
           </div>
         </GlassPanel>
@@ -174,6 +197,7 @@ function ParamField({
   editingValue: string
   onChange: (value: string) => void
 }) {
+  const { t } = useTranslation()
   const isModified = editingValue !== String(param.originalValue)
   const isCurrentValueDifferent = editingValue !== String(param.value)
 
@@ -187,12 +211,12 @@ function ParamField({
             </span>
             {isModified && (
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20">
-                已修改
+                {t('canvas.modified')}
               </span>
             )}
             {isCurrentValueDifferent && !isModified && (
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-400 border border-cyan-500/20">
-                编辑中
+                {t('canvas.editing')}
               </span>
             )}
           </div>
@@ -207,14 +231,14 @@ function ParamField({
                        text-white/80 text-sm font-mono
                        focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.07]
                        transition-colors placeholder:text-white/20"
-            placeholder={`当前值: ${String(param.originalValue)}`}
+            placeholder={t('canvas.currentValue', { value: String(param.originalValue) })}
           />
           <div className="flex items-center gap-2 mt-1.5">
             <span className="text-[10px] text-white/20">
-              类型: {typeof param.value}
+              {t('canvas.typeLabel')}: {typeof param.value}
             </span>
             <span className="text-[10px] text-white/20">
-              原始值: {String(param.originalValue)}
+              {t('canvas.originalValue')}: {String(param.originalValue)}
             </span>
           </div>
         </div>
@@ -245,7 +269,7 @@ function MetadataRow({ label, value }: { label: string; value?: string }) {
 
 function formatDate(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date
-  return d.toLocaleString('zh-CN', {
+  return d.toLocaleString(i18n.language, {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -268,6 +292,7 @@ function MetadataView({ currentWorkflow }: { currentWorkflow: Workflow | null })
 }
 
 function RuntimeMetadataPanel({ execution }: { execution: ExecutionStatus }) {
+  const { t } = useTranslation()
   const metadata = (execution.metadata || {}) as Record<string, unknown>
   const params = (metadata.params || {}) as Record<string, unknown>
   const runtime = (metadata.metadata || {}) as Record<string, unknown>
@@ -278,21 +303,21 @@ function RuntimeMetadataPanel({ execution }: { execution: ExecutionStatus }) {
     <div className="space-y-3">
       <GlassPanel className="p-4 space-y-2">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-xs text-white/40">当前执行</span>
+          <span className="text-xs text-white/40">{t('canvas.currentExecution')}</span>
           <StatusBadge status={status} />
         </div>
-        <MetadataRow label="执行 ID" value={`#${execution.id}`} />
-        <MetadataRow label="触发方式" value={execution.trigger || (metadata.trigger as string)} />
-        <MetadataRow label="开始时间" value={execution.startedAt ? formatDate(execution.startedAt) : '-'} />
-        <MetadataRow label="结束时间" value={execution.completedAt ? formatDate(execution.completedAt) : '-'} />
-        <MetadataRow label="耗时" value={execution.durationMs ? formatDuration(execution.durationMs) : '-'} />
+        <MetadataRow label={t('canvas.executionId')} value={`#${execution.id}`} />
+        <MetadataRow label={t('canvas.trigger')} value={execution.trigger || (metadata.trigger as string)} />
+        <MetadataRow label={t('canvas.startedAt')} value={execution.startedAt ? formatDate(execution.startedAt) : '-'} />
+        <MetadataRow label={t('canvas.completedAt')} value={execution.completedAt ? formatDate(execution.completedAt) : '-'} />
+        <MetadataRow label={t('canvas.duration')} value={execution.durationMs ? formatDuration(execution.durationMs) : '-'} />
       </GlassPanel>
 
       {error && (
         <GlassPanel className="p-4 border-rose-500/20">
           <div className="flex items-center gap-2 text-rose-400 text-xs font-medium mb-1">
             <AlertCircle className="w-3.5 h-3.5" />
-            错误信息
+            {t('canvas.errorInfo')}
           </div>
           <div className="text-xs text-rose-300/80 break-all font-mono">{error}</div>
         </GlassPanel>
@@ -301,10 +326,10 @@ function RuntimeMetadataPanel({ execution }: { execution: ExecutionStatus }) {
       <GlassPanel className="p-4">
         <div className="flex items-center gap-2 text-xs text-white/60 font-medium mb-2">
           <FileJson className="w-3.5 h-3.5" />
-          渲染后的参数
+          {t('canvas.renderedParams')}
         </div>
         {Object.keys(params).length === 0 ? (
-          <div className="text-xs text-white/30">暂无参数</div>
+          <div className="text-xs text-white/30">{t('canvas.noParamsData')}</div>
         ) : (
           <div className="space-y-1.5">
             {Object.entries(params).map(([key, value]) => (
@@ -323,10 +348,10 @@ function RuntimeMetadataPanel({ execution }: { execution: ExecutionStatus }) {
       <GlassPanel className="p-4">
         <div className="flex items-center gap-2 text-xs text-white/60 font-medium mb-2">
           <FileJson className="w-3.5 h-3.5" />
-          运行时元数据
+          {t('canvas.runtimeMetadata')}
         </div>
         {Object.keys(runtime).length === 0 ? (
-          <div className="text-xs text-white/30">暂无运行时数据</div>
+          <div className="text-xs text-white/30">{t('canvas.noRuntimeData')}</div>
         ) : (
           <MetadataTree data={runtime} />
         )}
@@ -336,30 +361,31 @@ function RuntimeMetadataPanel({ execution }: { execution: ExecutionStatus }) {
 }
 
 function StaticMetadataPanel({ workflow }: { workflow: Workflow | null }) {
+  const { t } = useTranslation()
   return (
     <div className="space-y-3">
       <GlassPanel className="p-4 space-y-2">
-        <MetadataRow label="名称" value={workflow?.name} />
+        <MetadataRow label={t('canvas.nameLabel')} value={workflow?.name} />
         <MetadataRow label="ID" value={workflow?.id} />
-        <MetadataRow label="状态" value={workflow?.status} />
+        <MetadataRow label={t('canvas.statusLabel')} value={workflow?.status} />
         <MetadataRow
-          label="创建时间"
+          label={t('node.createdAt')}
           value={workflow?.createdAt ? formatDate(workflow.createdAt) : '-'}
         />
         <MetadataRow
-          label="更新时间"
+          label={t('canvas.updatedAt')}
           value={workflow?.updatedAt ? formatDate(workflow.updatedAt) : '-'}
         />
       </GlassPanel>
       {workflow?.description && (
         <GlassPanel className="p-4">
-          <div className="text-xs text-white/40 mb-1">描述</div>
+          <div className="text-xs text-white/40 mb-1">{t('canvas.descLabel')}</div>
           <div className="text-sm text-white/80">{workflow.description}</div>
         </GlassPanel>
       )}
       {workflow?.intent && (
         <GlassPanel className="p-4">
-          <div className="text-xs text-white/40 mb-1">意图</div>
+          <div className="text-xs text-white/40 mb-1">{t('canvas.intentLabel')}</div>
           <div className="text-sm text-white/80">{workflow.intent}</div>
         </GlassPanel>
       )}
@@ -368,6 +394,7 @@ function StaticMetadataPanel({ workflow }: { workflow: Workflow | null }) {
 }
 
 function StatusBadge({ status }: { status: string }) {
+  const normalized = status.toLowerCase()
   const colors: Record<string, string> = {
     success: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
     failed: 'bg-rose-500/15 text-rose-400 border-rose-500/20',
@@ -377,7 +404,7 @@ function StatusBadge({ status }: { status: string }) {
   }
   return (
     <span
-      className={`text-[10px] px-1.5 py-0.5 rounded border ${colors[status] || colors.pending}`}
+      className={`text-[10px] px-1.5 py-0.5 rounded border ${colors[normalized] || colors.pending}`}
     >
       {status}
     </span>
@@ -416,40 +443,65 @@ function formatValue(value: unknown): string {
   }
 }
 
-const defaultYAML = `Version: "1.0"
-Name: demo-pipeline
+/**
+ * YAML tab：语法高亮展示流水线定义。
+ * 回放态（选中执行）时优先展示该执行的运行时快照 YAML——快照是执行实例的
+ * 独立图定义（续跑追加节点后与模板已解耦，含物化的 steps 与实际生效的参数）；
+ * 无快照的旧执行回退为「模板 YAML + 运行时 Param 覆写」；编辑态展示原始定义。
+ */
+function YamlTabView({ yamlConfig }: { yamlConfig?: string }) {
+  const { t } = useTranslation()
+  const selectedExecution = useExecutionStore((s) => s.selectedExecution)
+  const selectedExecutionYaml = useExecutionStore((s) => s.selectedExecutionYaml)
 
-Param:
-  env: "production"  # 部署环境
-  appName: "myapp"   # 应用名称
-  namespace: "myapp-production"  # 命名空间
+  const runtimeParams = useMemo(() => {
+    if (!selectedExecution) return null
+    const meta = (selectedExecution.metadata || {}) as Record<string, unknown>
+    const params = (meta.params || {}) as Record<string, unknown>
+    return Object.keys(params).length > 0 ? params : null
+  }, [selectedExecution])
 
-Executors:
-  local:
-    type: local
-    config:
-      shell: bash
+  const { code, isRuntime } = useMemo(() => {
+    // 有快照：直接展示快照 YAML（执行实例的单一事实来源）
+    if (selectedExecution && selectedExecutionYaml) {
+      return { code: selectedExecutionYaml, isRuntime: true }
+    }
+    // 无快照回退：模板 + 运行时 Param 覆写
+    const source = yamlConfig || ''
+    if (!runtimeParams || !source) return { code: source, isRuntime: false }
+    try {
+      const doc = yaml.load(source) as Record<string, unknown>
+      if (!doc || typeof doc !== 'object') return { code: source, isRuntime: false }
+      doc.Param = runtimeParams
+      return {
+        code: yaml.dump(doc, { lineWidth: -1, noRefs: true }),
+        isRuntime: true,
+      }
+    } catch {
+      return { code: source, isRuntime: false }
+    }
+  }, [selectedExecution, selectedExecutionYaml, yamlConfig, runtimeParams])
 
-Graph: |
-  stateDiagram-v2
-    [*] --> Build
-    Build --> Test
-    Test --> Deploy
-    Deploy --> [*]
-
-Nodes:
-  Build:
-    executor: local
-    steps:
-      - name: build
-        run: echo "Building {{ Param.appName }}..."
-  Test:
-    executor: local
-    steps:
-      - name: test
-        run: echo "Testing {{ Param.appName }}..."
-  Deploy:
-    executor: local
-    steps:
-      - name: deploy
-        run: echo "Deploying {{ Param.appName }} to {{ Param.namespace }}..."`
+  return (
+    <div className="space-y-3">
+      {isRuntime && selectedExecution && (
+        <div className="flex items-center gap-2 px-1">
+          <span className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full
+                           bg-cyan-500/15 text-cyan-300 border border-cyan-500/25">
+            <Zap className="w-3 h-3" />
+            {t('canvas.runtimeYaml', { id: selectedExecution.id })}
+          </span>
+        </div>
+      )}
+      <GlassPanel className="p-4 overflow-auto">
+        {code ? (
+          <YamlViewer code={code} />
+        ) : (
+          <div className="text-white/30 text-xs text-center py-8">
+            {t('canvas.noWorkflowSelected')}
+          </div>
+        )}
+      </GlassPanel>
+    </div>
+  )
+}
