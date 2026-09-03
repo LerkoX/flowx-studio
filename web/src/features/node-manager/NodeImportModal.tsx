@@ -101,7 +101,8 @@ export default function NodeImportModal({ isOpen, onClose, onAdd, isAdding }: No
                     </span>
                     {activeTab === key && (
                       <motion.div
-                        layoutId="importTab"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
                         className="absolute bottom-0 left-4 right-4 h-[2px] 
                                  bg-gradient-to-r from-indigo-400 to-purple-400 rounded-full"
                       />

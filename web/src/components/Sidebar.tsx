@@ -113,8 +113,8 @@ export default function Sidebar() {
                         {isActive && (
                           <motion.div
                             className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-white rounded-r-full"
-                            layoutId="sidebarIndicatorMobile"
-                            transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
                           />
                         )}
                         <Icon size={20} />

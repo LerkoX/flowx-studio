@@ -31,6 +31,31 @@ export interface NodeUIConfig {
   apiVersion?: number
 }
 
+/** flowx.json 节点包配置（API 只读回传，对应后端 NodePackage） */
+export interface NodePackageConfig {
+  name: string
+  displayName?: string
+  description?: string
+  version?: string
+  author?: string
+  tags?: string[]
+  icon?: string
+  language: string
+  entry: string
+  files?: string[]
+  image?: string
+  executor?: { ref?: string; type?: string; config?: Record<string, unknown> }
+  requirements?: string[]
+  parameters: NodeParameter[]
+  env?: Record<string, string>
+  run?: string
+  outputs?: NodeOutput[]
+  extract?: { type: string; patterns?: Record<string, string>; maxOutputSize?: number }
+  mock?: NodeMockConfig
+  ui?: NodeUIConfig
+  timeout?: number
+}
+
 export interface NodeDefinition {
   id: string
   name: string
@@ -66,6 +91,9 @@ export interface NodeDefinition {
 
   // 自定义 UI 组件配置（导入的节点包可能携带）
   ui?: NodeUIConfig
+
+  // flowx.json 包配置（仅节点详情接口回传，只读）
+  package?: NodePackageConfig
 
   createdAt?: Date
   updatedAt?: Date

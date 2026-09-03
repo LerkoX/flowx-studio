@@ -463,8 +463,8 @@ function TabButton({
       {active && (
         <motion.div
           className="absolute bottom-0 left-4 right-4 h-[2px] bg-gradient-to-r from-indigo-400 to-purple-400 rounded-full"
-          layoutId="workflowTab"
-          transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
         />
       )}
     </button>

@@ -140,6 +140,11 @@ type Node struct {
 	// 完整的 flowx.json 包配置（运行时展开使用）
 	PackageConfig *NodePackage `json:"-" db:"package_config"`
 
+	// Package 是 PackageConfig 的 API 只读副本（节点详情展示 flowx.json 用）。
+	// 用独立字段而非直接序列化 PackageConfig，是为了保持包配置无法通过
+	// Create/Update API 写入（防止绕过导入校验）。
+	Package *NodePackage `json:"package,omitempty" db:"-"`
+
 	// 节点自定义 UI 组件配置（来自 PackageConfig.UI，API 返回用）
 	UI *NodeUIConfig `json:"ui,omitempty" db:"-"`
 

@@ -153,6 +153,7 @@ func (s *NodeService) List(language, tag, search, nodeType string, page, pageSiz
 		if err := scanNode(rows, &node); err != nil {
 			continue
 		}
+		node.Package = nil // 列表接口不回传 flowx.json 包配置，避免负载膨胀
 		nodes = append(nodes, node)
 	}
 
@@ -226,6 +227,7 @@ func (s *NodeService) Create(req *model.Node) (*model.Node, error) {
 
 	id, _ := result.LastInsertId()
 	req.ID = id
+	req.Package = req.PackageConfig // API 只读副本（flowx.json 展示）
 
 	s.auditRecord("create_node", fmt.Sprintf("%d", id), "name="+req.Name)
 	s.eventBus.Publish(event.Event{
@@ -474,6 +476,7 @@ func scanNode(scanner interface {
 	json.Unmarshal([]byte(mockJSON), &node.MockConfig)
 	json.Unmarshal([]byte(tagsJSON), &node.Tags)
 	json.Unmarshal([]byte(pkgJSON), &node.PackageConfig)
+	node.Package = node.PackageConfig // API 只读副本（flowx.json 展示）
 	if fileAssetsJSON.Valid {
 		json.Unmarshal([]byte(fileAssetsJSON.String), &node.FileAssets)
 	}

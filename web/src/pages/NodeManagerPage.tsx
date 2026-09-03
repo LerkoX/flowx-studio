@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Search, Plus, Tag, Code, Container, Filter, X } from 'lucide-react'
+import { Search, Plus, Tag, Code, Container, Filter, X, ChevronDown, ChevronUp } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useNodeStore } from '@/stores/nodeStore'
 import { importNode } from '@/services/nodeService'
@@ -10,6 +10,7 @@ import NodeCard from '@/features/node-manager/NodeCard'
 import NodeImportModal from '@/features/node-manager/NodeImportModal'
 import NodeDetailModal from '@/features/node-manager/NodeDetailModal'
 import NodeTestPanel from '@/features/node-manager/NodeTestPanel'
+import Select from '@/components/Select'
 import type { NodeDefinition } from '@/types/node'
 
 export default function NodeManagerPage() {
@@ -45,6 +46,7 @@ export default function NodeManagerPage() {
   const [selectedNode, setSelectedNode] = useState<NodeDefinition | null>(null)
   const [showDetailModal, setShowDetailModal] = useState(false)
   const [showTestPanel, setShowTestPanel] = useState(false)
+  const [tagsExpanded, setTagsExpanded] = useState(false)
 
   const filteredNodes = getFilteredNodes()
   const allTags = getAllTags()
@@ -141,7 +143,7 @@ export default function NodeManagerPage() {
         </div>
 
         {/* 搜索和筛选 */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           {/* 搜索框 */}
           <div className="relative flex-1 max-w-md">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" />
@@ -200,20 +202,15 @@ export default function NodeManagerPage() {
 
           {/* 语言筛选 */}
           {allLanguages.length > 0 && (
-            <select
+            <Select
               value={selectedLanguage || ''}
-              onChange={(e) => setSelectedLanguage(e.target.value || null)}
-              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2
-                       text-xs text-white/80 focus:outline-none focus:border-white/20
-                       cursor-pointer"
-            >
-              <option value="" className="bg-panel">{t('node.allLanguages')}</option>
-              {allLanguages.map((lang) => (
-                <option key={lang} value={lang} className="bg-panel">
-                  {lang}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => setSelectedLanguage(v || null)}
+              options={[
+                { value: '', label: t('node.allLanguages') },
+                ...allLanguages.map((lang) => ({ value: lang, label: lang })),
+              ]}
+              className="min-w-0 flex-1 sm:flex-none sm:min-w-[130px]"
+            />
           )}
 
           {/* 清除筛选 */}
@@ -229,23 +226,41 @@ export default function NodeManagerPage() {
           )}
         </div>
 
-        {/* 标签筛选 */}
+        {/* 标签筛选（默认收起，仅展示已选标签） */}
         {allTags.length > 0 && (
-          <div className="flex items-center gap-2 mt-3 flex-wrap">
-            <Tag size={12} className="text-white/30" />
-            {allTags.map((tag) => (
-              <button
-                key={tag}
-                onClick={() => toggleTag(tag)}
-                className={`text-[11px] px-2.5 py-1 rounded-full transition-all
-                  ${selectedTags.includes(tag)
-                    ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
-                    : 'bg-white/5 text-white/40 border border-white/10 hover:bg-white/10'
-                  }`}
-              >
-                #{tag}
-              </button>
-            ))}
+          <div className="mt-3">
+            <button
+              onClick={() => setTagsExpanded(!tagsExpanded)}
+              className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs
+                       text-white/40 hover:text-white/60 hover:bg-white/5 transition-all"
+            >
+              <Tag size={12} />
+              {t('node.tagFilter')}
+              {selectedTags.length > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300
+                               border border-indigo-500/30 text-[10px]">
+                  {selectedTags.length}
+                </span>
+              )}
+              {tagsExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            </button>
+            {(tagsExpanded || selectedTags.length > 0) && (
+              <div className="flex items-center gap-2 mt-2 flex-wrap">
+                {(tagsExpanded ? allTags : selectedTags).map((tag) => (
+                  <button
+                    key={tag}
+                    onClick={() => toggleTag(tag)}
+                    className={`text-[11px] px-2.5 py-1 rounded-full transition-all
+                      ${selectedTags.includes(tag)
+                        ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
+                        : 'bg-white/5 text-white/40 border border-white/10 hover:bg-white/10'
+                      }`}
+                  >
+                    #{tag}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

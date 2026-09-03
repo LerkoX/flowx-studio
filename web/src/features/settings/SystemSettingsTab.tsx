@@ -4,6 +4,7 @@ import { Monitor, Moon, Sun, Globe, Bell, Shield, Save, RotateCcw, AlertCircle }
 import { useSettingsStore, defaultSystemSettings } from '@/stores/settingsStore'
 import { toast } from '@/stores/toastStore'
 import GlassPanel from '@/components/GlassPanel'
+import Select from '@/components/Select'
 
 function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -123,16 +124,15 @@ export default function SystemSettingsTab() {
           {/* 语言 */}
           <div>
             <SectionTitle icon={Globe}>{t('settings.language')}</SectionTitle>
-            <select
+            <Select
               value={formData.language}
-              onChange={(e) => applyImmediate({ language: e.target.value })}
-              className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10
-                       text-white/90 text-sm focus:outline-none focus:border-white/20
-                       cursor-pointer"
-            >
-              <option value="zh-CN" className="bg-panel">简体中文</option>
-              <option value="en-US" className="bg-panel">English</option>
-            </select>
+              onChange={(v) => applyImmediate({ language: v })}
+              options={[
+                { value: 'zh-CN', label: '简体中文' },
+                { value: 'en-US', label: 'English' },
+              ]}
+              triggerClassName="px-3 py-2 rounded-xl text-sm text-white/90"
+            />
           </div>
 
           <div className="h-px bg-white/5" />

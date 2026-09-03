@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, GitBranch, Container, Code, Tag, FileCode, Box, Clock, User } from 'lucide-react'
+import { X, GitBranch, Container, Code, Tag, FileCode, FileJson, Box, Clock, User, Copy, Check } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { NodeDefinition } from '@/types/node'
 import GlassPanel from '@/components/GlassPanel'
+import JsonViewer from '@/components/JsonViewer'
 
 interface NodeDetailModalProps {
   node: NodeDefinition | null
@@ -13,11 +14,24 @@ interface NodeDetailModalProps {
 
 export default function NodeDetailModal({ node, isOpen, onClose }: NodeDetailModalProps) {
   const { t, i18n } = useTranslation()
-  const [activeTab, setActiveTab] = useState<'overview' | 'params' | 'outputs'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'params' | 'outputs' | 'raw'>('overview')
+  const [copied, setCopied] = useState(false)
 
   if (!node) return null
 
   const isImageNode = node.nodeType === 'image'
+
+  const packageJson = node.package ? JSON.stringify(node.package, null, 2) : ''
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(packageJson)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // 剪贴板不可用（如非安全上下文）时静默失败
+    }
+  }
 
   return (
     <AnimatePresence>
@@ -74,6 +88,7 @@ export default function NodeDetailModal({ node, isOpen, onClose }: NodeDetailMod
                   { key: 'overview' as const, label: t('node.tabOverview'), icon: Box },
                   { key: 'params' as const, label: t('node.tabParams'), icon: FileCode },
                   ...(node.outputs ? [{ key: 'outputs' as const, label: t('node.tabOutputs'), icon: Code }] : []),
+                  { key: 'raw' as const, label: 'flowx.json', icon: FileJson },
                 ].map((tab) => (
                   <button
                     key={tab.key}
@@ -87,7 +102,8 @@ export default function NodeDetailModal({ node, isOpen, onClose }: NodeDetailMod
                     </span>
                     {activeTab === tab.key && (
                       <motion.div
-                        layoutId="detailTab"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
                         className="absolute bottom-0 left-4 right-4 h-[2px] 
                                  bg-gradient-to-r from-indigo-400 to-purple-400 rounded-full"
                       />
@@ -234,6 +250,28 @@ export default function NodeDetailModal({ node, isOpen, onClose }: NodeDetailMod
                       ))
                     )}
                   </div>
+                )}
+                {activeTab === 'raw' && (
+                  !node.package ? (
+                    <div className="text-center py-8 text-white/30 text-sm">
+                      {t('node.noPackageConfig')}
+                    </div>
+                  ) : (
+                    <GlassPanel className="p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-white/70 font-medium text-sm font-mono">flowx.json</h3>
+                        <button
+                          onClick={handleCopy}
+                          className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs
+                                   text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+                        >
+                          {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+                          {copied ? t('common.copied') : t('common.copy')}
+                        </button>
+                      </div>
+                      <JsonViewer code={packageJson} />
+                    </GlassPanel>
+                  )
                 )}
               </div>
             </div>

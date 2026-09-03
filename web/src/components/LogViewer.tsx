@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useExecutionStore, type LogLevel } from '@/stores/executionStore'
+import Select from '@/components/Select'
 import type { ExecutionLog } from '@/types/execution'
 
 const levelColors: Record<LogLevel, string> = {
@@ -155,22 +156,16 @@ export default function LogViewer() {
         {/* 节点过滤（服务端过滤） */}
         {nodeOptions.length > 0 && (
           <div className="flex items-center gap-1">
-            <select
+            <Select
               value={logFilter.nodeFilter || ''}
-              onChange={(e) =>
-                setLogFilter({ nodeFilter: e.target.value || null })
-              }
-              className="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5
-                         text-xs text-white/80 focus:outline-none focus:border-white/30
-                         cursor-pointer max-w-[120px]"
-            >
-              <option value="" className="bg-panel">{t('logs.allNodes')}</option>
-              {nodeOptions.map(([value, label]) => (
-                <option key={value} value={value} className="bg-panel">
-                  {label}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => setLogFilter({ nodeFilter: v || null })}
+              options={[
+                { value: '', label: t('logs.allNodes') },
+                ...nodeOptions.map(([value, label]) => ({ value, label })),
+              ]}
+              className="w-[120px]"
+              triggerClassName="px-2 py-1.5 rounded-lg text-xs text-white/80"
+            />
             {logFilter.nodeFilter && (
               <button
                 onClick={() => setLogFilter({ nodeFilter: null })}
