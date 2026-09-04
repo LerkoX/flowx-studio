@@ -399,6 +399,7 @@ function StatusBadge({ status }: { status: string }) {
     success: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
     failed: 'bg-rose-500/15 text-rose-400 border-rose-500/20',
     running: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/20',
+    paused: 'bg-violet-500/15 text-violet-400 border-violet-500/20',
     pending: 'bg-amber-500/15 text-amber-400 border-amber-500/20',
     cancelled: 'bg-slate-500/15 text-slate-400 border-slate-500/20',
   }

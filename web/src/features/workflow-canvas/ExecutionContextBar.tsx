@@ -67,6 +67,8 @@ export default function ExecutionContextBar({
               </span>
               {current?.status === 'running' ? (
                 <span className="text-[11px] text-cyan-400 shrink-0">{t('canvas.executing')}</span>
+              ) : current?.status === 'paused' ? (
+                <span className="text-[11px] text-violet-400 shrink-0">{t('canvas.paused')}</span>
               ) : current?.durationMs ? (
                 <span className="text-[11px] text-white/30 shrink-0">
                   {formatDuration(current.durationMs)}
@@ -165,6 +167,7 @@ function StatusBadge({ status }: { status: string }) {
     success: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
     failed: 'bg-rose-500/15 text-rose-400 border-rose-500/20',
     running: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/20',
+    paused: 'bg-violet-500/15 text-violet-400 border-violet-500/20',
     pending: 'bg-amber-500/15 text-amber-400 border-amber-500/20',
     cancelled: 'bg-slate-500/15 text-slate-400 border-slate-500/20',
   }
@@ -182,6 +185,7 @@ function StatusDot({ status }: { status: string }) {
     success: 'bg-emerald-400',
     failed: 'bg-rose-400',
     running: 'bg-cyan-400 animate-pulse',
+    paused: 'bg-violet-400',
     pending: 'bg-amber-400',
     cancelled: 'bg-slate-400',
   }

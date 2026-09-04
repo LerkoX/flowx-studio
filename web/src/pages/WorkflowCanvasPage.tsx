@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronRight, ChevronLeft, Play, Loader2, History } from 'lucide-react'
+import { ChevronRight, ChevronLeft, Play, Pause, Loader2, History } from 'lucide-react'
 import WorkflowCanvas from '@/features/workflow-canvas/WorkflowCanvas'
 import WorkflowConfigPanel from '@/features/workflow-canvas/WorkflowConfigPanel'
 import ExecutionContextBar from '@/features/workflow-canvas/ExecutionContextBar'
@@ -11,7 +11,7 @@ import LogViewer from '@/components/LogViewer'
 import { useAppStore } from '@/stores/appStore'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { useExecutionStore } from '@/stores/executionStore'
-import { runWorkflow, continueExecution, getWorkflow } from '@/services/workflowService'
+import { runWorkflow, continueExecution, pauseExecution, resumeExecution, getWorkflow } from '@/services/workflowService'
 import { parseNodeRefs } from '@/utils/mermaidParser'
 import { useIsMobile } from '@/hooks/useMediaQuery'
 import { useTranslation } from 'react-i18next'
@@ -46,12 +46,14 @@ export default function WorkflowCanvasPage() {
   const setCurrentWorkflow = useWorkflowStore((s) => s.setCurrentWorkflow)
   const params = useWorkflowStore((s) => s.params)
   const isExecuting = useExecutionStore((s) => s.isExecuting)
+  const runningExecutionId = useExecutionStore((s) => s.runningExecutionId)
   const selectedExecutionId = useExecutionStore((s) => s.selectedExecutionId)
   const selectedExecution = useExecutionStore((s) => s.selectedExecution)
   const selectedExecutionYaml = useExecutionStore((s) => s.selectedExecutionYaml)
   const executionNodes = useExecutionStore((s) => s.executionNodes)
   const beginContinue = useExecutionStore((s) => s.beginContinue)
   const [starting, setStarting] = useState(false)
+  const [pausePending, setPausePending] = useState(false)
   const { id: routeWorkflowId } = useParams<{ id: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -173,6 +175,49 @@ export default function WorkflowCanvasPage() {
     }
   }
 
+  // 暂停/恢复：以选中执行的状态为准（running/paused），不依赖 isExecuting——
+  // 浏览器刷新后 isExecuting 重置为 false，但 paused 执行仍需要恢复入口。
+  // 状态由 SSE（execution_paused/execution_resumed）回写 selectedExecution.status，
+  // 暂停为层边界生效——点击后当前层节点跑完才挂起，按钮先行进入 pending 反馈
+  const liveExecutionId = selectedExecutionId ?? runningExecutionId
+  const selectedStatus = selectedExecution?.status
+  const isPaused = selectedStatus === 'paused'
+  const showPauseResume =
+    !!liveExecutionId && (selectedStatus === 'running' || selectedStatus === 'paused')
+  const handlePauseResume = async () => {
+    if (!liveExecutionId || pausePending) return
+    setPausePending(true)
+    try {
+      if (isPaused) {
+        await resumeExecution(liveExecutionId)
+      } else {
+        await pauseExecution(liveExecutionId)
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setPausePending(false)
+    }
+  }
+  const pauseResumeButton = showPauseResume ? (
+    <button
+      onClick={handlePauseResume}
+      disabled={pausePending}
+      className="flex items-center justify-center w-7 h-7 rounded-full flex-shrink-0
+                 text-amber-300 hover:bg-amber-400/15
+                 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      title={isPaused ? t('canvas.resumeExecution') : t('canvas.pauseExecution')}
+    >
+      {pausePending ? (
+        <Loader2 size={13} className="animate-spin" />
+      ) : isPaused ? (
+        <Play size={13} className="ml-px" />
+      ) : (
+        <Pause size={13} />
+      )}
+    </button>
+  ) : null
+
   // 运行按钮渲染在画布右上角的胶囊工具条内（与流水线名、方向切换按钮并排）。
   // 移动端为图标-only 圆形按钮，桌面端保留文字
   const runTitle = isPlayback
@@ -215,6 +260,15 @@ export default function WorkflowCanvasPage() {
     )
   ) : null
 
+  // 胶囊工具条动作区：运行/续跑按钮 + 实时执行时的暂停/恢复按钮
+  const canvasAction =
+    runButton || pauseResumeButton ? (
+      <>
+        {runButton}
+        {pauseResumeButton}
+      </>
+    ) : null
+
   const renderTabContent = () => {
     switch (tab) {
       case 'logs':
@@ -243,7 +297,7 @@ export default function WorkflowCanvasPage() {
       <div className="h-full flex relative">
         {/* 中央画布区域 */}
         <div className="flex-1 relative">
-          <WorkflowCanvas action={runButton} />
+          <WorkflowCanvas action={canvasAction} />
         </div>
 
         {/* 移动端底部标签栏：当前模式的 tab + 历史执行入口 */}
@@ -361,7 +415,7 @@ export default function WorkflowCanvasPage() {
     <div className="h-full flex relative">
       {/* 中央画布区域 */}
       <div className="flex-1 relative">
-        <WorkflowCanvas action={runButton} />
+        <WorkflowCanvas action={canvasAction} />
       </div>
 
       {/* 右侧面板 */}

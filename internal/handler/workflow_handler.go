@@ -47,6 +47,8 @@ func (h *WorkflowHandler) RegisterRoutes(r *gin.RouterGroup) {
 		executions.GET("/:id/nodes", h.GetExecutionNodes)
 		executions.GET("/:id/yaml", h.GetExecutionYAML)
 		executions.POST("/:id/continue", h.ContinueExecution)
+		executions.POST("/:id/pause", h.PauseExecution)
+		executions.POST("/:id/resume", h.ResumeExecution)
 	}
 }
 
@@ -250,6 +252,38 @@ func (h *WorkflowHandler) ContinueExecution(c *gin.Context) {
 	}
 
 	if err := h.service.ContinueExecution(id, req.YAML); err != nil {
+		Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	Success(c, gin.H{"executionId": id, "status": "running"})
+}
+
+// PauseExecution 暂停运行中的执行实例（层边界暂停：当前层节点跑完后挂起）
+func (h *WorkflowHandler) PauseExecution(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		Error(c, http.StatusBadRequest, "invalid execution id")
+		return
+	}
+
+	if err := h.service.PauseExecution(id); err != nil {
+		Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	Success(c, gin.H{"executionId": id, "status": "paused"})
+}
+
+// ResumeExecution 恢复已暂停的执行实例
+func (h *WorkflowHandler) ResumeExecution(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		Error(c, http.StatusBadRequest, "invalid execution id")
+		return
+	}
+
+	if err := h.service.ResumeExecution(id); err != nil {
 		Error(c, http.StatusBadRequest, err.Error())
 		return
 	}

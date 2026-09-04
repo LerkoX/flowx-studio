@@ -186,7 +186,7 @@ type WorkflowNode struct {
 type Execution struct {
 	ID           int64      `json:"id" db:"id"`
 	WorkflowID   int64      `json:"workflowId" db:"workflow_id"`
-	Status       string     `json:"status" db:"status"`   // pending | running | success | failed | cancelled
+	Status       string     `json:"status" db:"status"`   // pending | running | paused | success | failed | cancelled
 	Trigger      string     `json:"trigger" db:"trigger"` // manual | schedule | api
 	StartedAt    *time.Time `json:"startedAt,omitempty" db:"started_at"`
 	CompletedAt  *time.Time `json:"completedAt,omitempty" db:"completed_at"`

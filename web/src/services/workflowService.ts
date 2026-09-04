@@ -98,6 +98,28 @@ export async function continueExecution(
 }
 
 /**
+ * 暂停运行中的执行实例（层边界暂停：当前层节点执行完后挂起）
+ * POST /api/v1/executions/:id/pause
+ */
+export async function pauseExecution(
+  executionId: string
+): Promise<ApiResponse<{ executionId: number; status: string }>> {
+  const response = await apiClient.post(`/api/v1/executions/${executionId}/pause`)
+  return response.data
+}
+
+/**
+ * 恢复已暂停的执行实例
+ * POST /api/v1/executions/:id/resume
+ */
+export async function resumeExecution(
+  executionId: string
+): Promise<ApiResponse<{ executionId: number; status: string }>> {
+  const response = await apiClient.post(`/api/v1/executions/${executionId}/resume`)
+  return response.data
+}
+
+/**
  * 获取执行历史
  * GET /api/v1/executions
  */

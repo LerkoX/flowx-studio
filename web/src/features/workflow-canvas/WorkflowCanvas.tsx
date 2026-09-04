@@ -298,6 +298,22 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
       return
     }
 
+    if (type === 'execution_paused') {
+      const payload = data as { execution_id?: number }
+      if (payload.execution_id) {
+        executionStore.updateExecutionStatus(String(payload.execution_id), 'paused')
+      }
+      return
+    }
+
+    if (type === 'execution_resumed') {
+      const payload = data as { execution_id?: number }
+      if (payload.execution_id) {
+        executionStore.updateExecutionStatus(String(payload.execution_id), 'running')
+      }
+      return
+    }
+
     if (type === 'node_start') {
       const payload = data as { node_id?: string }
       if (payload.node_id) updateNodeStatus(payload.node_id, 'running')

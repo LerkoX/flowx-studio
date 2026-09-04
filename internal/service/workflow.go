@@ -281,8 +281,8 @@ func (s *WorkflowService) ContinueExecution(execID int64, yamlContent string) er
 		return err
 	}
 	switch exec.Status {
-	case "running", "pending":
-		return fmt.Errorf("execution %d is %s, cannot continue", execID, exec.Status)
+	case "running", "pending", "paused":
+		return fmt.Errorf("execution %d is %s, cannot continue (paused executions use resume)", execID, exec.Status)
 	}
 
 	// 读取运行时快照与历史 metadata
@@ -330,6 +330,82 @@ func (s *WorkflowService) ContinueExecution(execID int64, yamlContent string) er
 
 	s.auditRecord("continue_execution", fmt.Sprintf("%d", execID),
 		fmt.Sprintf("workflow=%d yaml_updated=%v", exec.WorkflowID, yamlContent != ""))
+	return nil
+}
+
+// PauseExecution 暂停运行中的执行实例。引擎为层边界暂停：状态立即置为 PAUSED，
+// 当前并发层节点执行完后在层边界挂起（不中断运行中的节点）。DB 状态由
+// PipelinePaused 事件经事件桥落库为 paused（见 persistRuntimeEvent）。
+// 暂停即导出运行时快照（此处一次 + PipelinePaused 事件一次），server 重启后
+// 可从暂停点恢复（见 ResumeExecution 的重建分支）。
+func (s *WorkflowService) PauseExecution(execID int64) error {
+	exec, err := s.GetExecution(execID)
+	if err != nil {
+		return err
+	}
+	if exec.Status != "running" {
+		return fmt.Errorf("execution %d is %s, only running executions can be paused", execID, exec.Status)
+	}
+	if err := s.runtime.PauseExecution(context.Background(), execID); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return fmt.Errorf("execution %d 的实例已不在 server 内存中（server 重启过），状态为残留记录，无法暂停", execID)
+		}
+		return err
+	}
+	// 立即导出快照：覆盖「暂停后、层边界前 server 崩溃」的场景。此刻当前层节点
+	// 可能仍为 RUNNING，重建恢复时这些节点会重跑（at-least-once）；层边界到达后
+	// PipelinePaused 事件会再次导出干净状态的快照覆盖之
+	if snapshot, err := s.runtime.ExportExecutionConfig(execID); err == nil && snapshot != "" {
+		s.saveRuntimeSnapshot(execID, snapshot)
+	}
+	// 立即落库并广播：暂停在层边界才生效，若等引擎 PipelinePaused 事件再更新，
+	// 当前层有长耗时节点时 UI 会长时间无反馈。引擎事件到达后重复写入相同状态（幂等）
+	_, _ = s.db.Exec("UPDATE executions SET status = ? WHERE id = ?", "paused", execID)
+	s.setExecutionMetadata(execID, "paused", "", nil, nil, "")
+	s.eventBus.Publish(event.Event{
+		Type: "execution_paused",
+		Data: map[string]interface{}{"execution_id": execID, "status": "paused"},
+	})
+	s.auditRecord("pause_execution", fmt.Sprintf("%d", execID), fmt.Sprintf("workflow=%d", exec.WorkflowID))
+	return nil
+}
+
+// ResumeExecution 恢复已暂停的执行实例。实例在内存时直接 Resume；不在内存
+// （server 重启过）时从暂停时导出的运行时快照重建实例并增量续跑（已终结节点
+// 跳过，暂停时 RUNNING 的节点重跑），与 ContinueExecution 的恢复路径一致。
+func (s *WorkflowService) ResumeExecution(execID int64) error {
+	exec, err := s.GetExecution(execID)
+	if err != nil {
+		return err
+	}
+	if exec.Status != "paused" {
+		return fmt.Errorf("execution %d is %s, only paused executions can be resumed", execID, exec.Status)
+	}
+	if err := s.runtime.ResumeExecution(context.Background(), execID); err != nil {
+		if !strings.Contains(err.Error(), "not found") {
+			return err
+		}
+		// 实例不在内存（server 重启过）：从暂停快照重建并增量续跑
+		if exec.RuntimeYAML == nil || *exec.RuntimeYAML == "" {
+			return fmt.Errorf("execution %d 的实例已不在 server 内存中且无暂停快照（暂停发生于旧版本），无法恢复，只能重新运行流水线", execID)
+		}
+		metadataValues := s.executionMetadataValues(exec)
+		if err := s.runtime.LoadExecution(context.Background(), execID, *exec.RuntimeYAML, metadataValues); err != nil {
+			return fmt.Errorf("failed to rebuild paused execution from snapshot: %w", err)
+		}
+		if err := s.runtime.ContinueExecution(context.Background(), execID); err != nil {
+			return fmt.Errorf("failed to rerun paused execution: %w", err)
+		}
+	}
+	// 立即落库并广播：内存内 Resume 时引擎 PipelineResumed 事件为幂等重复；
+	// 重建路径下 Rerun 会触发 execution_start 事件再次写入 running（幂等）
+	_, _ = s.db.Exec("UPDATE executions SET status = ? WHERE id = ?", "running", execID)
+	s.setExecutionMetadata(execID, "running", "", nil, nil, "")
+	s.eventBus.Publish(event.Event{
+		Type: "execution_resumed",
+		Data: map[string]interface{}{"execution_id": execID, "status": "running"},
+	})
+	s.auditRecord("resume_execution", fmt.Sprintf("%d", execID), fmt.Sprintf("workflow=%d", exec.WorkflowID))
 	return nil
 }
 
@@ -810,6 +886,13 @@ func (s *WorkflowService) persistRuntimeEvent(evt runtime.ExecutionEvent) {
 				WHERE execution_id = ? AND node_id = ? AND status = 'running'
 			`, status, completed, duration, evt.ExecutionID, evt.NodeID)
 		}
+	case "execution_paused":
+		// 层边界暂停生效：状态落库为 paused，completed_at 保持不变（执行未结束）
+		_, _ = s.db.Exec("UPDATE executions SET status = ? WHERE id = ?", "paused", evt.ExecutionID)
+		s.setExecutionMetadata(evt.ExecutionID, "paused", "", nil, nil, "")
+	case "execution_resumed":
+		_, _ = s.db.Exec("UPDATE executions SET status = ? WHERE id = ?", "running", evt.ExecutionID)
+		s.setExecutionMetadata(evt.ExecutionID, "running", "", nil, nil, "")
 	case "execution_complete":
 		// dag 库返回大写状态（SUCCESS/FAILED/CANCELLED），入库前统一归一化为小写，
 		// 与轮询收尾路径（runWorkflowAsync）及前端状态映射保持一致

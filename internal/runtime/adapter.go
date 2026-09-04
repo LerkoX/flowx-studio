@@ -145,6 +145,27 @@ func (a *Adapter) ContinueExecution(ctx context.Context, executionID int64) erro
 	return nil
 }
 
+// PauseExecution 暂停运行中的执行实例。引擎为层边界暂停：Pause 立即将状态
+// 置为 PAUSED，当前并发层的节点执行完后在层边界挂起（不中断运行中的节点）。
+func (a *Adapter) PauseExecution(ctx context.Context, executionID int64) error {
+	id := fmt.Sprintf("exec-%d", executionID)
+	if err := a.runtime.Pause(ctx, id); err != nil {
+		return fmt.Errorf("failed to pause execution: %w", err)
+	}
+	return nil
+}
+
+// ResumeExecution 恢复已暂停的执行实例。实例在内存时直接 Resume；
+// 暂停时会导出运行时快照（见 PauseExecution 与 listener 的 PipelinePaused 分支），
+// server 重启后可由上层从快照重建实例再 Rerun 恢复。
+func (a *Adapter) ResumeExecution(ctx context.Context, executionID int64) error {
+	id := fmt.Sprintf("exec-%d", executionID)
+	if err := a.runtime.Resume(ctx, id); err != nil {
+		return fmt.Errorf("failed to resume execution: %w", err)
+	}
+	return nil
+}
+
 // ExportExecutionConfig 导出执行实例当前的配置快照（图结构 + 节点定义 + 运行时状态）。
 // 用于续跑修改图后立即持久化新快照，避免“改完未跑”期间 DB 快照落后于实例实际图
 func (a *Adapter) ExportExecutionConfig(executionID int64) (string, error) {
@@ -241,6 +262,28 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 				"params":   metadataToMap(p.GetParam()),
 				"metadata": metadataToMap(p.Metadata()),
 			},
+		})
+	case dag.PipelinePaused:
+		// 层边界暂停生效时同步导出快照（此刻当前层节点已全部终结，状态干净），
+		// 供 server 重启后从暂停点重建实例恢复运行
+		if h, ok := exportHandler.Load().(func(int64, string)); ok && h != nil {
+			id := fmt.Sprintf("exec-%d", l.executionID)
+			if snapshotYAML, err := l.adapter.runtime.ExportConfig(id); err == nil {
+				h(l.executionID, snapshotYAML)
+			}
+		}
+		l.adapter.PushEvent(ExecutionEvent{
+			Type:        "execution_paused",
+			ExecutionID: l.executionID,
+			Status:      "paused",
+			Timestamp:   time.Now(),
+		})
+	case dag.PipelineResumed:
+		l.adapter.PushEvent(ExecutionEvent{
+			Type:        "execution_resumed",
+			ExecutionID: l.executionID,
+			Status:      "running",
+			Timestamp:   time.Now(),
 		})
 	case dag.PipelineNodeStart:
 		node := p.CurrentNode()

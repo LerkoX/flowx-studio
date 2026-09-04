@@ -14,7 +14,7 @@ export type NodeWidgetStatus = 'idle' | 'running' | 'success' | 'failed' | 'skip
 /** 流水线执行实例的实时 metadata（来自 SSE 推送，无运行实例时为 null） */
 export interface NodeWidgetExecution {
   id: string
-  status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
+  status: 'pending' | 'running' | 'paused' | 'success' | 'failed' | 'cancelled'
   trigger?: string
   startedAt?: string
   completedAt?: string

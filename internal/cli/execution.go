@@ -58,6 +58,8 @@ func NewExecutionCmd() *cobra.Command {
 		newExecutionNodesCmd(),
 		newExecutionLogsCmd(),
 		newExecutionContinueCmd(),
+		newExecutionPauseCmd(),
+		newExecutionResumeCmd(),
 	)
 	return cmd
 }
@@ -136,7 +138,7 @@ func newExecutionListCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().Int64Var(&pipelineID, "pipeline", 0, "filter by pipeline (workflow) ID")
-	cmd.Flags().StringVar(&status, "status", "", "filter by status (running|success|failed|cancelled)")
+	cmd.Flags().StringVar(&status, "status", "", "filter by status (running|paused|success|failed|cancelled)")
 	cmd.Flags().IntVar(&page, "page", 1, "page number")
 	cmd.Flags().IntVar(&pageSize, "page-size", 20, "page size")
 	return cmd
@@ -317,6 +319,70 @@ func newExecutionContinueCmd() *cobra.Command {
 	}
 	cmd.Flags().Int64Var(&id, "id", 0, "execution ID (required)")
 	cmd.Flags().StringVar(&file, "file", "", "new pipeline YAML ('-' for stdin) to update the graph before continuing; finished nodes are skipped, only new/unrun nodes execute")
+	cmd.Flags().BoolVar(&follow, "follow", false, "follow the SSE log stream until the execution finishes")
+	return cmd
+}
+
+// newExecutionPauseCmd 暂停运行中的执行实例（层边界暂停：当前并发层节点执行完后挂起）
+func newExecutionPauseCmd() *cobra.Command {
+	var id int64
+	cmd := &cobra.Command{
+		Use:   "pause",
+		Short: "Pause a running execution (takes effect at the next layer boundary; running nodes are not interrupted)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if maybePrintSchema("execution pause") {
+				return nil
+			}
+			if id <= 0 {
+				return fmt.Errorf("--id is required. Run `flowx-studio execution pause --schema` for the parameter contract")
+			}
+
+			data, err := do(cmd.Context(), http.MethodPost,
+				"/executions/"+strconv.FormatInt(id, 10)+"/pause", nil, nil)
+			if err != nil {
+				return fail("pause execution", err, false)
+			}
+			printData(data, func() {
+				fmt.Printf("Paused execution id=%d\n", id)
+			})
+			return nil
+		},
+	}
+	cmd.Flags().Int64Var(&id, "id", 0, "execution ID (required)")
+	return cmd
+}
+
+// newExecutionResumeCmd 恢复已暂停的执行实例（仅 server 内存中仍存活的实例可恢复）
+func newExecutionResumeCmd() *cobra.Command {
+	var id int64
+	var follow bool
+	cmd := &cobra.Command{
+		Use:   "resume",
+		Short: "Resume a paused execution",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if maybePrintSchema("execution resume") {
+				return nil
+			}
+			if id <= 0 {
+				return fmt.Errorf("--id is required. Run `flowx-studio execution resume --schema` for the parameter contract")
+			}
+
+			data, err := do(cmd.Context(), http.MethodPost,
+				"/executions/"+strconv.FormatInt(id, 10)+"/resume", nil, nil)
+			if err != nil {
+				return fail("resume execution", err, false)
+			}
+			printData(data, func() {
+				fmt.Printf("Resumed execution id=%d\n", id)
+			})
+
+			if follow {
+				return followExecution(cmd.Context(), id)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().Int64Var(&id, "id", 0, "execution ID (required)")
 	cmd.Flags().BoolVar(&follow, "follow", false, "follow the SSE log stream until the execution finishes")
 	return cmd
 }

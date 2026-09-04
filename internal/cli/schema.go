@@ -61,6 +61,25 @@ var schemas = map[string]string{
   },
   "required": ["id"]
 }`,
+	"execution pause": `{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "flowx-studio execution pause",
+  "type": "object",
+  "properties": {
+    "id": {"type": "integer", "description": "执行实例 ID（必填）；仅 running 状态的实例可暂停。层边界暂停：当前并发层节点执行完后挂起，不中断运行中的节点"}
+  },
+  "required": ["id"]
+}`,
+	"execution resume": `{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "flowx-studio execution resume",
+  "type": "object",
+  "properties": {
+    "id":     {"type": "integer", "description": "执行实例 ID（必填）；仅 paused 状态的实例可恢复。暂停时已导出运行时快照，server 重启后会自动从快照重建并增量续跑（已终结节点跳过，崩溃时 RUNNING 的节点重跑）"},
+    "follow": {"type": "boolean", "default": false, "description": "跟随 SSE 日志流直到执行结束"}
+  },
+  "required": ["id"]
+}`,
 	"node create": `{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "flowx-studio node create",

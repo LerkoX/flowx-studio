@@ -10,6 +10,8 @@ const KNOWN_EVENTS = [
   'execution.log',
   'execution_start',
   'execution_complete',
+  'execution_paused',
+  'execution_resumed',
   'node_start',
   'node_complete',
   'workflow.created',

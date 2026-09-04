@@ -26,7 +26,7 @@ export interface ExecutionLog {
 export interface ExecutionStatus {
   id: string
   workflowId: string
-  status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
+  status: 'pending' | 'running' | 'paused' | 'success' | 'failed' | 'cancelled'
   trigger?: string
   startedAt?: Date
   completedAt?: Date

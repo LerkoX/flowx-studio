@@ -531,7 +531,23 @@ GET /api/v1/executions/:id/logs
 }
 ```
 
-### 4.5.6 续跑已结束的执行实例
+### 4.5.6 暂停 / 恢复运行中的执行实例
+
+```http
+POST /api/v1/executions/:id/pause
+POST /api/v1/executions/:id/resume
+```
+
+- `pause`：仅 `running` 状态可暂停。层边界暂停——状态立即置为 `paused`（立即落库并广播
+  `execution_paused` SSE 事件），当前并发层的节点执行完后在层边界挂起，**不中断运行中的节点**
+- `resume`：仅 `paused` 状态可恢复，恢复后状态回到 `running`（广播 `execution_resumed`）。
+  实例在内存时直接 Resume；**server 重启后也可恢复**：暂停时会导出运行时快照
+  （调用 pause 时立即导出一次 + 层边界生效时 `PipelinePaused` 事件再导出一次干净状态），
+  resume 发现实例不在内存时自动从快照重建并增量续跑（已终结节点跳过；若崩溃发生在
+  层边界之前，当时 RUNNING 的节点会重跑，at-least-once 语义）
+- `paused` 状态的执行不可续跑（`continue` 会拒绝），也不计入已结束状态
+
+### 4.5.7 续跑已结束的执行实例
 
 ```http
 POST /api/v1/executions/:id/continue
@@ -636,6 +652,8 @@ PUT /api/v1/config/system
 | `execution nodes --id E` | 节点状态与返回数据 | `GET /executions/:id/nodes` |
 | `execution logs --id E [--node X] [--level L]` | 查询执行日志 | `GET /executions/:id/logs` |
 | `execution continue --id E [--file wf.yaml] [--follow]` | 续跑已结束的执行，可追加节点 | `POST /executions/:id/continue` |
+| `execution pause --id E` | 暂停运行中的执行（层边界生效） | `POST /executions/:id/pause` |
+| `execution resume --id E [--follow]` | 恢复已暂停的执行 | `POST /executions/:id/resume` |
 | `node list` | 列出节点 | `GET /nodes` |
 | `node create --file node.yaml` | 创建节点（承接原 FAP `create_node` 动作） | `POST /nodes` |
 | `node update --id N --file node.yaml` | 原地更新节点定义（保持节点 ID；全量替换） | `PUT /nodes/:id` |
@@ -684,7 +702,9 @@ PUT /api/v1/config/system
 │   ├── GET    /:id/stream 实时日志流 (SSE)
 │   ├── GET    /:id/logs  查询执行日志
 │   ├── GET    /:id/logs/export?format=json|txt|markdown  导出执行日志
-│   └── POST   /:id/continue  续跑已结束的执行（可选携带新 YAML 追加节点）
+│   ├── POST   /:id/continue  续跑已结束的执行（可选携带新 YAML 追加节点）
+│   ├── POST   /:id/pause     暂停运行中的执行（层边界暂停，不中断运行中节点）
+│   └── POST   /:id/resume    恢复已暂停的执行（仅内存中存活的实例）
 │
 ├── /events
 │   └── GET    /          全局事件流 (SSE)

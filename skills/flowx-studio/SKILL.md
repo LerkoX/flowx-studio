@@ -46,6 +46,8 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 | 查询节点状态与返回数据 | `flowx-studio execution nodes --id <E> --json` |
 | 查询节点日志 | `flowx-studio execution logs --id <E> [--node <节点ID>] [--level error] --json` |
 | 续跑已结束的执行（可追加节点） | `flowx-studio execution continue --id <E> [--file wf.yaml] [--follow]` |
+| 暂停运行中的执行（层边界生效） | `flowx-studio execution pause --id <E>` |
+| 恢复已暂停的执行 | `flowx-studio execution resume --id <E> [--follow]` |
 | 向用户提问 | `flowx-studio ask --key <k> --prompt "<问题>" [--options a,b,c] [--default v]` |
 | 展示信息卡片 | `flowx-studio info --title <t> --message <m> [--level info\|warn\|error]` |
 
@@ -60,6 +62,7 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 - **节点 ID 仅支持 ASCII**（字母/数字/下划线/连字符）：`Nodes` 的键与 `Graph` 中的节点名禁止使用中文等非 ASCII 字符（底层 mermaid 解析器会静默丢弃含非 ASCII 标识符的边，导致接线断裂、节点变孤立起点）。显示名可用中文——通过节点的 `name` 字段设置（如 `name: 回声`），不影响图解析。
 - `ask` 的回答从 stdout 以 `key=value` 形式输出；`info` 为纯终端卡片，两者都不访问 server。
 - `pipeline update` 省略的字段会保留原值（CLI 自动合并）。
+- `execution pause` / `execution resume`：暂停/恢复运行中的执行。层边界暂停——状态立即置为 `paused`，当前并发层节点执行完后挂起（不中断运行中的节点）。暂停时自动导出运行时快照，**server 重启后 resume 会从快照重建并增量续跑**（已终结节点跳过，崩溃时 RUNNING 的节点重跑）。`paused` 状态不可 `continue`
 - `execution continue` 用于已结束（success/failed/cancelled）的执行实例：不带 `--file` 时增量重跑（已终结节点跳过）；带 `--file` 时更新该执行的**运行时快照**（可追加节点）再继续运行。续跑沿用同一执行 ID，日志与节点记录追加，可通过 `execution logs/nodes/get` 查询。
 - **执行实例是独立于模板的个体**：续跑修改的是该执行的快照（DB `runtime_yaml`），不是流水线定义；前端回放态画布也按快照渲染。标准改法：`execution yaml --id <E> > snap.yaml` 导出快照 → 编辑（Graph 加边、Nodes 加节点）→ `execution continue --id <E> --file snap.yaml`。
 - **快照编辑规则**：快照中已有的节点保持原样（物化形式，带 steps，展开器会跳过）；**新增节点直接写编写态**（`config.nodeRef` + `config.params`，无需 steps/executor，展开器自动物化并复用快照中同类型的执行器条目）；`Version`/`Name` 不可变、已执行节点不可删改、`Executors` 已有条目不可改删但**允许新增**（追加 docker 等异构节点时）。
