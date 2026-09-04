@@ -59,18 +59,18 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
   // preview：只能平移画布；edit：可拖动节点、切换布局方向
   const [mode, setMode] = useState<'preview' | 'edit'>('preview')
   const [, setSelectedNode] = useState<string | null>(null)
-  const {
-    currentWorkflow,
-    nodeStatuses,
-    nodeCompletedAt,
-    nodePrevCompletedAt,
-    nodeRuntimeData,
-    updateNodeStatus,
-    setNodeStatuses,
-    setNodeRuntimeData,
-    resetNodeRuntimeData,
-  } = useWorkflowStore()
-  const { nodes: nodeDefs, loadNodes } = useNodeStore()
+  // 精确选择器订阅：避免 store 中无关字段变化触发整个画布重渲染
+  const currentWorkflow = useWorkflowStore((s) => s.currentWorkflow)
+  const nodeStatuses = useWorkflowStore((s) => s.nodeStatuses)
+  const nodeCompletedAt = useWorkflowStore((s) => s.nodeCompletedAt)
+  const nodePrevCompletedAt = useWorkflowStore((s) => s.nodePrevCompletedAt)
+  const nodeRuntimeData = useWorkflowStore((s) => s.nodeRuntimeData)
+  const updateNodeStatus = useWorkflowStore((s) => s.updateNodeStatus)
+  const setNodeStatuses = useWorkflowStore((s) => s.setNodeStatuses)
+  const setNodeRuntimeData = useWorkflowStore((s) => s.setNodeRuntimeData)
+  const resetNodeRuntimeData = useWorkflowStore((s) => s.resetNodeRuntimeData)
+  const nodeDefs = useNodeStore((s) => s.nodes)
+  const loadNodes = useNodeStore((s) => s.loadNodes)
   const selectedExecutionId = useExecutionStore((s) => s.selectedExecutionId)
   const selectedExecutionYaml = useExecutionStore((s) => s.selectedExecutionYaml)
 
@@ -229,6 +229,11 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
         const runtime = nodeRuntimeData[node.id]
         if (!runtime) return node
 
+        // 引用未变直接跳过：一次更新中大多数节点没有变化，免去深比较开销
+        if (runtime.inputs === node.data.inputs && runtime.outputs === node.data.outputs) {
+          return node
+        }
+
         const hasChanges =
           JSON.stringify(runtime.inputs) !== JSON.stringify(node.data.inputs) ||
           JSON.stringify(runtime.outputs) !== JSON.stringify(node.data.outputs)
@@ -248,7 +253,6 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
     )
   }, [nodeRuntimeData, setNodes])
 
-  const executionStore = useExecutionStore()
   const selectedExecution = useExecutionStore((s) => s.selectedExecution)
 
   // 将执行实例 metadata 中的节点输出（扁平点键：GetWeather.city）按节点分发到 nodeRuntimeData，
@@ -278,8 +282,8 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
       const payload = data as { execution_id?: number }
       if (payload.execution_id) {
         const id = String(payload.execution_id)
-        executionStore.startExecution(id)
-        executionStore.selectExecution(id)
+        useExecutionStore.getState().startExecution(id)
+        useExecutionStore.getState().selectExecution(id)
       }
       return
     }
@@ -290,7 +294,7 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
         params?: Record<string, unknown>
       }
       if (payload.execution_id) {
-        executionStore.updateExecutionMetadata(String(payload.execution_id), {
+        useExecutionStore.getState().updateExecutionMetadata(String(payload.execution_id), {
           status: 'running',
           params: payload.params || {},
         })
@@ -301,7 +305,7 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
     if (type === 'execution_paused') {
       const payload = data as { execution_id?: number }
       if (payload.execution_id) {
-        executionStore.updateExecutionStatus(String(payload.execution_id), 'paused')
+        useExecutionStore.getState().updateExecutionStatus(String(payload.execution_id), 'paused')
       }
       return
     }
@@ -309,7 +313,7 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
     if (type === 'execution_resumed') {
       const payload = data as { execution_id?: number }
       if (payload.execution_id) {
-        executionStore.updateExecutionStatus(String(payload.execution_id), 'running')
+        useExecutionStore.getState().updateExecutionStatus(String(payload.execution_id), 'running')
       }
       return
     }
@@ -340,7 +344,7 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
         timestamp?: string
       }
       if (payload.execution_id) {
-        executionStore.appendRealtimeLog({
+        useExecutionStore.getState().appendRealtimeLog({
           id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
           executionId: payload.execution_id,
           nodeId: payload.node_id,
@@ -363,14 +367,14 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
         metadata?: Record<string, unknown>
       }
       if (payload.execution_id) {
-        executionStore.updateExecutionMetadata(String(payload.execution_id), {
+        useExecutionStore.getState().updateExecutionMetadata(String(payload.execution_id), {
           status: (payload.status || 'success').toLowerCase(),
           params: payload.params || {},
           metadata: payload.metadata || {},
         })
         // 续跑（continue）不产生 execution.completed 事件，此处兜底结束运行态；
         // 普通运行该调用幂等（随后的 execution.completed 会重复设置，无副作用）
-        executionStore.stopExecution()
+        useExecutionStore.getState().stopExecution()
       }
       return
     }
@@ -378,12 +382,12 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
     if (type === 'execution.completed') {
       const payload = data as { execution_id?: number; status?: string }
       if (payload.execution_id) {
-        executionStore.stopExecution()
-        executionStore.updateExecutionStatus(
+        useExecutionStore.getState().stopExecution()
+        useExecutionStore.getState().updateExecutionStatus(
           String(payload.execution_id),
           (payload.status as ExecutionStatus['status']) || 'success'
         )
-        executionStore.selectExecution(String(payload.execution_id))
+        useExecutionStore.getState().selectExecution(String(payload.execution_id))
       }
     }
   })

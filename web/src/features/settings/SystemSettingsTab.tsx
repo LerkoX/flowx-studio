@@ -35,7 +35,10 @@ function SectionTitle({ icon: Icon, children }: { icon: typeof Monitor; children
 
 export default function SystemSettingsTab() {
   const { t } = useTranslation()
-  const { systemSettings, updateSystemSettings, loadSystemSettings, error } = useSettingsStore()
+  const systemSettings = useSettingsStore((s) => s.systemSettings)
+  const updateSystemSettings = useSettingsStore((s) => s.updateSystemSettings)
+  const loadSystemSettings = useSettingsStore((s) => s.loadSystemSettings)
+  const error = useSettingsStore((s) => s.error)
   const [formData, setFormData] = useState(systemSettings)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)

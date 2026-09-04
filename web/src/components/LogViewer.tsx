@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
+import { useRef, useEffect, useState, useCallback, useMemo, memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useExecutionStore, type LogLevel } from '@/stores/executionStore'
 import Select from '@/components/Select'
@@ -20,16 +20,15 @@ interface LogSegment {
 
 export default function LogViewer() {
   const { t } = useTranslation()
-  const {
-    executionLog,
-    logsTotal,
-    loadingOlder,
-    loadingLogs,
-    executionNodes,
-    logFilter,
-    setLogFilter,
-    loadOlderLogs,
-  } = useExecutionStore()
+  // 精确选择器订阅：执行期间 store 高频更新，避免无关字段变化重渲染日志列表
+  const executionLog = useExecutionStore((s) => s.executionLog)
+  const logsTotal = useExecutionStore((s) => s.logsTotal)
+  const loadingOlder = useExecutionStore((s) => s.loadingOlder)
+  const loadingLogs = useExecutionStore((s) => s.loadingLogs)
+  const executionNodes = useExecutionStore((s) => s.executionNodes)
+  const logFilter = useExecutionStore((s) => s.logFilter)
+  const setLogFilter = useExecutionStore((s) => s.setLogFilter)
+  const loadOlderLogs = useExecutionStore((s) => s.loadOlderLogs)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [userScrolled, setUserScrolled] = useState(false)
   // prepend 旧日志后保持视口停留在原内容的滚动补偿标记
@@ -278,8 +277,9 @@ function NodeLogSegment({
   )
 }
 
-// 单行日志：级别与时间小 label 置于行首，消息内容完整展示不截断
-function LogLine({
+// 单行日志：级别与时间小 label 置于行首，消息内容完整展示不截断。
+// memo 化后新日志到达时只渲染新增行，已加载的历史行不重复渲染
+const LogLine = memo(function LogLine({
   log,
   searchQuery,
 }: {
@@ -354,7 +354,7 @@ function LogLine({
       )}
     </div>
   )
-}
+})
 
 function formatTime(date: Date): string {
   const h = String(date.getHours()).padStart(2, '0')

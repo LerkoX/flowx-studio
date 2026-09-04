@@ -54,7 +54,30 @@ const LOG_PAGE_SIZE = 300
 // 过滤条件变化时防抖重载日志
 let filterDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
-export const useExecutionStore = create<ExecutionState>((set, get) => ({
+// 实时日志批量追加：SSE 高频推送时先入缓冲，合并为一次 set 再通知订阅者，
+// 避免每条日志都触发一次全量重渲染（渲染风暴）
+const REALTIME_LOG_FLUSH_MS = 150
+let realtimeLogBuffer: unknown[] = []
+let realtimeLogTimer: ReturnType<typeof setTimeout> | null = null
+
+export const useExecutionStore = create<ExecutionState>((set, get) => {
+  // 立即将缓冲区中的实时日志落进 state；在替换/清空 executionLog 的操作前调用，
+  // 防止异步 flush 把旧日志追加到已切换的执行实例上
+  const flushRealtimeLogs = () => {
+    if (realtimeLogTimer) {
+      clearTimeout(realtimeLogTimer)
+      realtimeLogTimer = null
+    }
+    if (realtimeLogBuffer.length === 0) return
+    const batch = realtimeLogBuffer.map(normalizeLog)
+    realtimeLogBuffer = []
+    set((state) => ({
+      executionLog: [...state.executionLog, ...batch],
+      logsTotal: state.logsTotal + batch.length,
+    }))
+  }
+
+  return {
   isExecuting: false,
   runningExecutionId: null,
   executions: [],
@@ -95,6 +118,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   },
 
   selectExecution: async (id) => {
+    // 切换执行实例前落盘缓冲日志，避免 flush 晚于日志重载而串数据
+    flushRealtimeLogs()
     set({ selectedExecutionId: id, selectedExecution: null, selectedExecutionYaml: null, loadingSelected: true })
     if (!id) {
       set({ executionNodes: [], executionLog: [], loadingSelected: false })
@@ -139,6 +164,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
 
   // 加载最后 N 条日志（desc 取回后反转为时间正序展示）
   loadLatestLogs: async (executionId) => {
+    flushRealtimeLogs()
     set({ loadingLogs: true })
     try {
       const { logFilter } = get()
@@ -190,7 +216,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
     }
   },
 
-  startExecution: (id) =>
+  startExecution: (id) => {
+    flushRealtimeLogs()
     set({
       isExecuting: true,
       runningExecutionId: id,
@@ -198,7 +225,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       executionLog: [],
       logsTotal: 0,
       executionNodes: [],
-    }),
+    })
+  },
 
   stopExecution: () => set({ isExecuting: false, runningExecutionId: null }),
 
@@ -240,11 +268,12 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
 
   setExecutionNodes: (nodes) => set({ executionNodes: nodes }),
 
-  appendRealtimeLog: (entry) =>
-    set((state) => ({
-      executionLog: [...state.executionLog, normalizeLog(entry)],
-      logsTotal: state.logsTotal + 1,
-    })),
+  appendRealtimeLog: (entry) => {
+    realtimeLogBuffer.push(entry)
+    if (!realtimeLogTimer) {
+      realtimeLogTimer = setTimeout(flushRealtimeLogs, REALTIME_LOG_FLUSH_MS)
+    }
+  },
 
   setLogFilter: (filter) => {
     const prev = get().logFilter
@@ -266,7 +295,10 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
     }, 300)
   },
 
-  clearLogs: () => set({ executionLog: [], logsTotal: 0 }),
+  clearLogs: () => {
+    flushRealtimeLogs()
+    set({ executionLog: [], logsTotal: 0 })
+  },
 
   exportLogs: (format) => {
     const { executionLog } = get()
@@ -289,7 +321,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
           .join('\n')
     }
   },
-}))
+  }
+})
 
 function normalizeMetadata(value: unknown): Record<string, unknown> | undefined {
   if (!value) return undefined

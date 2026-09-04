@@ -16,25 +16,26 @@ import type { NodeDefinition } from '@/types/node'
 export default function NodeManagerPage() {
   const { t } = useTranslation()
   const { confirm, dialog } = useConfirm()
-  const {
-    searchQuery,
-    selectedTags,
-    selectedLanguage,
-    selectedNodeType,
-    isAdding,
-    setSearchQuery,
-    setSelectedTags,
-    setSelectedLanguage,
-    setSelectedNodeType,
-    addNode,
-    deleteNode,
-    setIsAdding,
-    setAddError,
-    getFilteredNodes,
-    getAllTags,
-    getAllLanguages,
-    loadNodes,
-  } = useNodeStore()
+  // 精确选择器订阅：状态切片驱动 getFilteredNodes 等派生计算，actions 为稳定引用
+  const searchQuery = useNodeStore((s) => s.searchQuery)
+  const selectedTags = useNodeStore((s) => s.selectedTags)
+  const selectedLanguage = useNodeStore((s) => s.selectedLanguage)
+  const selectedNodeType = useNodeStore((s) => s.selectedNodeType)
+  const isAdding = useNodeStore((s) => s.isAdding)
+  // nodes 切片变化时重渲染，getFilteredNodes/getAllTags/getAllLanguages 在渲染期读取最新值
+  useNodeStore((s) => s.nodes)
+  const setSearchQuery = useNodeStore((s) => s.setSearchQuery)
+  const setSelectedTags = useNodeStore((s) => s.setSelectedTags)
+  const setSelectedLanguage = useNodeStore((s) => s.setSelectedLanguage)
+  const setSelectedNodeType = useNodeStore((s) => s.setSelectedNodeType)
+  const addNode = useNodeStore((s) => s.addNode)
+  const deleteNode = useNodeStore((s) => s.deleteNode)
+  const setIsAdding = useNodeStore((s) => s.setIsAdding)
+  const setAddError = useNodeStore((s) => s.setAddError)
+  const getFilteredNodes = useNodeStore((s) => s.getFilteredNodes)
+  const getAllTags = useNodeStore((s) => s.getAllTags)
+  const getAllLanguages = useNodeStore((s) => s.getAllLanguages)
+  const loadNodes = useNodeStore((s) => s.loadNodes)
 
   // 进入节点管理页时加载节点列表（store 为内存态，刷新页面后必须重新拉取）
   useEffect(() => {

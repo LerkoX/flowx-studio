@@ -13,7 +13,7 @@ export default function WorkflowListPage() {
   const { t } = useTranslation()
   const [workflows, setWorkflows] = useState<Workflow[]>([])
   const [loading, setLoading] = useState(true)
-  const { setCurrentWorkflow } = useWorkflowStore()
+  const setCurrentWorkflow = useWorkflowStore((s) => s.setCurrentWorkflow)
   const { confirm, dialog } = useConfirm()
 
   const load = async () => {
