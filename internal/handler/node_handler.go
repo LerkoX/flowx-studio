@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -143,6 +144,10 @@ func (h *NodeHandler) Delete(c *gin.Context) {
 	}
 
 	if err := h.service.Delete(id); err != nil {
+		if errors.Is(err, service.ErrNodeReferenced) {
+			Error(c, http.StatusConflict, err.Error())
+			return
+		}
 		Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}

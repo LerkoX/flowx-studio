@@ -3,6 +3,7 @@ package service
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -13,7 +14,12 @@ import (
 	"github.com/LerkoX/flowx-studio/internal/model"
 	"github.com/LerkoX/flowx-studio/internal/sandbox"
 	"github.com/LerkoX/flowx-studio/internal/validator"
+	"github.com/LerkoX/flowx/core"
+	"gopkg.in/yaml.v3"
 )
+
+// ErrNodeReferenced 节点被流水线引用，禁止删除（handler 据此返回 409）
+var ErrNodeReferenced = errors.New("node is referenced by workflows")
 
 // NodeService 节点服务
 type NodeService struct {
@@ -300,8 +306,25 @@ func (s *NodeService) Update(id int64, req *model.Node) error {
 }
 
 // Delete 删除节点（同时清理资产目录）
+// 被流水线 YAML 以 config.nodeRef 引用的节点禁止删除，避免运行期展开失败
 func (s *NodeService) Delete(id int64) error {
 	node, getErr := s.Get(id)
+
+	// 节点存在时先检查流水线引用（按 nodeRef 名称匹配，与运行期展开器的查找方式一致）
+	if getErr == nil {
+		refs, err := s.findReferencingWorkflows(node.Name)
+		if err != nil {
+			return fmt.Errorf("failed to check node references: %w", err)
+		}
+		if len(refs) > 0 {
+			names := make([]string, len(refs))
+			for i, wf := range refs {
+				names[i] = fmt.Sprintf("%s(id=%d)", wf.Name, wf.ID)
+			}
+			return fmt.Errorf("%w: 节点 %q 被 %d 条流水线引用（%s）",
+				ErrNodeReferenced, node.Name, len(refs), strings.Join(names, ", "))
+		}
+	}
 
 	_, err := s.db.Exec("DELETE FROM nodes WHERE id = ?", id)
 	if err != nil {
@@ -322,6 +345,33 @@ func (s *NodeService) Delete(id int64) error {
 	})
 
 	return nil
+}
+
+// findReferencingWorkflows 全量扫描流水线 YAML，返回以 config.nodeRef 引用指定节点名的流水线。
+// 解析失败的流水线 YAML 视为不引用（与运行期行为一致：坏 YAML 本身就无法运行）。
+func (s *NodeService) findReferencingWorkflows(nodeName string) ([]model.Workflow, error) {
+	var workflows []model.Workflow
+	if err := s.db.Select(&workflows, "SELECT id, name, yaml_config FROM workflows"); err != nil {
+		return nil, err
+	}
+
+	var refs []model.Workflow
+	for _, wf := range workflows {
+		var cfg core.PipelineConfig
+		if err := yaml.Unmarshal([]byte(wf.YAMLConfig), &cfg); err != nil {
+			continue
+		}
+		for _, nodeCfg := range cfg.Nodes {
+			if nodeCfg.Config == nil {
+				continue
+			}
+			if ref, ok := nodeCfg.Config["nodeRef"].(string); ok && ref == nodeName {
+				refs = append(refs, wf)
+				break
+			}
+		}
+	}
+	return refs, nil
 }
 
 // MockTest Mock 测试节点
