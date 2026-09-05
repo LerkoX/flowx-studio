@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useParams, useSearchParams, Navigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronRight, ChevronLeft, Play, Pause, Loader2, History } from 'lucide-react'
 import WorkflowCanvas from '@/features/workflow-canvas/WorkflowCanvas'
@@ -141,6 +141,11 @@ export default function WorkflowCanvasPage() {
       return prev
     })
   }, [isPlayback])
+
+  // 前端不提供流水线编辑界面，无 ID 的空画布无意义，重定向回列表页。
+  // 重定向判断放在所有 hooks 之后：/canvas 与 /canvas/:id 共用本组件，
+  // 参数变化不触发卸载，提前 return 会破坏 hooks 顺序
+  if (!routeWorkflowId) return <Navigate to="/" replace />
 
   // 内页运行：携带参数面板中的参数触发执行，SSE 事件会驱动画布状态与日志，
   // 运行后自动进入新执行的回放态（execution.started 事件会设置 selectedExecutionId）

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
-import { Play, Plus, Trash2, GitBranch } from 'lucide-react'
+import { Play, Trash2, GitBranch } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getWorkflows, runWorkflow, deleteWorkflow } from '@/services/workflowService'
 import { useWorkflowStore } from '@/stores/workflowStore'
@@ -69,20 +69,9 @@ export default function WorkflowListPage() {
       className="h-full overflow-auto p-6"
     >
       <div className="max-w-5xl mx-auto space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-white/90">{t('workflow.listTitle')}</h1>
-            <p className="text-white/40 text-sm mt-1">{t('workflow.listSubtitle')}</p>
-          </div>
-          <Link
-            to="/canvas"
-            onClick={() => setCurrentWorkflow(null)}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/10 text-white/90
-                       hover:bg-white/20 transition-colors border border-white/10"
-          >
-            <Plus size={18} />
-            {t('common.create')}
-          </Link>
+        <div>
+          <h1 className="text-2xl font-bold text-white/90">{t('workflow.listTitle')}</h1>
+          <p className="text-white/40 text-sm mt-1">{t('workflow.listSubtitle')}</p>
         </div>
 
         {loading ? (
