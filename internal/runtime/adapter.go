@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -225,6 +226,26 @@ func metadataToMap(m dag.Metadata) map[string]interface{} {
 	return result
 }
 
+// nodeOutputs 从流水线 metadata 中提取某个节点的输出字段（键为 <nodeID>.<field> 扁平结构），
+// 返回去掉节点前缀的字段 map。节点完成时其 extract 输出已写入 metadata store，
+// 随 node_complete 事件下发，供前端画布实时展示节点输出
+func nodeOutputs(m dag.Metadata, nodeID string) map[string]interface{} {
+	if m == nil || nodeID == "" {
+		return nil
+	}
+	prefix := nodeID + "."
+	var result map[string]interface{}
+	for k, v := range m {
+		if field, ok := strings.CutPrefix(k, prefix); ok {
+			if result == nil {
+				result = make(map[string]interface{})
+			}
+			result[field] = v.Value
+		}
+	}
+	return result
+}
+
 // Handle 处理事件
 func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 	fmt.Printf("[debug] listener exec-%d event=%s\n", l.executionID, event)
@@ -309,6 +330,9 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 			NodeID:      nodeID,
 			Status:      "success",
 			Timestamp:   time.Now(),
+			Data: map[string]interface{}{
+				"outputs": nodeOutputs(p.Metadata(), nodeID),
+			},
 		})
 	case dag.PipelineNodeFailed:
 		node := p.CurrentNode()
@@ -322,6 +346,9 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 			NodeID:      nodeID,
 			Status:      "failed",
 			Timestamp:   time.Now(),
+			Data: map[string]interface{}{
+				"outputs": nodeOutputs(p.Metadata(), nodeID),
+			},
 		})
 	}
 }

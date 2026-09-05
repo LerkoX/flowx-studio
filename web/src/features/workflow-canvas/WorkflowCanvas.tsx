@@ -35,6 +35,17 @@ const statusMap: Record<string, string> = {
   failed: 'failed',
 }
 
+// 简单的 semver 比较（1.10.0 > 1.2.0），用于同名节点取最新版本
+function compareVersion(a?: string, b?: string): number {
+  const pa = (a || '0').split('.').map((x) => parseInt(x, 10) || 0)
+  const pb = (b || '0').split('.').map((x) => parseInt(x, 10) || 0)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0)
+    if (d !== 0) return d
+  }
+  return 0
+}
+
 // 判断边是否处于活跃（高亮）状态：目标节点 running 时，只有「目标上一轮结束后
 // 又完成过一次」的源节点入边才亮——循环图中可区分正向边与回边的真实触发来源；
 // 无时间戳数据（打开历史执行/中途进入运行）时回退为「目标运行即亮」
@@ -49,6 +60,20 @@ function isEdgeActive(
   const sourceAt = completedAt[edge.source]
   if (!sourceAt) return false
   return sourceAt > (prevCompletedAt[edge.target] ?? 0)
+}
+
+// 判断边是否已走过（实线）：两端当前都成功，或两端都曾真实完成过。
+// 完成时间戳只在真实 running → 终态时更新（循环迭代中跳过上游节点
+// 重发的 node_complete 不污染），且只增不减——因此循环体外的入环边在
+// 目标节点重跑（running）期间保持实线，不会回退成 idle 流动虚线
+function isEdgeTraversed(
+  source: string,
+  target: string,
+  statuses: Record<string, string>,
+  completedAt: Record<string, number>,
+): boolean {
+  if (statuses[source] === 'success' && statuses[target] === 'success') return true
+  return completedAt[source] !== undefined && completedAt[target] !== undefined
 }
 
 function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
@@ -102,7 +127,18 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
     const matchNodeDef = (instanceId: string) => {
       const ref = nodeRefs[instanceId]
       if (!ref) return undefined
-      return nodeDefs.find((n) => n.name === ref)
+      // 快照物化后 nodeRef 带版本锁（echo@1.1.0）：按 名称+版本 精确匹配；
+      // 裸名称（模板编写态）或锁定版本已被删除时，回退同名最新版本——
+      // 与后端裸 nodeRef 解析到最新版本的语义一致
+      const at = ref.lastIndexOf('@')
+      const name = at > 0 ? ref.slice(0, at) : ref
+      const version = at > 0 ? ref.slice(at + 1) : ''
+      const candidates = nodeDefs.filter((n) => n.name === name)
+      if (version) {
+        const exact = candidates.find((n) => n.version === version)
+        if (exact) return exact
+      }
+      return candidates.sort((a, b) => compareVersion(b.version, a.version))[0]
     }
 
     // 过期取消：首次进入时 mermaid 动态加载较慢，若 nodeDefs 在此期间加载完成
@@ -111,6 +147,17 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
 
     parseWorkflowGraph(sourceYaml)
       .then(({ nodes: parsedNodes, edges: parsedEdges }) => {
+        // 状态读取必须取解析完成时刻的最新值（getState），不能用 effect 闭包快照：
+        // mermaid 解析是异步的，期间 selectExecutionAndSync 可能已把执行状态
+        // 同步进 store（选中/清除历史执行），用闭包快照重建节点会把刚同步的
+        // 状态用旧值覆盖（出现「选中显示 idle、清除反而显示 success」的反转）
+        const {
+          nodeStatuses: curStatuses,
+          nodeCompletedAt: curCompletedAt,
+          nodePrevCompletedAt: curPrevCompletedAt,
+          nodeRuntimeData: curRuntimeData,
+        } = useWorkflowStore.getState()
+
         const rawNodes: Node[] = parsedNodes.map((n) => {
           const nodeDef = n.id === '__start__' || n.id === '__end__' ? undefined : matchNodeDef(n.id)
           return {
@@ -120,10 +167,10 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
             data: {
               id: n.id,
               name: n.label,
-              status: nodeStatuses[n.id] || 'idle',
+              status: curStatuses[n.id] || 'idle',
               accentColor: nodeDef?.ui ? '#a855f7' : '#6366f1',
-              inputs: nodeRuntimeData[n.id]?.inputs,
-              outputs: nodeRuntimeData[n.id]?.outputs,
+              inputs: curRuntimeData[n.id]?.inputs,
+              outputs: curRuntimeData[n.id]?.outputs,
               direction,
               nodeRef: nodeDef?.name,
               nodeDbId: nodeDef?.id,
@@ -143,12 +190,11 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
           data: {
             animated: isEdgeActive(
               { source: e.source, target: e.target } as Edge,
-              nodeStatuses,
-              nodeCompletedAt,
-              nodePrevCompletedAt,
+              curStatuses,
+              curCompletedAt,
+              curPrevCompletedAt,
             ),
-            traversed:
-              nodeStatuses[e.source] === 'success' && nodeStatuses[e.target] === 'success',
+            traversed: isEdgeTraversed(e.source, e.target, curStatuses, curCompletedAt),
             label: e.label,
           },
         }))
@@ -189,14 +235,13 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
     setNodes(layouted)
   }, [nodes, edges, direction, setNodes])
 
-  // 实时同步执行状态
+  // 实时同步执行状态：空状态表（退出回放态/新执行开始）时全量复位为 idle，
+  // 不能 early-return，否则上一轮的着色会残留在节点上
   useEffect(() => {
-    if (!nodeStatuses || Object.keys(nodeStatuses).length === 0) return
-
     setNodes((nds) =>
       nds.map((node) => {
-        const status = nodeStatuses[node.id]
-        if (status && status !== node.data.status) {
+        const status = nodeStatuses[node.id] || 'idle'
+        if (status !== node.data.status) {
           return {
             ...node,
             data: { ...node.data, status },
@@ -212,43 +257,35 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
         data: {
           ...edge.data,
           animated: isEdgeActive(edge, nodeStatuses, nodeCompletedAt, nodePrevCompletedAt),
-          traversed:
-            nodeStatuses[edge.source] === 'success' && nodeStatuses[edge.target] === 'success',
+          traversed: isEdgeTraversed(edge.source, edge.target, nodeStatuses, nodeCompletedAt),
           status: nodeStatuses[edge.target] === 'failed' ? 'failed' : 'normal',
         },
       }))
     )
   }, [nodeStatuses, nodeCompletedAt, nodePrevCompletedAt, setNodes, setEdges])
 
-  // 同步节点运行时数据（入参和返回）
+  // 同步节点运行时数据（入参和返回）：退出回放态时 nodeRuntimeData 清空，
+  // 此处同步清掉节点上残留的 inputs/outputs，不能 early-return
   useEffect(() => {
-    if (!nodeRuntimeData || Object.keys(nodeRuntimeData).length === 0) return
-
     setNodes((nds) =>
       nds.map((node) => {
         const runtime = nodeRuntimeData[node.id]
-        if (!runtime) return node
+        const inputs = runtime?.inputs
+        const outputs = runtime?.outputs
 
-        // 引用未变直接跳过：一次更新中大多数节点没有变化，免去深比较开销
-        if (runtime.inputs === node.data.inputs && runtime.outputs === node.data.outputs) {
+        // 引用未变直接跳过：一次更新中大多数节点没有变化
+        if (inputs === node.data.inputs && outputs === node.data.outputs) {
           return node
         }
 
-        const hasChanges =
-          JSON.stringify(runtime.inputs) !== JSON.stringify(node.data.inputs) ||
-          JSON.stringify(runtime.outputs) !== JSON.stringify(node.data.outputs)
-
-        if (hasChanges) {
-          return {
-            ...node,
-            data: {
-              ...node.data,
-              inputs: runtime.inputs,
-              outputs: runtime.outputs,
-            },
-          }
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            inputs,
+            outputs,
+          },
         }
-        return node
       })
     )
   }, [nodeRuntimeData, setNodes])
@@ -325,9 +362,25 @@ function WorkflowCanvasInner({ action }: { action?: React.ReactNode }) {
     }
 
     if (type === 'node_complete') {
-      const payload = data as { node_id?: string; status?: string }
+      const payload = data as {
+        node_id?: string
+        status?: string
+        // 后端 persistRuntimeEvent 会把事件 Data 展开到顶层，outputs 与 node_id 平级
+        outputs?: Record<string, unknown>
+      }
       if (payload.node_id) {
         updateNodeStatus(payload.node_id, statusMap[payload.status || ''] || 'idle')
+        // 节点输出随 node_complete 实时下发：驱动画布节点 UI 即时展示输出，
+        // 不必等执行结束后 metadata 的一次性同步（循环中跳过节点重发的事件
+        // 携带相同输出，重复设置幂等无副作用）
+        const outputs = payload.outputs
+        if (outputs && Object.keys(outputs).length > 0) {
+          const normalized: Record<string, string> = {}
+          for (const [k, v] of Object.entries(outputs)) {
+            normalized[k] = typeof v === 'string' ? v : JSON.stringify(v)
+          }
+          setNodeRuntimeData(payload.node_id, { outputs: normalized })
+        }
       }
       return
     }

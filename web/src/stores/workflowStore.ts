@@ -16,7 +16,13 @@ interface WorkflowState {
   setCurrentWorkflow: (workflow: Workflow | null) => void
   addWorkflow: (workflow: Workflow) => void
   updateNodeStatus: (nodeId: string, status: string) => void
-  setNodeStatuses: (statuses: Record<string, string>) => void
+  setNodeStatuses: (
+    statuses: Record<string, string>,
+    timestamps?: {
+      completedAt: Record<string, number>
+      prevCompletedAt: Record<string, number>
+    },
+  ) => void
   syncParamsFromYAML: (yamlConfig: string) => void
   updateParam: (key: string, value: string | number | boolean | object) => void
   setNodeRuntimeData: (nodeId: string, data: Partial<NodeRuntimeData>) => void
@@ -39,47 +45,13 @@ function parseParamValue(v: unknown): { value: unknown; description?: string } {
 export const useWorkflowStore = create<WorkflowState>((set) => ({
   currentWorkflow: null,
   workflows: [],
-  nodeStatuses: {
-    start: 'success',
-    build: 'running',
-    test: 'idle',
-    deploy: 'idle',
-  },
+  // 初始为空：节点状态与运行时数据完全由执行驱动（SSE 事件 / 回放同步），
+  // 无执行时画布所有节点保持 idle
+  nodeStatuses: {},
   nodeCompletedAt: {},
   nodePrevCompletedAt: {},
   params: {},
-  nodeRuntimeData: {
-    build: {
-      nodeId: 'build',
-      inputs: ['env', 'appName'],
-      outputs: {
-        imageTag: 'myapp:v1.0.0',
-        buildStatus: 'success',
-      },
-      status: 'running',
-      startTime: new Date().toISOString(),
-    },
-    test: {
-      nodeId: 'test',
-      inputs: ['env'],
-      outputs: {},
-      status: 'idle',
-    },
-    deploy: {
-      nodeId: 'deploy',
-      inputs: ['env', 'namespace'],
-      outputs: {},
-      status: 'idle',
-    },
-    start: {
-      nodeId: 'start',
-      inputs: [],
-      outputs: {},
-      status: 'success',
-      startTime: new Date().toISOString(),
-      endTime: new Date().toISOString(),
-    },
-  },
+  nodeRuntimeData: {},
 
   setCurrentWorkflow: (workflow) => set({ currentWorkflow: workflow }),
 
@@ -109,12 +81,14 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
     }
   }),
 
-  // 整体重置状态（新执行开始/切换历史执行）时一并清空时间戳，
-  // 画布高亮在无时间戳数据时回退为「目标节点运行即亮」
-  setNodeStatuses: (statuses) => set({
+  // 整体重置状态（新执行开始/切换历史执行）时默认清空时间戳，
+  // 画布高亮在无时间戳数据时回退为「目标节点运行即亮」。
+  // 选中历史执行时可传入从执行节点记录播种的时间戳，
+  // 避免中途选中运行中的执行时兜底逻辑误亮循环图的入环边
+  setNodeStatuses: (statuses, timestamps) => set({
     nodeStatuses: statuses,
-    nodeCompletedAt: {},
-    nodePrevCompletedAt: {},
+    nodeCompletedAt: timestamps?.completedAt ?? {},
+    nodePrevCompletedAt: timestamps?.prevCompletedAt ?? {},
   }),
 
   syncParamsFromYAML: (yamlConfig: string) => {

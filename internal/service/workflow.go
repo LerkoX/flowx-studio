@@ -894,6 +894,16 @@ func (s *WorkflowService) persistRuntimeEvent(evt runtime.ExecutionEvent) {
 				WHERE execution_id = ? AND node_id = ? AND status = 'running'
 			`, status, completed, duration, evt.ExecutionID, evt.NodeID)
 		}
+		// 节点输出（adapter 在 node_complete 事件的 Data.outputs 携带）增量合并进
+		// 执行 metadata：运行中途选中该执行 / 暂停时也能看到已完成节点的输出，
+		// 不必等 execution_complete 一次性下发
+		if outputs, ok := evt.Data["outputs"].(map[string]interface{}); ok && len(outputs) > 0 && evt.NodeID != "" {
+			prefixed := make(map[string]interface{}, len(outputs))
+			for k, v := range outputs {
+				prefixed[evt.NodeID+"."+k] = v
+			}
+			s.setExecutionMetadata(evt.ExecutionID, "", "", nil, prefixed, "")
+		}
 	case "execution_paused":
 		// 层边界暂停生效：状态落库为 paused，completed_at 保持不变（执行未结束）
 		_, _ = s.db.Exec("UPDATE executions SET status = ? WHERE id = ?", "paused", evt.ExecutionID)
@@ -959,7 +969,16 @@ func (s *WorkflowService) setExecutionMetadata(execID int64, status, trigger str
 		cache["params"] = params
 	}
 	if runtimeMetadata != nil {
-		cache["metadata"] = runtimeMetadata
+		// 合并而非整体替换：node_complete 会按节点增量上报输出（<nodeID>.<field>），
+		// execution_complete 携带的全量快照是超集，合并语义两种场景都安全
+		existing, _ := cache["metadata"].(map[string]interface{})
+		if existing == nil {
+			existing = make(map[string]interface{}, len(runtimeMetadata))
+			cache["metadata"] = existing
+		}
+		for k, v := range runtimeMetadata {
+			existing[k] = v
+		}
 	}
 
 	metadataJSON, _ := json.Marshal(cache)

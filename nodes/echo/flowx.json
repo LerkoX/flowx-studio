@@ -2,7 +2,7 @@
   "name": "echo",
   "displayName": "回声",
   "description": "打印一条日志消息，可选先 sleep 指定秒数再输出；常用于调试、占位与演示并行/回环流水线拓扑",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "flowx-team",
   "tags": ["utility", "debug", "log"],
   "icon": "📣",
@@ -43,6 +43,13 @@
   "mock": {
     "enabled": true,
     "entry": "mock.sh"
+  },
+  "ui": {
+    "entry": "ui/node-widget.js",
+    "width": 220,
+    "height": 130,
+    "collapsed": false,
+    "apiVersion": 1
   },
   "timeout": 120
 }
