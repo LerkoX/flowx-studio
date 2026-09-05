@@ -143,7 +143,9 @@ image-downloader/
 
 **执行器解析优先级**（运行时展开，见 [7.4.1 节](07-node-system.md#741-运行时适配器与节点展开)）：`executor.ref`（注册实例）→ `executor.type + config`（内联匿名）→ 均未声明时：有 `image` 归为 docker（默认执行器为 docker 实例时复用其配置，否则合成匿名 docker），无 `image` 使用全局默认执行器。
 
-**docker 执行器实例支持的 config 键**：`host`（远程 daemon 地址，如 `tcp://192.168.1.10:2375` / `ssh://user@host`，留空读 `DOCKER_HOST` 环境变量）、`tlsVerify`、`certPath`、`registry`、`network`、`workdir`、`volumes`（远程 daemon 时为**远端机器**路径）、`env`、`tty`、`ttyWidth`、`ttyHeight`。
+**docker 执行器实例支持的 config 键**：`host`（远程 daemon 地址，如 `tcp://192.168.1.10:2375` / `ssh://user@host`，留空读 `DOCKER_HOST` 环境变量）、`tlsVerify`、`certPath`、`image`（容器镜像，默认 `alpine:latest`）、`registry`、`network`、`workdir`、`volumes`（远程 daemon 时为**远端机器**路径）、`env`、`tty`、`ttyWidth`、`ttyHeight`。
+
+**镜像注入规则**（展开时）：节点包的 `image` 会写入其 docker/k8s 执行器条目的 `config.image`，优先级为**节点 `image` > 条目 `config.image`**。flowx 执行器按名单例（同名=同容器），因此引用共享条目（`executor.ref` 实例或默认 docker 实例）且镜像与条目不一致时，展开器会复制条目配置合成节点专属的 `<节点名>-executor` 条目并注入镜像；镜像一致时直接复用共享条目。`executor.type: local` 时 `image` 只是 docker 能力声明，不注入。
 **local 执行器实例支持的 config 键**：`shell`、`workdir`、`timeout`、`env`、`pty`、`ptyWidth`、`ptyHeight`。
 | `requirements` | string[] | 否 | 依赖列表；若不填，可尝试读取 `requirements.txt` |
 | `parameters` | Parameter[] | 是 | 参数定义（`description` 应详细描述所需数据；可用 `source` 标注推荐来源节点包 + 输出字段） |

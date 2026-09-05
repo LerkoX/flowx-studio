@@ -252,11 +252,17 @@ func ExpandWorkflowConfig(configYAML string, lookup func(name string) (*model.No
 
 // resolveNodeExecutor 为 nodeRef 节点解析执行器，返回 (执行器名, 执行器类型)。
 // 命名实例会就地写入 executors map（多节点共享同一条目）；匿名实例合成 <node名>-executor。
+//
+// 镜像注入：节点声明的 image 会写入其 docker/k8s 执行器条目的 Config["image"]
+//（flowx core 执行器按名单例，镜像不同即不同容器）。优先级：节点 image > 条目 config.image。
+// 共享条目（ref 实例 / 默认实例）在镜像不一致时复制出节点专属条目，避免不同镜像的
+// 节点互相覆盖同一共享容器。
 func resolveNodeExecutor(node *model.Node, executors map[string]core.ExecutorConfig, resolve ExecutorResolver) (string, string, error) {
 	pkg := node.PackageConfig
 	if pkg == nil {
 		pkg = &model.NodePackage{Image: node.Image}
 	}
+	image := nodeImage(pkg, node)
 
 	// 1. executor.ref：引用注册的执行器实例
 	if pkg.Executor.Ref != "" {
@@ -267,6 +273,17 @@ func resolveNodeExecutor(node *model.Node, executors map[string]core.ExecutorCon
 		if err != nil {
 			return "", "", err
 		}
+		// 容器执行器且镜像与实例配置不一致：复制实例配置合成节点专属条目
+		if isContainerExecutor(inst.Type) && image != "" && configImage(inst.Config) != image {
+			cfg := copyExecutorConfig(inst.Config)
+			cfg["image"] = image
+			if name := findCompatibleExecutor(executors, inst.Type, cfg); name != "" {
+				return name, inst.Type, nil
+			}
+			name := node.Name + "-executor"
+			executors[name] = core.ExecutorConfig{Type: inst.Type, Description: inst.Description, Config: cfg}
+			return name, inst.Type, nil
+		}
 		executors[inst.Name] = core.ExecutorConfig{
 			Type:        inst.Type,
 			Description: inst.Description,
@@ -275,38 +292,54 @@ func resolveNodeExecutor(node *model.Node, executors map[string]core.ExecutorCon
 		return inst.Name, inst.Type, nil
 	}
 
-	// 2. executor.type (+config)：内联匿名实例
+	// 2. executor.type (+config)：内联匿名实例（条目本来即节点专属，直接注入镜像）
 	if pkg.Executor.Type != "" {
 		name := node.Name + "-executor"
+		cfg := pkg.Executor.Config
+		if isContainerExecutor(pkg.Executor.Type) && image != "" && configImage(cfg) != image {
+			cfg = copyExecutorConfig(cfg)
+			cfg["image"] = image
+		}
 		executors[name] = core.ExecutorConfig{
 			Type:   pkg.Executor.Type,
-			Config: pkg.Executor.Config,
+			Config: cfg,
 		}
 		return name, pkg.Executor.Type, nil
 	}
 
 	// 3. 未声明：有 image 归为 docker，无 image 走全局默认执行器
-	image := pkg.Image
-	if image == "" {
-		image = node.Image
-	}
 	if image != "" {
-		// 默认执行器是 docker 时复用其实例（继承 host/registry 等配置）；否则匿名 docker
+		// 默认执行器是 docker 且镜像一致时复用其实例（继承 host/registry 等配置）；
+		// 镜像不同则继承实例配置合成节点专属条目；无 docker 默认时匿名 docker
 		if resolve != nil {
 			if def, err := resolve("", true); err == nil && def != nil && def.Type == "docker" {
-				if name := findCompatibleExecutor(executors, def.Type, def.Config); name != "" {
+				if configImage(def.Config) == image {
+					if name := findCompatibleExecutor(executors, def.Type, def.Config); name != "" {
+						return name, "docker", nil
+					}
+					executors[def.Name] = core.ExecutorConfig{
+						Type:        def.Type,
+						Description: def.Description,
+						Config:      def.Config,
+					}
+					return def.Name, "docker", nil
+				}
+				cfg := copyExecutorConfig(def.Config)
+				cfg["image"] = image
+				if name := findCompatibleExecutor(executors, "docker", cfg); name != "" {
 					return name, "docker", nil
 				}
-				executors[def.Name] = core.ExecutorConfig{
-					Type:        def.Type,
+				name := node.Name + "-executor"
+				executors[name] = core.ExecutorConfig{
+					Type:        "docker",
 					Description: def.Description,
-					Config:      def.Config,
+					Config:      cfg,
 				}
-				return def.Name, "docker", nil
+				return name, "docker", nil
 			}
 		}
 		name := node.Name + "-executor"
-		executors[name] = core.ExecutorConfig{Type: "docker"}
+		executors[name] = core.ExecutorConfig{Type: "docker", Config: map[string]interface{}{"image": image}}
 		return name, "docker", nil
 	}
 
@@ -330,6 +363,34 @@ func resolveNodeExecutor(node *model.Node, executors map[string]core.ExecutorCon
 	name := node.Name + "-executor"
 	executors[name] = core.ExecutorConfig{Type: "local"}
 	return name, "local", nil
+}
+
+// nodeImage 节点声明的容器镜像（包配置优先于顶层 legacy 字段）
+func nodeImage(pkg *model.NodePackage, node *model.Node) string {
+	if pkg.Image != "" {
+		return pkg.Image
+	}
+	return node.Image
+}
+
+// isContainerExecutor 是否为容器类执行器（image 配置键对其生效）
+func isContainerExecutor(execType string) bool {
+	return execType == "docker" || execType == "k8s" || execType == "kubernetes"
+}
+
+// configImage 执行器条目 config 中的 image 键（未设置返回空串）
+func configImage(c map[string]interface{}) string {
+	s, _ := c["image"].(string)
+	return s
+}
+
+// copyExecutorConfig 浅拷贝执行器 config（注入 image 前防止改到共享的实例配置）
+func copyExecutorConfig(c map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(c)+1)
+	for k, v := range c {
+		out[k] = v
+	}
+	return out
 }
 
 // findCompatibleExecutor 在 executors 中查找与目标类型/配置完全一致的已有条目。

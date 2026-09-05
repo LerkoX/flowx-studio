@@ -189,8 +189,41 @@ func TestExpandWorkflow_ImageNodeFallsToDocker(t *testing.T) {
 	if execName != "compress-executor" {
 		t.Errorf("node executor = %q, want compress-executor", execName)
 	}
-	if cfg.Executors["compress-executor"].Type != "docker" {
-		t.Errorf("executor type = %q, want docker", cfg.Executors["compress-executor"].Type)
+	ec := cfg.Executors["compress-executor"]
+	if ec.Type != "docker" {
+		t.Errorf("executor type = %q, want docker", ec.Type)
+	}
+	// 节点镜像注入执行器条目 config.image，供 docker 执行器消费
+	if ec.Config["image"] != "python:3.11-slim" {
+		t.Errorf("executor config.image = %v, want python:3.11-slim", ec.Config["image"])
+	}
+}
+
+func TestExpandWorkflow_ImageNodeInheritsDockerDefault(t *testing.T) {
+	node := newTestNode(&model.NodePackage{
+		Name:     "compress",
+		Language: "python",
+		Entry:    "main.py",
+		Image:    "python:3.11-slim",
+	})
+	// 默认执行器是远程 docker 且未配置镜像 → 继承 host 合成节点专属条目
+	//（executor 按名单例，镜像必须落在条目 config 上，不能改共享实例）
+	def := &model.Executor{Name: "docker-remote", Type: "docker", IsDefault: true,
+		Config: map[string]interface{}{"host": "tcp://192.168.1.10:2375"}}
+	cfg := expandWorkflow(t, node, staticResolver(nil, def))
+
+	if cfg.Nodes["A"].Executor != "compress-executor" {
+		t.Errorf("node executor = %q, want compress-executor", cfg.Nodes["A"].Executor)
+	}
+	ec := cfg.Executors["compress-executor"]
+	if ec.Config["host"] != "tcp://192.168.1.10:2375" {
+		t.Errorf("docker default host not inherited: %+v", ec.Config)
+	}
+	if ec.Config["image"] != "python:3.11-slim" {
+		t.Errorf("executor config.image = %v, want python:3.11-slim", ec.Config["image"])
+	}
+	if _, ok := cfg.Executors["docker-remote"]; ok {
+		t.Error("shared docker-remote entry should not be written when image differs")
 	}
 }
 
@@ -201,9 +234,9 @@ func TestExpandWorkflow_ImageNodeReusesDockerDefault(t *testing.T) {
 		Entry:    "main.py",
 		Image:    "python:3.11-slim",
 	})
-	// 默认执行器是远程 docker → image 节点复用该实例（继承 host）
+	// 默认 docker 实例配置的镜像与节点一致 → 直接复用实例条目
 	def := &model.Executor{Name: "docker-remote", Type: "docker", IsDefault: true,
-		Config: map[string]interface{}{"host": "tcp://192.168.1.10:2375"}}
+		Config: map[string]interface{}{"host": "tcp://192.168.1.10:2375", "image": "python:3.11-slim"}}
 	cfg := expandWorkflow(t, node, staticResolver(nil, def))
 
 	if cfg.Nodes["A"].Executor != "docker-remote" {
@@ -211,6 +244,93 @@ func TestExpandWorkflow_ImageNodeReusesDockerDefault(t *testing.T) {
 	}
 	if cfg.Executors["docker-remote"].Config["host"] != "tcp://192.168.1.10:2375" {
 		t.Errorf("docker default config not propagated: %+v", cfg.Executors["docker-remote"])
+	}
+}
+
+func TestExpandWorkflow_RefInstanceImageOverride(t *testing.T) {
+	node := newTestNode(&model.NodePackage{
+		Name:     "train",
+		Language: "python",
+		Entry:    "main.py",
+		Image:    "pytorch:2.1-cuda",
+		Executor: model.NodeExecutorConfig{Ref: "docker-gpu"},
+	})
+	// ref 实例未配置镜像、节点自带镜像 → 复制实例配置（host）合成节点专属条目
+	inst := &model.Executor{Name: "docker-gpu", Type: "docker",
+		Config: map[string]interface{}{"host": "tcp://10.0.0.8:2375"}}
+	cfg := expandWorkflow(t, node, staticResolver(map[string]*model.Executor{"docker-gpu": inst}, nil))
+
+	if cfg.Nodes["A"].Executor != "train-executor" {
+		t.Errorf("node executor = %q, want train-executor", cfg.Nodes["A"].Executor)
+	}
+	ec := cfg.Executors["train-executor"]
+	if ec.Config["host"] != "tcp://10.0.0.8:2375" {
+		t.Errorf("ref instance host not inherited: %+v", ec.Config)
+	}
+	if ec.Config["image"] != "pytorch:2.1-cuda" {
+		t.Errorf("executor config.image = %v, want pytorch:2.1-cuda", ec.Config["image"])
+	}
+	// 实例配置不被修改
+	if _, ok := inst.Config["image"]; ok {
+		t.Error("shared instance config mutated")
+	}
+}
+
+func TestExpandWorkflow_RefInstanceImageMatch(t *testing.T) {
+	node := newTestNode(&model.NodePackage{
+		Name:     "train",
+		Language: "python",
+		Entry:    "main.py",
+		Image:    "pytorch:2.1-cuda",
+		Executor: model.NodeExecutorConfig{Ref: "docker-gpu"},
+	})
+	// ref 实例镜像与节点一致 → 直接复用实例条目（多节点可共享）
+	inst := &model.Executor{Name: "docker-gpu", Type: "docker",
+		Config: map[string]interface{}{"image": "pytorch:2.1-cuda"}}
+	cfg := expandWorkflow(t, node, staticResolver(map[string]*model.Executor{"docker-gpu": inst}, nil))
+
+	if cfg.Nodes["A"].Executor != "docker-gpu" {
+		t.Errorf("node executor = %q, want docker-gpu", cfg.Nodes["A"].Executor)
+	}
+}
+
+func TestExpandWorkflow_InlineDockerImageInjection(t *testing.T) {
+	node := newTestNode(&model.NodePackage{
+		Name:     "compress",
+		Language: "python",
+		Entry:    "main.py",
+		Image:    "python:3.11-slim",
+		Executor: model.NodeExecutorConfig{Type: "docker", Config: map[string]interface{}{"network": "host"}},
+	})
+	// 内联 docker 执行器：节点 image 注入条目 config
+	cfg := expandWorkflow(t, node, staticResolver(nil, nil))
+
+	ec := cfg.Executors["compress-executor"]
+	if ec.Config["image"] != "python:3.11-slim" {
+		t.Errorf("executor config.image = %v, want python:3.11-slim", ec.Config["image"])
+	}
+	if ec.Config["network"] != "host" {
+		t.Errorf("inline config lost: %+v", ec.Config)
+	}
+}
+
+func TestExpandWorkflow_LocalExecutorIgnoresImage(t *testing.T) {
+	node := newTestNode(&model.NodePackage{
+		Name:     "compress",
+		Language: "python",
+		Entry:    "main.py",
+		Image:    "python:3.11-slim", // 仅作 docker 能力声明
+		Executor: model.NodeExecutorConfig{Type: "local"},
+	})
+	// local 执行器不注入 image（镜像只是元信息）
+	cfg := expandWorkflow(t, node, staticResolver(nil, nil))
+
+	ec := cfg.Executors["compress-executor"]
+	if ec.Type != "local" {
+		t.Errorf("executor type = %q, want local", ec.Type)
+	}
+	if _, ok := ec.Config["image"]; ok {
+		t.Errorf("local executor should not carry image: %+v", ec.Config)
 	}
 }
 
