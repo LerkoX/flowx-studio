@@ -102,6 +102,20 @@ type NodeFileAsset struct {
 	Kind        string `json:"kind"` // runtime | ui
 }
 
+// DeriveExecutor 从 PackageConfig 派生顶层 Executor 透出字段（API 只读）。
+// 包未声明 executor（ref/type/config 全空）时保持 nil，交由展开规则兜底。
+func (n *Node) DeriveExecutor() {
+	n.Executor = nil
+	if n.PackageConfig == nil {
+		return
+	}
+	e := n.PackageConfig.Executor
+	if e.Ref == "" && e.Type == "" && e.Config == nil {
+		return
+	}
+	n.Executor = &e
+}
+
 // Node 节点定义
 type Node struct {
 	ID          int64  `json:"id" db:"id"`
@@ -140,6 +154,10 @@ type Node struct {
 	// 完整的 flowx.json 包配置（运行时展开使用）
 	PackageConfig *NodePackage `json:"-" db:"package_config"`
 
+	// 节点包声明的执行器（来自 PackageConfig.Executor，API 只读透出）。
+	// 编排时据此判断节点默认运行时：ref/type 非空即作者锁定或倾向；
+	// 空则按展开规则兜底（有 image 归 docker，否则全局默认执行器）。
+	Executor *NodeExecutorConfig `json:"executor,omitempty" db:"-"`
 	// Package 是 PackageConfig 的 API 只读副本（节点详情展示 flowx.json 用）。
 	// 用独立字段而非直接序列化 PackageConfig，是为了保持包配置无法通过
 	// Create/Update API 写入（防止绕过导入校验）。

@@ -38,6 +38,25 @@ type nodeJSON struct {
 	NodeType    string   `json:"nodeType,omitempty"`
 	Image       string   `json:"image,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
+	Executor    *struct {
+		Ref  string `json:"ref,omitempty"`
+		Type string `json:"type,omitempty"`
+	} `json:"executor,omitempty"`
+}
+
+// executorLabel 节点默认运行时的人类可读描述：
+// ref 锁定 > 内联 type > 有 image 归 docker > 全局默认执行器。
+func (n nodeJSON) executorLabel() string {
+	switch {
+	case n.Executor != nil && n.Executor.Ref != "":
+		return "ref:" + n.Executor.Ref
+	case n.Executor != nil && n.Executor.Type != "":
+		return n.Executor.Type
+	case n.Image != "":
+		return "docker(image)"
+	default:
+		return "default"
+	}
 }
 
 func newNodeListCmd() *cobra.Command {
@@ -82,10 +101,10 @@ func newNodeListCmd() *cobra.Command {
 						kind = "image:" + n.Image
 					}
 					rows = append(rows, []string{
-						strconv.FormatInt(n.ID, 10), n.Name, n.NodeType, kind, n.Version,
+						strconv.FormatInt(n.ID, 10), n.Name, n.NodeType, kind, n.Version, n.executorLabel(),
 					})
 				}
-				printTable([]string{"ID", "NAME", "TYPE", "LANG/IMAGE", "VERSION"}, rows)
+				printTable([]string{"ID", "NAME", "TYPE", "LANG/IMAGE", "VERSION", "EXECUTOR"}, rows)
 				fmt.Printf("\nTotal: %d (page %d, page_size %d)\n", p.Total, p.Page, p.PageSize)
 			})
 			return nil

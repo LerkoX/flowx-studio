@@ -262,6 +262,7 @@ func (s *NodeService) Create(req *model.Node) (*model.Node, error) {
 	id, _ := result.LastInsertId()
 	req.ID = id
 	req.Package = req.PackageConfig // API 只读副本（flowx.json 展示）
+	req.DeriveExecutor()
 
 	s.auditRecord("create_node", fmt.Sprintf("%d", id), "name="+req.Name)
 	s.eventBus.Publish(event.Event{
@@ -584,6 +585,7 @@ func scanNode(scanner interface {
 	json.Unmarshal([]byte(tagsJSON), &node.Tags)
 	json.Unmarshal([]byte(pkgJSON), &node.PackageConfig)
 	node.Package = node.PackageConfig // API 只读副本（flowx.json 展示）
+	node.DeriveExecutor()             // 顶层透出执行器声明，list 接口也可见
 	if fileAssetsJSON.Valid {
 		json.Unmarshal([]byte(fileAssetsJSON.String), &node.FileAssets)
 	}

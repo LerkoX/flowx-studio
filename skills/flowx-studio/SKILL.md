@@ -79,6 +79,18 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 - 输出用 `extract: {"type": "codec-block"}`（代码打印 ```flowx-yaml 块）或 `regex`
 - Mock 测试：`mock: {enabled: true, entry: "mock.py"}`，可用 `FLOWX_PARAM_*` 或裸大写参数名读参
 
+### 执行器选择（创建/导入节点包时必读）
+
+节点的默认运行时在**创建期**确定并固化进 flowx.json 的 `executor` 字段，之后所有 pipeline 自动继承，编排时无需再关心。流程：
+
+1. `executor list --json` 探测环境：是否注册了 docker 实例
+2. 分支：
+   - **无 docker 实例** → 直接写 `"executor": {"type": "local"}`，不打扰用户；`image` 字段保留，作为「将来有 docker 环境时可用」的能力声明
+   - **有 docker 实例** → `ask --key runtime --prompt "节点 <name> 默认用 docker 还是 local 运行？" --options docker,local` 询问用户；选 docker 写 `"executor": {"ref": "<docker实例名>"}`（继承实例的 host/registry 等配置），选 local 写 `"executor": {"type": "local"}`
+3. 依赖本机环境才能跑的节点（如调用本机 CLI、访问宿主机路径）直接 local，不必询问
+
+解析优先级（运行时展开）：`executor.ref` → `executor.type` → 仅有 `image` 归 docker → 全局默认执行器。`node list --json` 的顶层 `executor` 字段透出节点包的声明（编排前可查看已有节点的默认运行时）；人类可读表格的 EXECUTOR 列给出等效描述（`ref:<名>` / `local` / `docker(image)` / `default`）。
+
 ### 自定义 UI 组件（可选，module 模式）
 
 画布节点可内嵌节点包自带的前端组件。flowx.json 声明：
