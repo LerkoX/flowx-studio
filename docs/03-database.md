@@ -26,10 +26,10 @@ FLOWX_DB_PATH=/custom/path/flowx.db
 ```sql
 CREATE TABLE nodes (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    name            TEXT NOT NULL UNIQUE,           -- 节点唯一标识（蛇形命名）
+    name            TEXT NOT NULL,                   -- 节点包名（蛇形命名）
     display_name    TEXT,                            -- 显示名称
     description     TEXT,                            -- 节点功能描述
-    version         TEXT,                            -- 版本号
+    version         TEXT NOT NULL DEFAULT '0',       -- 版本号（空版本归一为 '0'）
     author          TEXT,                            -- 作者
     icon            TEXT,                            -- 图标
     node_type       TEXT NOT NULL DEFAULT 'code',    -- 节点类型: code | image
@@ -49,7 +49,8 @@ CREATE TABLE nodes (
     file_assets     TEXT,                            -- JSON: 文件资产索引（迁移 008；内容在 assets store，不入库）
     tags            TEXT DEFAULT '[]',               -- 标签，JSON 数组
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+    updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(name, version)                            -- 多版本并存（迁移 012）
 );
 
 -- 索引
@@ -381,6 +382,9 @@ migrations/
 ├── 007_audit_logs.sql               -- 审计日志表
 ├── 008_add_node_file_assets.sql     -- nodes 增加 file_assets 资产索引字段
 └── 009_drop_node_files.sql          -- 删除 nodes.files（文件内容统一入 assets store）
+    010_executors.sql                -- 执行器实例表
+    011_execution_runtime_yaml.sql   -- executions 增加 runtime_yaml 快照字段
+    012_node_versions.sql            -- nodes 重建：name 唯一放宽为 UNIQUE(name, version)
 ```
 
 ### 3.5.2 迁移执行逻辑

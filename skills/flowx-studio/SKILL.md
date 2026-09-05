@@ -29,7 +29,7 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 | 列出节点（查 nodeRef 名称） | `flowx-studio node list --json` |
 | 创建节点 | `flowx-studio node create --file node.yaml` |
 | 原地更新节点（YAML 定义，保持 ID） | `flowx-studio node update --id <N> --file node.yaml` |
-| 导入节点包（flowx.json） | `flowx-studio node import --type git --url <repo>` 或 `--type folder --path <dir>`；同名存在时加 `--overwrite` 原地更新 |
+| 导入节点包（flowx.json） | `flowx-studio node import --type git --url <repo>` 或 `--type folder --path <dir>`；同名同版本存在时加 `--overwrite` 原地更新；同名不同版本直接并存 |
 | Mock 测试节点 | `flowx-studio node mock --id <N> [--params '{...}']` |
 | 删除节点 | `flowx-studio node delete --id <N>` |
 | 列出流水线 | `flowx-studio pipeline list [--json]` |
@@ -56,7 +56,7 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 - 认证：CLI 自动读取 `<data-dir>/auth.token`（或 `FLOWX_STUDIO_AUTH_TOKEN`），无需手动配置；401 时提示用户检查 token。
 - 退出码：`0` 成功；`1` 业务/校验失败（stderr 含错误详情与重试指引，修正后重试同一命令）；`2` 用法错误。
 - YAML 校验失败时按 stderr 的错误详情修正 YAML 后重试（错误文本即重试指令）。
-- 生成 FlowX YAML 时优先用 `config.nodeRef` 引用 `node list` 查到的已有节点，不要内联节点代码。
+- 生成 FlowX YAML 时优先用 `config.nodeRef` 引用 `node list` 查到的已有节点，不要内联节点代码。引用支持版本锁定：`name@version` 精确锁定（生产流水线推荐），裸 `name` 解析到该名称的最新版本（import 新版本后行为会漂移）。
 - 节点间传参：flowx.json 模板只允许 `{{ Param.* }}`；上游节点数据在 pipeline YAML 节点 `config.params` 中绑定（如 `weatherCity: "{{ GetWeather.city }}"`，实例 ID 用本 YAML `Nodes` 的键）。节点参数上的 `source` 字段标注了推荐来源节点包和输出字段，可依此接线；未绑定的参数回退到 pipeline 级 `Param`。详见 `docs/11-node-package.md` 11.7 节。
 - YAML 要求：`Name` 非空；`Nodes` 为非空 map；`Graph` 以 `stateDiagram-v2` 开头且至少一条迁移（支持 `[*]` 起止节点）；节点声明的 `executor` 必须在 `Executors` 中定义。
 - **节点 ID 仅支持 ASCII**（字母/数字/下划线/连字符）：`Nodes` 的键与 `Graph` 中的节点名禁止使用中文等非 ASCII 字符（底层 mermaid 解析器会静默丢弃含非 ASCII 标识符的边，导致接线断裂、节点变孤立起点）。显示名可用中文——通过节点的 `name` 字段设置（如 `name: 回声`），不影响图解析。
@@ -97,7 +97,7 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 
 1. `node import --type folder --path <dir>`（校验失败按 stderr 修正重试）
 2. `node mock --id <N>` 验证节点逻辑（有 mock 时）
-3. 同名节点已存在时：`node import ... --overwrite` 原地更新（保持节点 ID，pipeline 按 nodeRef 名称引用不受影响）；或 `node update --id <N> --file node.yaml` 更新 YAML 定义的节点
+3. 同名同版本节点已存在时：`node import ... --overwrite` 原地更新（保持节点 ID，按 `name@version` 精确引用的流水线不受影响）；同名不同版本直接 import 即可并存（裸名称引用的流水线会解析到最新版本——想稳定就在 YAML 里写 `nodeRef: <name>@<version>`）
 4. 画布验证：pipeline YAML 用 `config.nodeRef: <name>` 引用后运行，浏览器查看内嵌 UI
 
 ## 典型流程

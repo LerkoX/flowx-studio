@@ -129,7 +129,7 @@ image-downloader/
 | `name` | string | 是 | 节点唯一标识，字母开头，支持 snake_case 或 kebab-case（正则 `^[a-zA-Z][a-zA-Z0-9_-]*$`） |
 | `displayName` | string | 否 | 展示名称 |
 | `description` | string | 否 | 功能描述 |
-| `version` | string | 否 | 版本号，如 `1.0.0` |
+| `version` | string | 否 | 版本号，如 `1.0.0`；同名不同版本多版本并存（见 11.5.1 节），空版本归一为 `0` |
 | `author` | string | 否 | 作者 |
 | `tags` | string[] | 否 | 标签 |
 | `icon` | string | 否 | 图标，如 `🖼️` |
@@ -294,6 +294,18 @@ Content-Type: application/json
 GET /api/v1/nodes/:id/ui/*filepath
 ```
 
+### 11.5.1 版本与引用（nodeRef 版本锁定）
+
+节点按 `(name, version)` 组合唯一存储，**同名不同版本多行并存**（空版本归一为 `0`）：
+
+- **导入**：同名不同版本直接新增为独立节点（新 ID）；同名同版本报「已存在」，需 `--overwrite` 原地覆盖（保持 ID，引用该版本的流水线与物化快照无感知）
+- **引用语法**：pipeline YAML 的 `config.nodeRef` 支持两种形式——
+  - `get-weather@1.0.0`：**精确锁定版本**，节点升级不影响该流水线
+  - `get-weather`（裸名称）：解析到该名称的**最新版本**，向后兼容旧 YAML，但 import 新版本后行为会漂移——**生产流水线建议显式锁版本**
+- **「最新」排序**：版本号按 semver 风格比较（首段 `-` 后为预发布段；基版本按 `.` 分段，数字段按数值比较 `1.10.0 > 1.9.0`；带预发布段者更小），完全相等取 ID 大者；空版本 `0` 最小
+- **物化快照**：展开后的节点 `config.nodeRef` 一律改写为完整引用 `name@version`，执行快照/回放可精确还原运行版本
+- **删除保护**：`name@version` 精确引用只挡删该版本；裸名称引用挡删它当前解析到的版本（最新版），删除旧版本放行
+
 ## 11.6 字段映射
 
 ### 11.6.1 映射到 model.Node
@@ -434,7 +446,7 @@ Nodes:
   GetWeather:                 # 节点实例 ID，pipeline 作者自定义
     name: 获取天气
     config:
-      nodeRef: get-weather    # 引用节点包
+      nodeRef: get-weather    # 引用节点包（可锁版本：get-weather@1.0.0）
       params:
         city: 深圳             # 常量绑定
   SendFeishu:

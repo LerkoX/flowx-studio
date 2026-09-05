@@ -439,12 +439,20 @@ func (s *WorkflowService) executionMetadataValues(exec *model.Execution) map[str
 	return meta
 }
 
-// expandLookup 供 ExpandWorkflowConfig 按 nodeRef 名称查找节点，
+// expandLookup 供 ExpandWorkflowConfig 按 nodeRef 引用查找节点，
+// 支持 "name"（解析到最新版本）与 "name@version"（精确锁定）两种形式，
 // 并填充资产目录/签名 URL（展开器据此生成 cp/curl 引导脚本）。
-func (s *WorkflowService) expandLookup(name string) (*model.Node, error) {
-	node, err := s.nodeSvc.GetByName(name)
+func (s *WorkflowService) expandLookup(ref string) (*model.Node, error) {
+	name, version, err := model.ParseNodeRef(ref)
 	if err != nil {
 		return nil, err
+	}
+	node, err := s.nodeSvc.GetByRef(name, version)
+	if err != nil {
+		return nil, err
+	}
+	if node == nil {
+		return nil, nil // 展开器统一报 "node <ref> not found"
 	}
 	s.nodeSvc.PrepareAssets(node)
 	return node, nil

@@ -171,17 +171,44 @@ func (s *NodeService) List(language, tag, search, nodeType string, page, pageSiz
 	}, nil
 }
 
-// GetByName 根据名称获取节点
-func (s *NodeService) GetByName(name string) (*model.Node, error) {
-	row := s.db.QueryRowx("SELECT * FROM nodes WHERE name = ?", name)
-	var node model.Node
-	if err := scanNode(row, &node); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("node not found")
+// GetByRef 按名称+版本获取节点：version 非空时精确匹配；为空时解析到该名称的
+// 最新版本（CompareNodeVersions 最大者，并列取 ID 大者）。未找到返回 (nil, nil)。
+func (s *NodeService) GetByRef(name, version string) (*model.Node, error) {
+	if version != "" {
+		row := s.db.QueryRowx("SELECT * FROM nodes WHERE name = ? AND version = ?",
+			name, model.NormalizeNodeVersion(version))
+		var node model.Node
+		if err := scanNode(row, &node); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("failed to get node: %w", err)
 		}
+		return &node, nil
+	}
+
+	rows, err := s.db.Queryx("SELECT * FROM nodes WHERE name = ?", name)
+	if err != nil {
 		return nil, fmt.Errorf("failed to get node: %w", err)
 	}
-	return &node, nil
+	defer rows.Close()
+
+	var latest *model.Node
+	for rows.Next() {
+		var node model.Node
+		if err := scanNode(rows, &node); err != nil {
+			return nil, fmt.Errorf("failed to get node: %w", err)
+		}
+		if latest == nil {
+			latest = &node
+			continue
+		}
+		if c := model.CompareNodeVersions(node.Version, latest.Version); c > 0 ||
+			(c == 0 && node.ID > latest.ID) {
+			latest = &node
+		}
+	}
+	return latest, nil
 }
 
 // Get 获取节点详情
@@ -205,6 +232,7 @@ func (s *NodeService) Create(req *model.Node) (*model.Node, error) {
 	if req.NodeType == "" {
 		req.NodeType = "code"
 	}
+	req.Version = model.NormalizeNodeVersion(req.Version)
 
 	paramsJSON, _ := json.Marshal(req.Parameters)
 	outputsJSON, _ := json.Marshal(req.Outputs)
@@ -226,7 +254,7 @@ func (s *NodeService) Create(req *model.Node) (*model.Node, error) {
 
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-			return nil, fmt.Errorf("node name already exists")
+			return nil, fmt.Errorf("node %s already exists", model.FormatNodeRef(req.Name, req.Version))
 		}
 		return nil, fmt.Errorf("failed to create node: %w", err)
 	}
@@ -245,7 +273,7 @@ func (s *NodeService) Create(req *model.Node) (*model.Node, error) {
 }
 
 // Update 原地更新节点（保持 ID 不变；流水线按 nodeRef 名称引用，不受影响）。
-// ID 不存在返回 "node not found"；改名为已占用名称返回 "node name already exists"。
+// ID 不存在返回 "node not found"；改名/改版本撞到已占用组合返回 "already exists"。
 // PackageConfig / FileAssets 无法通过 API 设置（PackageConfig json:"-"，资产由导入流程落盘），
 // 请求未携带时保留原值，避免更新导入的节点包时丢失 UI 配置与资产索引。
 func (s *NodeService) Update(id int64, req *model.Node) error {
@@ -257,6 +285,7 @@ func (s *NodeService) Update(id int64, req *model.Node) error {
 	if err != nil {
 		return err // 含 "node not found"
 	}
+	req.Version = model.NormalizeNodeVersion(req.Version)
 	if req.PackageConfig == nil {
 		req.PackageConfig = existing.PackageConfig
 	}
@@ -287,7 +316,7 @@ func (s *NodeService) Update(id int64, req *model.Node) error {
 
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-			return fmt.Errorf("node name already exists")
+			return fmt.Errorf("node %s already exists", model.FormatNodeRef(req.Name, req.Version))
 		}
 		return fmt.Errorf("failed to update node: %w", err)
 	}
@@ -306,13 +335,16 @@ func (s *NodeService) Update(id int64, req *model.Node) error {
 }
 
 // Delete 删除节点（同时清理资产目录）
-// 被流水线 YAML 以 config.nodeRef 引用的节点禁止删除，避免运行期展开失败
+// 被流水线 YAML 以 config.nodeRef 引用的节点禁止删除，避免运行期展开失败。
+// 版本感知匹配：
+//   - 精确引用 name@version → 只挡删该版本
+//   - 裸名称引用 name → 挡删它当前解析到的版本（即该名称的最新版本），删旧版本放行
 func (s *NodeService) Delete(id int64) error {
 	node, getErr := s.Get(id)
 
-	// 节点存在时先检查流水线引用（按 nodeRef 名称匹配，与运行期展开器的查找方式一致）
+	// 节点存在时先检查流水线引用（与运行期展开器的查找方式一致）
 	if getErr == nil {
-		refs, err := s.findReferencingWorkflows(node.Name)
+		refs, err := s.findReferencingWorkflows(node)
 		if err != nil {
 			return fmt.Errorf("failed to check node references: %w", err)
 		}
@@ -322,7 +354,7 @@ func (s *NodeService) Delete(id int64) error {
 				names[i] = fmt.Sprintf("%s(id=%d)", wf.Name, wf.ID)
 			}
 			return fmt.Errorf("%w: 节点 %q 被 %d 条流水线引用（%s）",
-				ErrNodeReferenced, node.Name, len(refs), strings.Join(names, ", "))
+				ErrNodeReferenced, model.FormatNodeRef(node.Name, node.Version), len(refs), strings.Join(names, ", "))
 		}
 	}
 
@@ -349,7 +381,14 @@ func (s *NodeService) Delete(id int64) error {
 
 // findReferencingWorkflows 全量扫描流水线 YAML，返回以 config.nodeRef 引用指定节点名的流水线。
 // 解析失败的流水线 YAML 视为不引用（与运行期行为一致：坏 YAML 本身就无法运行）。
-func (s *NodeService) findReferencingWorkflows(nodeName string) ([]model.Workflow, error) {
+// findReferencingWorkflows 查找引用了指定节点（名称+版本）的流水线。
+// 匹配规则与运行期展开器一致：name@version 精确匹配；裸 name 在该节点是其
+// 名称的最新版本（裸引用的解析结果）时也算引用。
+func (s *NodeService) findReferencingWorkflows(node *model.Node) ([]model.Workflow, error) {
+	// 该名称的最新版本（裸引用解析目标）；查询失败不影响精确引用的判断
+	latest, _ := s.GetByRef(node.Name, "")
+	isBareTarget := latest != nil && latest.ID == node.ID
+
 	var workflows []model.Workflow
 	if err := s.db.Select(&workflows, "SELECT id, name, yaml_config FROM workflows"); err != nil {
 		return nil, err
@@ -361,14 +400,32 @@ func (s *NodeService) findReferencingWorkflows(nodeName string) ([]model.Workflo
 		if err := yaml.Unmarshal([]byte(wf.YAMLConfig), &cfg); err != nil {
 			continue
 		}
+		matched := false
 		for _, nodeCfg := range cfg.Nodes {
 			if nodeCfg.Config == nil {
 				continue
 			}
-			if ref, ok := nodeCfg.Config["nodeRef"].(string); ok && ref == nodeName {
-				refs = append(refs, wf)
+			rawRef, ok := nodeCfg.Config["nodeRef"].(string)
+			if !ok {
+				continue
+			}
+			refName, refVersion, err := model.ParseNodeRef(rawRef)
+			if err != nil || refName != node.Name {
+				continue
+			}
+			if refVersion != "" {
+				if model.NormalizeNodeVersion(refVersion) == model.NormalizeNodeVersion(node.Version) {
+					matched = true
+				}
+			} else if isBareTarget {
+				matched = true
+			}
+			if matched {
 				break
 			}
+		}
+		if matched {
+			refs = append(refs, wf)
 		}
 	}
 	return refs, nil

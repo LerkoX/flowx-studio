@@ -142,7 +142,9 @@ func expandNodeWithExecutorType(node *model.Node, executorTypeOverride string, p
 			},
 		},
 		Config: map[string]interface{}{
-			"nodeRef": node.Name,
+			// 物化节点记录完整引用 name@version：快照是执行实例的事实来源，
+			// 精确版本保证回放展示与续跑比对可还原到具体节点版本
+			"nodeRef": model.FormatNodeRef(node.Name, node.Version),
 		},
 	}
 
@@ -198,6 +200,10 @@ func ExpandWorkflowConfig(configYAML string, lookup func(name string) (*model.No
 		}
 		if ref == "" {
 			continue
+		}
+		// 引用格式前置校验（name 或 name@version），格式错误直接报清晰错误
+		if _, _, err := model.ParseNodeRef(ref); err != nil {
+			return "", err
 		}
 		// 已物化节点（带 steps，如执行快照中的历史节点）保持原样、跳过重展开：
 		// 展开结果依赖执行器注册表/节点包版本等可变状态，重展开会改写

@@ -97,19 +97,20 @@ func (s *NodeImportService) importFromPath(dir, sourceType, sourceURL, sourcePat
 		return nil, err
 	}
 
-	// 原地更新：同名节点已存在时保留原 ID 覆盖记录。
-	// 流水线按 nodeRef 名称引用节点，ID 不变即无感知；资产已由 buildNode 落盘。
-	if overwrite {
-		if existing, err := s.nodeSvc.GetByName(node.Name); err == nil && existing != nil {
-			if err := s.nodeSvc.Update(existing.ID, node); err != nil {
-				return nil, err
-			}
-			node.ID = existing.ID
-			s.nodeSvc.auditRecord("import_node_overwrite", fmt.Sprintf("%d", node.ID),
-				fmt.Sprintf("name=%s source=%s", node.Name, sourceType))
-			return node, nil
+	// 多版本并存：同名不同版本直接新增；同名同版本需 --overwrite 原地覆盖
+	// （保持 ID，引用该版本的物化快照与流水线无感知）。资产已由 buildNode 落盘。
+	if existing, err := s.nodeSvc.GetByRef(node.Name, node.Version); err == nil && existing != nil {
+		if !overwrite {
+			return nil, fmt.Errorf("node %s already exists (id=%d); retry with --overwrite to replace it in place",
+				model.FormatNodeRef(node.Name, node.Version), existing.ID)
 		}
-		// 同名节点不存在时退化为创建
+		if err := s.nodeSvc.Update(existing.ID, node); err != nil {
+			return nil, err
+		}
+		node.ID = existing.ID
+		s.nodeSvc.auditRecord("import_node_overwrite", fmt.Sprintf("%d", node.ID),
+			fmt.Sprintf("name=%s version=%s source=%s", node.Name, node.Version, sourceType))
+		return node, nil
 	}
 
 	created, err := s.nodeSvc.Create(node)

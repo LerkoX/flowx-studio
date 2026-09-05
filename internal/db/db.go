@@ -72,6 +72,14 @@ func New(dbPath string) (*DB, error) {
 }
 
 func runMigrations(db *sqlx.DB) error {
+	// 建表重建类迁移（如 011 节点多版本）需要 DROP TABLE，
+	// 期间关闭外键强制检查；PRAGMA foreign_keys 在事务内无效，故在事务外设置。
+	// 进程内单连接（MaxOpenConns(1)），迁移结束后恢复。
+	if _, err := db.Exec("PRAGMA foreign_keys = OFF"); err != nil {
+		return err
+	}
+	defer db.Exec("PRAGMA foreign_keys = ON") //nolint:errcheck
+
 	// 创建迁移记录表
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS schema_migrations (

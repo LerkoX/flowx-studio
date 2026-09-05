@@ -260,7 +260,7 @@ func newNodeImportCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sourceType, "type", "", "source type: git|folder (required)")
 	cmd.Flags().StringVar(&sourceURL, "url", "", "git repository URL (required when --type=git)")
 	cmd.Flags().StringVar(&sourcePath, "path", "", "local folder path (required when --type=folder)")
-	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "update in place when a node with the same name exists (keeps node ID; no need to delete first)")
+	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "update in place when a node with the same name AND version exists (keeps node ID); different versions always coexist as new nodes")
 	return cmd
 }
 
