@@ -280,3 +280,52 @@ func TestExpandNodeToConfig_DockerEntryOnlyNoURL(t *testing.T) {
 		t.Errorf("expected entry heredoc, run:\n%s", run)
 	}
 }
+
+func TestExpandNodeToConfig_MaterializedConfigPreservesBindings(t *testing.T) {
+	pkg := &model.NodePackage{
+		Name:     "echo",
+		Version:  "1.1.0",
+		Language: "bash",
+		Entry:    "main.sh",
+		Parameters: []model.NodeParameter{
+			{Name: "message", Type: "string"},
+			{Name: "sleep", Type: "string"},
+		},
+		Env: map[string]string{
+			"ECHO_MESSAGE": "{{ Param.message }}",
+			"ECHO_SLEEP":   "{{ Param.sleep }}",
+		},
+	}
+	node := newTestNode(pkg)
+	node.Version = "1.1.0"
+
+	bindings := map[string]string{
+		"message": "分支1 第1步",
+		"sleep":   "0.36",
+	}
+	cfg, err := ExpandNodeToConfig(node, bindings)
+	if err != nil {
+		t.Fatalf("expand failed: %v", err)
+	}
+	// 物化 config 保留 nodeRef（name@version）与原始参数绑定，
+	// 快照导出后前端回放态据此展示节点参数
+	if cfg.Config["nodeRef"] != "echo@1.1.0" {
+		t.Errorf("nodeRef = %v, want echo@1.1.0", cfg.Config["nodeRef"])
+	}
+	params, ok := cfg.Config["params"].(map[string]string)
+	if !ok {
+		t.Fatalf("config.params missing or wrong type: %T", cfg.Config["params"])
+	}
+	if params["message"] != "分支1 第1步" || params["sleep"] != "0.36" {
+		t.Errorf("params = %v, want bindings preserved", params)
+	}
+
+	// 无绑定时不写 params 键，保持快照干净
+	cfg2, err := ExpandNodeToConfig(node)
+	if err != nil {
+		t.Fatalf("expand failed: %v", err)
+	}
+	if _, ok := cfg2.Config["params"]; ok {
+		t.Errorf("config.params should be absent without bindings, got %v", cfg2.Config["params"])
+	}
+}

@@ -131,6 +131,18 @@ func expandNodeWithExecutorType(node *model.Node, executorTypeOverride string, p
 		runScript.WriteString("\n")
 	}
 
+	nodeConfig := map[string]interface{}{
+		// 物化节点记录完整引用 name@version：快照是执行实例的事实来源，
+		// 精确版本保证回放展示与续跑比对可还原到具体节点版本
+		"nodeRef": model.FormatNodeRef(node.Name, node.Version),
+	}
+	if len(bindings) > 0 {
+		// 保留原始参数绑定（常量或 {{ 上游.输出 }} 模板原样）：快照导出后
+		// 供前端回放态展示节点参数。物化节点带 steps，续跑时跳过重展开，
+		// 不参与 validateBindings 校验，无副作用
+		nodeConfig["params"] = bindings
+	}
+
 	nodeCfg := &core.NodeConfig{
 		Name:     node.DisplayName,
 		Executor: executorName,
@@ -141,11 +153,7 @@ func expandNodeWithExecutorType(node *model.Node, executorTypeOverride string, p
 				Run:  runScript.String(),
 			},
 		},
-		Config: map[string]interface{}{
-			// 物化节点记录完整引用 name@version：快照是执行实例的事实来源，
-			// 精确版本保证回放展示与续跑比对可还原到具体节点版本
-			"nodeRef": model.FormatNodeRef(node.Name, node.Version),
-		},
+		Config: nodeConfig,
 	}
 
 	if pkg.Extract != nil {
