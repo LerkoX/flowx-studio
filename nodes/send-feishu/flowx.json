@@ -4,7 +4,10 @@
   "description": "通用飞书通知节点：通过飞书开放平台应用凭证向指定群聊发送卡片消息（内容支持 lark_md Markdown 格式），与具体业务内容无关",
   "version": "1.2.0",
   "author": "flowx-team",
-  "tags": ["feishu", "notification"],
+  "tags": [
+    "feishu",
+    "notification"
+  ],
   "icon": "💬",
   "language": "python",
   "entry": "main.py",
@@ -16,7 +19,9 @@
       "workdir": "/data/data/com.termux/files/home/.flowx-studio/workspace"
     }
   },
-  "requirements": ["requests"],
+  "requirements": [
+    "requests"
+  ],
   "parameters": [
     {
       "name": "feishuAppId",
@@ -48,7 +53,11 @@
       "type": "string",
       "description": "要发送的消息正文（Markdown 文本，使用飞书 lark_md 语法渲染，支持 **加粗**、换行、列表等）",
       "required": true,
-      "source": { "nodeRef": "get-weather", "output": "text", "description": "上游节点组织好的文本输出，如天气报告" }
+      "source": {
+        "nodeRef": "get-weather",
+        "output": "text",
+        "description": "上游节点组织好的文本输出，如天气报告"
+      }
     }
   ],
   "env": {
@@ -60,15 +69,19 @@
   },
   "run": "python3 main.py",
   "outputs": [
-    { "name": "status", "type": "string", "description": "发送状态" }
+    {
+      "name": "status",
+      "type": "string",
+      "description": "发送状态"
+    }
   ],
   "extract": {
     "type": "codec-block"
   },
   "ui": {
     "entry": "ui/node-widget.js",
-    "width": 260,
-    "height": 150,
+    "width": 320,
+    "height": 340,
     "collapsed": false,
     "apiVersion": 1
   },

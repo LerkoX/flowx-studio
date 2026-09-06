@@ -23,6 +23,10 @@ export interface NodeWidgetProps {
   status: NodeWidgetStatus
   inputs: string[]
   outputs: Record<string, string>
+  /** 节点实例当前参数绑定（config.params）：常量或 {{ 上游.输出 }} 模板 */
+  params: Record<string, string>
+  /** 全量替换该节点 config.params 并持久化；回放态为 undefined（只读），调用前判空 */
+  onParamsChange?: (params: Record<string, string>) => void
   execution: NodeWidgetExecution | null
   theme: 'dark'
   locale: string

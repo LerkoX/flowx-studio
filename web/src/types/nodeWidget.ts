@@ -6,7 +6,9 @@
  * 一个 mount 函数。Studio 画布在节点卡片内嵌区域调用 mount 渲染组件，
  * 并在数据变化时调用返回句柄的 update()。
  *
- * 契约为只读：组件不能回调 Studio，不暴露认证信息。
+ * 交互能力：组件可通过 props.onParamsChange 把参数调整写回当前节点实例的
+ * config.params（pipeline YAML）。回放态（查看历史执行快照）下回调缺省，
+ * 组件进入只读展示。除该回调外不暴露 Studio 其他能力与认证信息。
  */
 
 export type NodeWidgetStatus = 'idle' | 'running' | 'success' | 'failed' | 'skipped'
@@ -35,6 +37,17 @@ export interface NodeWidgetProps {
   inputs: string[]
   /** 节点运行时输出 */
   outputs: Record<string, string>
+  /**
+   * 节点实例当前的参数绑定（pipeline YAML 中该节点的 config.params）。
+   * 值为常量字符串或上游引用模板（如 "{{ GetWeather.city }}"），原样下发。
+   */
+  params: Record<string, string>
+  /**
+   * 参数写回回调：传入完整的参数表（全量替换该节点的 config.params，
+   * 传 {} 清空绑定），Studio 写回 pipeline YAML 并持久化。
+   * 回放态（执行快照）下为 undefined，组件调用前需判空进入只读模式。
+   */
+  onParamsChange?: (params: Record<string, string>) => void
   /** 流水线执行实例实时 metadata；无运行实例时为 null */
   execution: NodeWidgetExecution | null
   /** 当前主题 */

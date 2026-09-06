@@ -64,14 +64,26 @@ function lonLatToVec3(lonDeg, latDeg, r, out) {
   )
 }
 
+const isTemplate = (v) => typeof v === 'string' && v.indexOf('{{') >= 0
+
 function parseConfig(props) {
+  let base = { ...DEFAULT_CFG }
   const raw = props && props.outputs && props.outputs.config
   if (typeof raw === 'string' && raw.trim().startsWith('{')) {
     try {
-      return { ...DEFAULT_CFG, ...JSON.parse(raw) }
+      base = { ...base, ...JSON.parse(raw) }
     } catch { /* fallthrough */ }
   }
-  return { ...DEFAULT_CFG }
+  // 画布参数（config.params）优先于运行时输出：编辑态调整后即时生效，
+  // 模板接线值（{{ ... }}）不解析，保持现有配置
+  const p = (props && props.params) || {}
+  const num = (v, d) => { const n = parseFloat(v); return isNaN(n) ? d : n }
+  if (p.auto_rotate !== undefined && !isTemplate(p.auto_rotate)) base.autoRotate = p.auto_rotate !== 'false'
+  if (p.rotation_speed !== undefined && !isTemplate(p.rotation_speed)) base.rotationSpeed = num(p.rotation_speed, base.rotationSpeed)
+  if (p.camera_lat !== undefined && !isTemplate(p.camera_lat)) base.cameraLat = num(p.camera_lat, base.cameraLat)
+  if (p.camera_lon !== undefined && !isTemplate(p.camera_lon)) base.cameraLon = num(p.camera_lon, base.cameraLon)
+  if (p.cloud_opacity !== undefined && !isTemplate(p.cloud_opacity)) base.cloudOpacity = num(p.cloud_opacity, base.cloudOpacity)
+  return base
 }
 
 const EARTH_VERT = /* glsl */ `
@@ -299,6 +311,94 @@ export default function mount(el, props) {
   }
   setStatus(props.status || 'idle')
 
+  // ---------- 参数控制面板（onParamsChange 契约） ----------
+  const editable = () => typeof (currentProps && currentProps.onParamsChange) === 'function'
+  const setParam = (key, value) => {
+    if (!editable()) return
+    const params = { ...((currentProps && currentProps.params) || {}), [key]: String(value) }
+    currentProps = { ...currentProps, params }
+    currentProps.onParamsChange(params)
+  }
+
+  const panelRefreshers = []
+  const mkLabel = (t) => {
+    const n = document.createElement('div')
+    n.style.cssText = 'font-size:9px;color:rgba(190,220,255,0.5);margin:6px 0 2px'
+    n.textContent = t
+    return n
+  }
+  const mkSlider = (key, cfgKey, min, max, step, fmt, apply) => {
+    const row = document.createElement('div')
+    row.style.cssText = 'display:flex;align-items:center;gap:6px'
+    const sl = document.createElement('input')
+    sl.type = 'range'; sl.min = min; sl.max = max; sl.step = step
+    sl.style.cssText = 'flex:1;accent-color:#60a5fa;margin:0;min-width:0'
+    const val = document.createElement('span')
+    val.style.cssText = 'font-size:9px;color:rgba(190,220,255,0.7);min-width:34px;text-align:right;font-family:ui-monospace,Menlo,monospace'
+    sl.addEventListener('input', () => {
+      const v = parseFloat(sl.value)
+      val.textContent = fmt(v)
+      apply(v)
+    })
+    sl.addEventListener('change', () => setParam(key, sl.value))
+    panelRefreshers.push(() => {
+      sl.disabled = !editable()
+      sl.style.opacity = editable() ? '1' : '0.5'
+      sl.value = String(cfg[cfgKey])
+      val.textContent = fmt(cfg[cfgKey])
+    })
+    row.append(sl, val)
+    return row
+  }
+
+  const gearBtn = document.createElement('button')
+  gearBtn.textContent = '⚙'
+  gearBtn.title = '视角与显示参数'
+  gearBtn.style.cssText = 'position:absolute;right:8px;bottom:8px;width:26px;height:26px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(10,16,36,0.72);color:rgba(190,220,255,0.85);font-size:13px;cursor:pointer;backdrop-filter:blur(4px)'
+  el.appendChild(gearBtn)
+
+  const panel = document.createElement('div')
+  panel.style.cssText = 'position:absolute;right:8px;bottom:40px;width:210px;padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:rgba(8,12,28,0.85);backdrop-filter:blur(6px);display:none;font-family:system-ui,sans-serif'
+
+  // 自动旋转开关
+  const rotateRow = document.createElement('label')
+  rotateRow.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:10px;color:rgba(190,220,255,0.8);cursor:pointer'
+  const rotateChk = document.createElement('input')
+  rotateChk.type = 'checkbox'
+  rotateChk.style.cssText = 'accent-color:#60a5fa;margin:0'
+  rotateChk.addEventListener('change', () => {
+    cfg.autoRotate = rotateChk.checked
+    setParam('auto_rotate', rotateChk.checked ? 'true' : 'false')
+  })
+  rotateRow.append(rotateChk, document.createTextNode('自动环绕'))
+  panelRefreshers.push(() => {
+    rotateChk.disabled = !editable()
+    rotateChk.checked = !!cfg.autoRotate
+  })
+
+  const applyCamera = () => {
+    if (dragging) return
+    sph.setFromVector3(lonLatToVec3(cfg.cameraLon, cfg.cameraLat, sph.radius))
+  }
+  panel.append(
+    rotateRow,
+    mkLabel('旋转速度（°/s）'),
+    mkSlider('rotation_speed', 'rotationSpeed', 0, 20, 0.5, (v) => v.toFixed(1), (v) => { cfg.rotationSpeed = v }),
+    mkLabel('相机纬度'),
+    mkSlider('camera_lat', 'cameraLat', -80, 80, 1, (v) => v.toFixed(0) + '°', (v) => { cfg.cameraLat = v; applyCamera() }),
+    mkLabel('相机经度'),
+    mkSlider('camera_lon', 'cameraLon', -180, 180, 1, (v) => v.toFixed(0) + '°', (v) => { cfg.cameraLon = v; applyCamera() }),
+    mkLabel('云层不透明度'),
+    mkSlider('cloud_opacity', 'cloudOpacity', 0, 1, 0.05, (v) => v.toFixed(2), (v) => {
+      cfg.cloudOpacity = v
+      cloudMat.uniforms.opacity.value = v
+    }),
+  )
+  el.appendChild(panel)
+  gearBtn.addEventListener('click', () => {
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none'
+  })
+
   // ---------- 实时云图 ----------
   let cloudSource = '离线云图'
   const loadLiveClouds = () => {
@@ -379,6 +479,7 @@ export default function mount(el, props) {
       currentProps = next
       cfg = parseConfig(next)
       setStatus((next && next.status) || 'idle')
+      panelRefreshers.forEach((f) => f())
     },
     unmount() {
       disposed = true

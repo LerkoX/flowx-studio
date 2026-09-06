@@ -4,7 +4,11 @@
   "description": "打印一条日志消息，可选先 sleep 指定秒数再输出；常用于调试、占位与演示并行/回环流水线拓扑",
   "version": "1.1.0",
   "author": "flowx-team",
-  "tags": ["utility", "debug", "log"],
+  "tags": [
+    "utility",
+    "debug",
+    "log"
+  ],
   "icon": "📣",
   "language": "bash",
   "entry": "main.sh",
@@ -32,7 +36,11 @@
     "ECHO_SLEEP": "{{ Param.sleep }}"
   },
   "outputs": [
-    { "name": "text", "type": "string", "description": "原样回显的 message 文本" }
+    {
+      "name": "text",
+      "type": "string",
+      "description": "原样回显的 message 文本"
+    }
   ],
   "extract": {
     "type": "regex",
@@ -47,7 +55,7 @@
   "ui": {
     "entry": "ui/node-widget.js",
     "width": 220,
-    "height": 130,
+    "height": 200,
     "collapsed": false,
     "apiVersion": 1
   },

@@ -40,7 +40,8 @@ export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelPr
   const isCodeNode = node.nodeType === 'code'
   const hasUI = !!(node.ui?.entry && node.id)
 
-  // UI 预览用的合成 props：入参来自表单，输出来自最近一次 Mock 结果
+  // UI 预览用的合成 props：入参来自表单，输出来自最近一次 Mock 结果；
+  // 组件调整参数时全量写回表单（与画布上 config.params 的全量替换语义一致）
   const previewProps: NodeWidgetProps = {
     nodeId: 'mock-preview',
     nodeRef: node.name,
@@ -49,6 +50,8 @@ export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelPr
     outputs: Object.fromEntries(
       Object.entries(result?.output || {}).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)])
     ),
+    params: paramValues,
+    onParamsChange: (params) => setParamValues(params),
     execution: null,
     theme: getCurrentTheme(),
     locale: typeof navigator !== 'undefined' ? navigator.language : 'zh-CN',

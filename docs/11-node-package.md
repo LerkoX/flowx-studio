@@ -570,6 +570,12 @@ interface NodeWidgetProps {
   status: 'idle' | 'running' | 'success' | 'failed' | 'skipped'
   inputs: string[]              // 节点入参参数名
   outputs: Record<string, string>  // 节点运行时输出
+  params: Record<string, string>   // 节点实例当前参数绑定（config.params）：
+                                   // 常量或 {{ 上游.输出 }} 模板，原样下发
+  onParamsChange?: (params: Record<string, string>) => void
+                                  // 参数写回：全量替换该节点的 config.params（传 {} 清空），
+                                  // Studio 写回 pipeline YAML 并防抖持久化；回放态（执行快照）
+                                  // 下为 undefined，组件调用前需判空进入只读模式
   execution: {                  // 流水线执行实例实时 metadata（SSE 驱动）；无运行实例时为 null
     id: string
     status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
@@ -586,8 +592,8 @@ interface NodeWidgetProps {
 }
 ```
 
-契约为**只读**：组件不能回调 Studio，不暴露认证 token。未来如需交互能力，以
-`apiVersion: 2` 新增 `actions` 演进。
+组件的交互能力仅限于 `onParamsChange`：可渲染任意参数调整控件（滑杆、下拉等），
+调整后把完整参数表回传 Studio。组件不暴露认证 token 与 Studio 其他内部能力。
 
 类型定义与 React 开发模板见 `templates/node-widget/`（Vite 单文件构建）；免构建
 原生 DOM 示例见 `tests/e2e/testdata/ui-demo-node/ui/node-widget.js`。

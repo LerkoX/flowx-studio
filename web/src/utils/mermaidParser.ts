@@ -75,6 +75,36 @@ export function parseNodeRefs(yamlConfig: string): Record<string, string> {
   return result
 }
 
+/**
+ * 从 FlowX YAML 中提取各节点实例的参数绑定（config.params）。
+ * 返回 { 节点实例ID: { 参数名: 绑定值 } }，值为常量或上游引用模板字符串。
+ * 标量值统一转为 string（与后端 parseParamBindings 的 %v 语义一致）。
+ * 解析失败或节点未绑定参数时对应条目缺省。
+ */
+export function parseNodeParams(yamlConfig: string): Record<string, Record<string, string>> {
+  const result: Record<string, Record<string, string>> = {}
+  try {
+    const doc = yaml.load(yamlConfig) as Record<string, unknown> | undefined
+    if (!doc || typeof doc !== 'object') return result
+    const nodes = (doc.Nodes || doc.nodes) as Record<string, unknown> | undefined
+    if (!nodes || typeof nodes !== 'object') return result
+    for (const [id, def] of Object.entries(nodes)) {
+      if (!def || typeof def !== 'object') continue
+      const config = (def as Record<string, unknown>).config as Record<string, unknown> | undefined
+      const raw = config?.params
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+      const params: Record<string, string> = {}
+      for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+        params[k] = typeof v === 'string' ? v : String(v)
+      }
+      if (Object.keys(params).length > 0) result[id] = params
+    }
+  } catch {
+    // YAML 解析失败时返回已提取部分
+  }
+  return result
+}
+
 async function parseStateDiagram(graph: string): Promise<ParsedGraph> {
   const mermaid = await getMermaid()
 

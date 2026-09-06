@@ -31,6 +31,10 @@ interface GlowNodeData {
   nodeUpdatedAt?: string
   /** 自定义 UI 组件配置 */
   ui?: NodeUIConfig
+  /** 节点实例当前参数绑定（pipeline YAML config.params），供自定义 UI 展示 */
+  params?: Record<string, string>
+  /** 参数写回回调（编辑态提供；回放态缺省，组件进入只读） */
+  onParamsChange?: (params: Record<string, string>) => void
 }
 
 function toWidgetExecution(exec: ExecutionStatus | null): NodeWidgetExecution | null {
@@ -94,12 +98,14 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
       status,
       inputs: nodeData.inputs || [],
       outputs: nodeData.outputs || {},
+      params: nodeData.params || {},
+      onParamsChange: nodeData.onParamsChange,
       execution: toWidgetExecution(selectedExecution),
       theme: getCurrentTheme(),
       locale: typeof navigator !== 'undefined' ? navigator.language : 'zh-CN',
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }),
-    [nodeData.id, nodeData.nodeRef, status, nodeData.inputs, nodeData.outputs, selectedExecution]
+    [nodeData.id, nodeData.nodeRef, status, nodeData.inputs, nodeData.outputs, nodeData.params, nodeData.onParamsChange, selectedExecution]
   )
 
   const hasInputs = nodeData.inputs && nodeData.inputs.length > 0

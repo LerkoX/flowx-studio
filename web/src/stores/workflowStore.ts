@@ -25,6 +25,8 @@ interface WorkflowState {
   ) => void
   syncParamsFromYAML: (yamlConfig: string) => void
   updateParam: (key: string, value: string | number | boolean | object) => void
+  /** 全量替换节点实例的参数绑定（写回 yamlConfig 中该节点的 config.params；{} 清空） */
+  updateNodeParams: (nodeId: string, params: Record<string, string>) => void
   setNodeRuntimeData: (nodeId: string, data: Partial<NodeRuntimeData>) => void
   resetNodeRuntimeData: () => void
 }
@@ -157,6 +159,38 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
       }
 
       return { params: updatedParams }
+    })
+  },
+
+  updateNodeParams: (nodeId, params) => {
+    set((state) => {
+      const workflow = state.currentWorkflow
+      if (!workflow) return state
+      try {
+        const doc = yaml.load(workflow.yamlConfig) as Record<string, unknown> | undefined
+        if (!doc || typeof doc !== 'object') return state
+        const nodes = (doc.Nodes || doc.nodes) as Record<string, unknown> | undefined
+        const nodeDef = nodes?.[nodeId] as Record<string, unknown> | undefined
+        if (!nodeDef || typeof nodeDef !== 'object') return state
+        const config = { ...((nodeDef.config as Record<string, unknown>) ?? {}) }
+        if (Object.keys(params).length > 0) {
+          config.params = params
+        } else {
+          delete config.params
+        }
+        nodeDef.config = config
+        const newYaml = yaml.dump(doc)
+        const updatedWorkflow = { ...workflow, yamlConfig: newYaml }
+        return {
+          currentWorkflow: updatedWorkflow,
+          workflows: state.workflows.map((w) =>
+            w.id === workflow.id ? updatedWorkflow : w
+          ),
+        }
+      } catch {
+        // YAML 解析失败时不改动
+        return state
+      }
     })
   },
 

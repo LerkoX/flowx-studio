@@ -100,9 +100,10 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 ```
 
 - `entry`：包内预编译单文件 `.js` bundle（≤10MB），格式不限——ESM 默认导出 `mount`，或 IIFE 调用 `window.FlowXNodeWidget.define(mount)`
-- 契约：`mount(el, props) => { update(props), unmount() }`；`props` 只读，含 `status`/`inputs`/`outputs`/`execution`（流水线实时 metadata，无运行实例为 null）
+- 契约：`mount(el, props) => { update(props), unmount() }`；`props` 含 `status`/`inputs`/`outputs`/`execution`（流水线实时 metadata，无运行实例为 null）与 `params`（该节点实例当前的 `config.params` 绑定值，常量或 `{{ 上游.输出 }}` 模板原样下发）
+- **参数调整控件**：组件渲染滑杆/下拉等控件后调用 `props.onParamsChange(params)` 把**完整参数表**写回该节点的 `config.params`（全量替换，传 `{}` 清空），Studio 自动写回 pipeline YAML 并持久化；回放态（查看历史执行快照）下 `onParamsChange` 为 undefined，调用前必须判空进入只读模式
 - 参考实现：免构建原生 JS 示例 `tests/e2e/testdata/ui-demo-node/ui/node-widget.js`；React+Vite 工程模板 `templates/node-widget/`
-- 改组件后只需重新 `node import` 生效，无需重启 server；在「节点管理→测试」面板有 UI 预览
+- 改组件后只需重新 `node import` 生效，无需重启 server；在「节点管理→测试」面板有 UI 预览（预览中 onParamsChange 写回 Mock 测试的输入参数表单）
 - 安全：组件代码在 Studio 前端上下文执行，只导入可信来源
 
 ### 导入与验证

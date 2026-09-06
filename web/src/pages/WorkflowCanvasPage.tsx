@@ -208,7 +208,7 @@ export default function WorkflowCanvasPage() {
     <button
       onClick={handlePauseResume}
       disabled={pausePending}
-      className="flex items-center justify-center w-7 h-7 rounded-full flex-shrink-0
+      className="flex items-center justify-center w-7 h-7 rounded-md flex-shrink-0
                  text-amber-300 hover:bg-amber-400/15
                  disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       title={isPaused ? t('canvas.resumeExecution') : t('canvas.pauseExecution')}
@@ -223,8 +223,8 @@ export default function WorkflowCanvasPage() {
     </button>
   ) : null
 
-  // 运行按钮渲染在画布右上角的胶囊工具条内（与流水线名、方向切换按钮并排）。
-  // 移动端为图标-only 圆形按钮，桌面端保留文字
+  // 运行按钮渲染在画布顶部工具栏内（与流水线名/ID、方向切换按钮并排）。
+  // 移动端为图标-only 按钮，桌面端保留文字
   const runTitle = isPlayback
     ? continueMode
       ? t('canvas.continueExecution')
@@ -237,9 +237,8 @@ export default function WorkflowCanvasPage() {
       <button
         onClick={handleRun}
         disabled={runDisabled}
-        className="flex items-center justify-center w-7 h-7 rounded-full flex-shrink-0
+        className="flex items-center justify-center w-7 h-7 rounded-md flex-shrink-0
                    bg-indigo-500/80 hover:bg-indigo-500 text-on-accent
-                   shadow-lg shadow-indigo-500/20
                    disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         title={runTitle}
       >
@@ -249,9 +248,8 @@ export default function WorkflowCanvasPage() {
       <button
         onClick={handleRun}
         disabled={runDisabled}
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full flex-shrink-0
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md flex-shrink-0
                    bg-indigo-500/80 hover:bg-indigo-500 text-on-accent text-xs font-medium
-                   border border-indigo-400/30 shadow-lg shadow-indigo-500/20
                    disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         title={runTitle}
       >
@@ -265,7 +263,7 @@ export default function WorkflowCanvasPage() {
     )
   ) : null
 
-  // 胶囊工具条动作区：运行/续跑按钮 + 实时执行时的暂停/恢复按钮
+  // 顶部工具栏动作区：运行/续跑按钮 + 实时执行时的暂停/恢复按钮
   const canvasAction =
     runButton || pauseResumeButton ? (
       <>
@@ -288,6 +286,17 @@ export default function WorkflowCanvasPage() {
     }
   }
 
+  // 顶部工具栏「当前执行」徽标/历史按钮：展开历史执行下拉。
+  // 桌面端需确保右侧面板展开，移动端打开底部抽屉（与底部历史入口行为一致）
+  const handleShowHistory = () => {
+    setSwitcherOpen(true)
+    if (isMobile) {
+      setMobileParamsOpen(true)
+    } else if (paramsPanelCollapsed) {
+      toggleParamsPanel()
+    }
+  }
+
   const contextBar = (
     <ExecutionContextBar
       workflowId={currentWorkflow?.id || routeWorkflowId}
@@ -302,7 +311,7 @@ export default function WorkflowCanvasPage() {
       <div className="h-full flex relative">
         {/* 中央画布区域 */}
         <div className="flex-1 relative">
-          <WorkflowCanvas action={canvasAction} />
+          <WorkflowCanvas action={canvasAction} onShowHistory={handleShowHistory} />
         </div>
 
         {/* 移动端底部标签栏：当前模式的 tab + 历史执行入口 */}
@@ -420,7 +429,7 @@ export default function WorkflowCanvasPage() {
     <div className="h-full flex relative">
       {/* 中央画布区域 */}
       <div className="flex-1 relative">
-        <WorkflowCanvas action={canvasAction} />
+        <WorkflowCanvas action={canvasAction} onShowHistory={handleShowHistory} />
       </div>
 
       {/* 右侧面板 */}
