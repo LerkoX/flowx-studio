@@ -29,6 +29,16 @@ import { useTranslation } from 'react-i18next'
 const nodeTypes = { glowNode: GlowNode, terminalNode: TerminalNode }
 const edgeTypes = { gradientEdge: GradientEdge }
 
+// 节点参数防抖持久化的挂起冲刷句柄（模块级，画布单实例）
+// 运行流水线从 DB 读 YAML：800ms 防抖窗口内点击运行会拿到旧参数，
+// 运行前必须 await flushNodeParamsPersist() 把挂起的 PUT 立即落库
+let pendingParamsFlush: (() => Promise<void>) | null = null
+
+/** 冲刷节点参数写回的防抖持久化；无挂起变更时立即返回 */
+export async function flushNodeParamsPersist(): Promise<void> {
+  if (pendingParamsFlush) await pendingParamsFlush()
+}
+
 const statusMap: Record<string, string> = {
   running: 'running',
   success: 'success',
@@ -126,29 +136,44 @@ function WorkflowCanvasInner({
   // 组件 onParamsChange → 写回内存 yamlConfig（workflowStore.updateNodeParams）
   // → 防抖持久化到后端（滑杆类控件会连续触发，合并为一次 PUT）
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const persistNow = useCallback(async () => {
+    const latest = useWorkflowStore.getState().currentWorkflow
+    if (!latest) return
+    try {
+      await updateWorkflow(latest.id, {
+        name: latest.name,
+        description: latest.description,
+        intent: latest.intent,
+        yamlConfig: latest.yamlConfig,
+        status: latest.status,
+      })
+    } catch (err) {
+      console.error('Failed to persist node params:', err)
+    }
+  }, [])
   const handleNodeParamsChange = useCallback((nodeId: string, params: Record<string, string>) => {
     useWorkflowStore.getState().updateNodeParams(nodeId, params)
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
-    persistTimerRef.current = setTimeout(async () => {
-      const latest = useWorkflowStore.getState().currentWorkflow
-      if (!latest) return
-      try {
-        await updateWorkflow(latest.id, {
-          name: latest.name,
-          description: latest.description,
-          intent: latest.intent,
-          yamlConfig: latest.yamlConfig,
-          status: latest.status,
-        })
-      } catch (err) {
-        console.error('Failed to persist node params:', err)
-      }
+    // 挂起期间注册模块级冲刷句柄：运行流水线从 DB 读 YAML，
+    // 800ms 防抖窗口内点运行会用到旧参数，运行前必须 await 冲刷
+    pendingParamsFlush = async () => {
+      if (!persistTimerRef.current) return
+      clearTimeout(persistTimerRef.current)
+      persistTimerRef.current = null
+      pendingParamsFlush = null
+      await persistNow()
+    }
+    persistTimerRef.current = setTimeout(() => {
+      persistTimerRef.current = null
+      pendingParamsFlush = null
+      persistNow()
     }, 800)
-  }, [])
+  }, [persistNow])
 
   useEffect(() => {
     return () => {
       if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
+      pendingParamsFlush = null
     }
   }, [])
 

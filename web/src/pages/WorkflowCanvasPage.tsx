@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams, Navigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronRight, ChevronLeft, Play, Pause, Loader2, History } from 'lucide-react'
-import WorkflowCanvas from '@/features/workflow-canvas/WorkflowCanvas'
+import WorkflowCanvas, { flushNodeParamsPersist } from '@/features/workflow-canvas/WorkflowCanvas'
 import WorkflowConfigPanel from '@/features/workflow-canvas/WorkflowConfigPanel'
 import ExecutionContextBar from '@/features/workflow-canvas/ExecutionContextBar'
 import ExecutionNodesPanel from '@/features/workflow-canvas/ExecutionNodesPanel'
@@ -153,6 +153,8 @@ export default function WorkflowCanvasPage() {
     if (!currentWorkflow || starting || isExecuting) return
     setStarting(true)
     try {
+      // 节点 UI 参数写回有 800ms 防抖：防抖窗口内运行会读到 DB 旧参数，先冲刷
+      await flushNodeParamsPersist()
       if (isPlayback) {
         // 回放态续跑：执行实例是独立个体，图以 DB 中的运行时快照为准——
         // 有快照时不带 YAML（纯增量重跑未执行节点）；
