@@ -45,7 +45,8 @@ export interface NodeWidgetProps {
   /**
    * 参数写回回调：传入完整的参数表（全量替换该节点的 config.params，
    * 传 {} 清空绑定），Studio 写回 pipeline YAML 并持久化。
-   * 回放态（执行快照）下为 undefined，组件调用前需判空进入只读模式。
+   * 回放态（执行快照）或画布预览（非编辑）模式下为 undefined，
+   * 组件调用前需判空进入只读模式。
    */
   onParamsChange?: (params: Record<string, string>) => void
   /** 流水线执行实例实时 metadata；无运行实例时为 null */

@@ -89,6 +89,10 @@ function WorkflowCanvasInner({
   const [direction, setDirection] = useState<'TB' | 'LR'>('TB')
   // preview：只能平移画布；edit：可拖动节点、切换布局方向
   const [mode, setMode] = useState<'preview' | 'edit'>('preview')
+  // 解析 effect 不能依赖 mode（切换模式重跑 mermaid+dagre 会丢失手动拖动的位置），
+  // 构建节点 data 时通过 ref 读当前模式；mode 变化由独立 effect 同步 data.interactive
+  const modeRef = useRef(mode)
+  modeRef.current = mode
   const [, setSelectedNode] = useState<string | null>(null)
   // 精确选择器订阅：避免 store 中无关字段变化触发整个画布重渲染
   const currentWorkflow = useWorkflowStore((s) => s.currentWorkflow)
@@ -219,6 +223,8 @@ function WorkflowCanvasInner({
               nodeUpdatedAt: nodeDef?.updatedAt ? String(nodeDef.updatedAt) : undefined,
               ui: nodeDef?.ui,
               params: nodeParams[n.id],
+              // 非编辑（预览）模式：节点不可选中、内嵌 UI 不可交互
+              interactive: modeRef.current === 'edit',
               onParamsChange: paramsEditable
                 ? (params: Record<string, string>) => handleNodeParamsChange(n.id, params)
                 : undefined,
@@ -261,6 +267,18 @@ function WorkflowCanvasInner({
       cancelled = true
     }
   }, [sourceYaml, direction, nodeDefs, paramsEditable, handleNodeParamsChange, setNodes, setEdges])
+
+  // 模式切换时只同步节点的 interactive 标记（不重跑图解析/布局，保留手动位置）
+  useEffect(() => {
+    const interactive = mode === 'edit'
+    setNodes((nds) =>
+      nds.map((node) =>
+        node.data.interactive === interactive
+          ? node
+          : { ...node, data: { ...node.data, interactive } },
+      ),
+    )
+  }, [mode, setNodes])
 
   // 按实测尺寸重排：首帧布局只能按估算尺寸占位，组件挂载/详情展开后节点实际
   // 尺寸会变化（React Flow 自动测量到 node.measured），此处检测到变化后重跑 dagre，
@@ -513,7 +531,7 @@ function WorkflowCanvasInner({
         maxZoom={2}
         nodesDraggable={mode === 'edit'}
         nodesConnectable={false}
-        elementsSelectable={true}
+        elementsSelectable={mode === 'edit'}
         panOnScroll={true}
         panOnDrag={true}
         selectionOnDrag={false}

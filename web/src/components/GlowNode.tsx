@@ -35,6 +35,8 @@ interface GlowNodeData {
   params?: Record<string, string>
   /** 参数写回回调（编辑态提供；回放态缺省，组件进入只读） */
   onParamsChange?: (params: Record<string, string>) => void
+  /** 画布编辑模式标记：false 时节点不可选中、内嵌 UI 不可交互（缺省视为 true） */
+  interactive?: boolean
 }
 
 function toWidgetExecution(exec: ExecutionStatus | null): NodeWidgetExecution | null {
@@ -69,6 +71,8 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
   const isMobile = useIsMobile()
 
   const hasUI = !!(nodeData.ui?.entry && nodeData.nodeDbId)
+  // 预览模式：内嵌 UI 不可交互，且不下发 onParamsChange（组件按契约进入只读）
+  const interactive = nodeData.interactive !== false
   const uiWidth = nodeData.ui?.width || 260
   const uiHeight = nodeData.ui?.height || 120
   const viewportWidth = useViewportWidth()
@@ -99,13 +103,13 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
       inputs: nodeData.inputs || [],
       outputs: nodeData.outputs || {},
       params: nodeData.params || {},
-      onParamsChange: nodeData.onParamsChange,
+      onParamsChange: interactive ? nodeData.onParamsChange : undefined,
       execution: toWidgetExecution(selectedExecution),
       theme: getCurrentTheme(),
       locale: typeof navigator !== 'undefined' ? navigator.language : 'zh-CN',
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }),
-    [nodeData.id, nodeData.nodeRef, status, nodeData.inputs, nodeData.outputs, nodeData.params, nodeData.onParamsChange, selectedExecution]
+    [nodeData.id, nodeData.nodeRef, status, nodeData.inputs, nodeData.outputs, nodeData.params, nodeData.onParamsChange, interactive, selectedExecution]
   )
 
   const hasInputs = nodeData.inputs && nodeData.inputs.length > 0
@@ -221,7 +225,10 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
 
         {/* 内嵌自定义 UI 组件（桌面端常显；移动端随详情展开） */}
         {hasUI && (!isMobile || detailsExpanded) && (
-          <div className="mt-2 pt-2 border-t border-white/10">
+          // 预览模式拦截组件区域的指针事件；“查看数据”开关恢复可点击
+          <div
+            className={`mt-2 pt-2 border-t border-white/10 ${interactive ? '' : 'pointer-events-none'}`}
+          >
             {widgetScale < 1 ? (
               // 移动端收窄：按原始尺寸挂载组件，再用 transform 等比缩小到节点宽度
               <div style={{ width: widgetWidth, height: widgetHeight, overflow: 'hidden' }}>
@@ -255,7 +262,7 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
                   e.stopPropagation()
                   setRawDataExpanded(!rawDataExpanded)
                 }}
-                className="mt-1.5 flex items-center gap-1 text-[10px] text-white/30 hover:text-white/60 transition-colors"
+                className="mt-1.5 flex items-center gap-1 text-[10px] text-white/30 hover:text-white/60 transition-colors pointer-events-auto"
               >
                 {rawDataExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                 {rawDataExpanded ? t('canvas.collapseData') : t('canvas.viewData')}

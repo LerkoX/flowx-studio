@@ -144,7 +144,10 @@ const ModuleNodeWidget = memo(({ url, width, height, widgetProps }: ModuleNodeWi
   }, [url])
 
   // 数据推送：props 内容变化时调用组件的 update()
-  const propsKey = JSON.stringify(widgetProps)
+  // 注意 onParamsChange 是函数、JSON.stringify 会丢弃它，但预览/编辑模式切换
+  // 正是通过它的有无表达（只读/可写），必须显式编入 key，否则切换后组件收不到 update
+  const propsKey =
+    JSON.stringify(widgetProps) + (widgetProps.onParamsChange ? '|rw' : '|ro')
   useEffect(() => {
     if (!handleRef.current?.update) return
     try {
