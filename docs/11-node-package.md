@@ -68,7 +68,8 @@ image-downloader/
   "files": ["utils.py"],
   "image": "python:3.11-slim",
   "executor": {
-    "type": "docker",
+    "supportedTypes": ["local", "docker"],
+    "preferredType": "docker",
     "config": {
       "workdir": "/app",
       "volumes": ["/tmp:/tmp"]
@@ -136,12 +137,14 @@ image-downloader/
 | `language` | string | 是 | 运行语言：`python` / `go` / `bash` / `node` 等 |
 | `entry` | string | 是 | 入口文件，如 `main.py` |
 | `files` | string[] | 否 | 需要一起拷贝的其他同级文件 |
-| `image` | string | 否 | Docker 镜像；若指定且未声明 `executor`，归为 docker 执行（默认执行器是 docker 实例时复用其实例配置） |
-| `executor.ref` | string | 否 | 引用 Studio 注册的执行器实例名（如 `docker-gpu`）；与 `executor.type` 互斥，优先级最高。实例在 `/executors` 页面或 `flowx-studio executor` CLI 管理 |
-| `executor.type` | string | 否 | 内联匿名执行器类型：`local` / `docker`（`k8s`/`kubernetes` 导入时拒绝）；与 `executor.ref` 互斥 |
-| `executor.config` | object | 否 | 内联执行器配置，透传给 FlowX 执行器（`flowx/executor/local/adapter.go`、`flowx/executor/docker/adapter.go`）；仅与 `executor.type` 搭配使用 |
+| `image` | string | 否 | Docker 镜像能力声明；若指定且未声明 `executor`，按旧版兼容规则归为 docker 执行 |
+| `executor.supportedTypes` | string[] | 否 | 节点支持的执行器类型：`local` / `docker`；节点包可跨环境复用，因此只声明类型能力，不绑定用户环境中的实例名 |
+| `executor.preferredType` | string | 否 | 默认偏好类型，必须包含在 `supportedTypes` 中；缺省时使用 `supportedTypes[0]`。偏好类型不可用（如系统无 docker 实例）时按 `supportedTypes` 顺序降级 |
+| `executor.ref` | string | 否 | **旧版兼容字段**：引用 Studio 注册的执行器实例名；不可与 `supportedTypes`/`preferredType` 混用。新节点包不应使用，因为实例名属于用户环境 |
+| `executor.type` | string | 否 | **旧版兼容字段**：固定内联匿名执行器类型 `local` / `docker`；不可与 `supportedTypes`/`preferredType` 混用 |
+| `executor.config` | object | 否 | 匿名执行器配置，透传给 FlowX 执行器；选择注册实例时以实例配置为准，节点 `image` 仍会按镜像注入规则覆盖条目 `config.image` |
 
-**执行器解析优先级**（运行时展开，见 [7.4.1 节](07-node-system.md#741-运行时适配器与节点展开)）：`executor.ref`（注册实例）→ `executor.type + config`（内联匿名）→ 均未声明时：有 `image` 归为 docker（默认执行器为 docker 实例时复用其配置，否则合成匿名 docker），无 `image` 使用全局默认执行器。
+**执行器解析优先级**（运行时展开，见 [7.4.1 节](07-node-system.md#741-运行时适配器与节点展开)）：pipeline 节点 `config.executor` 显式选择 → 旧版 `executor.ref`（注册实例）→ 旧版 `executor.type + config`（内联匿名）→ `supportedTypes/preferredType`（偏好类型无可用实例时按支持列表降级）→ 有 `image` 归为 docker（默认执行器为 docker 实例时复用其配置，否则合成匿名 docker）→ 无 `image` 使用全局默认执行器。
 
 **docker 执行器实例支持的 config 键**：`host`（远程 daemon 地址，如 `tcp://192.168.1.10:2375` / `ssh://user@host`，留空读 `DOCKER_HOST` 环境变量）、`tlsVerify`、`certPath`、`image`（容器镜像，默认 `alpine:latest`）、`registry`、`network`、`workdir`、`volumes`（远程 daemon 时为**远端机器**路径）、`env`、`tty`、`ttyWidth`、`ttyHeight`。
 
@@ -523,9 +526,10 @@ Mock 测试入口 API 仍使用 `POST /api/v1/nodes/:id/mock`。
 7. ~~如果 `image` 为空且 `executor.type` 为 `docker`，导入失败~~（**未在代码中实现**：`node_import.go` 仅校验 `executor.type` 类型名合法性，不检查 `image` 是否配置）
 8. `mock.entry` 若存在，文件必须存在
 9. 节点名称唯一（数据库唯一约束）
-10. `executor.ref` 与 `executor.type` 互斥；`ref` 须为合法实例名（正则 `^[a-zA-Z][a-zA-Z0-9_-]*$`），引用不存在的实例**不在导入时报错**（允许先导节点后配执行器），运行时展开时报错
-11. `executor.type` 仅接受 `local` / `docker`；`k8s` / `kubernetes` 导入时拒绝（暂不支持）
-12. `ui` 若存在：`ui.entry` 必填且为包内相对路径的单文件 `.js`（禁止绝对路径与 `..` 穿越），文件必须存在且大小 ≤ 10MB，`ui.apiVersion` 缺省或为 1
+10. `executor.supportedTypes` 仅接受不重复的 `local` / `docker`；`executor.preferredType` 必须包含在 `supportedTypes` 中（未列 supportedTypes 时 preferredType 即唯一支持类型）
+11. 旧版 `executor.ref` 与 `executor.type` 互斥；二者也不可混用 `supportedTypes`/`preferredType`。`ref` 须为合法实例名（正则 `^[a-zA-Z][a-zA-Z0-9_-]*$`），引用不存在的实例**不在导入时报错**（允许先导节点后配执行器），运行时展开时报错
+12. 旧版 `executor.type` 仅接受 `local` / `docker`；`k8s` / `kubernetes` 导入时拒绝（暂不支持）
+13. `ui` 若存在：`ui.entry` 必填且为包内相对路径的单文件 `.js`（禁止绝对路径与 `..` 穿越），文件必须存在且大小 ≤ 10MB，`ui.apiVersion` 缺省或为 1
 
 ## 11.12 实现任务（已全部完成 ✅）
 

@@ -89,6 +89,14 @@ func (s *WorkflowService) executorResolver() runtime.ExecutorResolver {
 	return s.executors.ResolveForNode
 }
 
+// executorTypeResolver 供 ExpandWorkflowConfig 按类型选择注册执行器实例（多 Docker 场景）。
+func (s *WorkflowService) executorTypeResolver() runtime.ExecutorTypeResolver {
+	if s.executors == nil {
+		return nil
+	}
+	return s.executors.ResolveTypeForNode
+}
+
 // auditRecord 静默记录审计日志
 func (s *WorkflowService) auditRecord(action, resourceID, detail string) {
 	if s.audit != nil {
@@ -300,7 +308,7 @@ func (s *WorkflowService) ContinueExecution(execID int64, yamlContent string) er
 		// 原样跳过，仅新节点（nodeRef 形式、无 steps）展开。展开结果依赖执行器
 		// 注册表等可变状态，旧节点不重展开是保证与快照比对一致的关键
 		if s.nodeSvc != nil {
-			expanded, err := runtime.ExpandWorkflowConfig(yamlContent, s.expandLookup, s.executorResolver())
+			expanded, err := runtime.ExpandWorkflowConfigWithTypeResolver(yamlContent, s.expandLookup, s.executorResolver(), s.executorTypeResolver())
 			if err != nil {
 				return fmt.Errorf("failed to expand nodeRef: %w", err)
 			}
@@ -472,7 +480,7 @@ func (s *WorkflowService) MockRun(id int64) (map[string]interface{}, error) {
 
 	expanded := wf.YAMLConfig
 	if s.nodeSvc != nil {
-		expanded, err = runtime.ExpandWorkflowConfig(wf.YAMLConfig, s.expandLookup, s.executorResolver())
+		expanded, err = runtime.ExpandWorkflowConfigWithTypeResolver(wf.YAMLConfig, s.expandLookup, s.executorResolver(), s.executorTypeResolver())
 		if err != nil {
 			return nil, fmt.Errorf("failed to expand nodeRef: %w", err)
 		}
@@ -490,7 +498,7 @@ func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 
 	yamlConfig := wf.YAMLConfig
 	if s.nodeSvc != nil {
-		expanded, err := runtime.ExpandWorkflowConfig(yamlConfig, s.expandLookup, s.executorResolver())
+		expanded, err := runtime.ExpandWorkflowConfigWithTypeResolver(yamlConfig, s.expandLookup, s.executorResolver(), s.executorTypeResolver())
 		if err != nil {
 			s.db.Exec("UPDATE executions SET status = ?, completed_at = ?, error_message = ? WHERE id = ?",
 				"failed", time.Now(), err.Error(), execID)

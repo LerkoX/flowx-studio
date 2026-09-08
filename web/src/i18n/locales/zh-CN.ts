@@ -196,7 +196,7 @@ export default {
     deleteConfirmMessage: '确定删除执行器「{{name}}」吗？引用它的节点将无法运行。',
     configTitle: '{{type}} 执行器配置',
     instanceName: '实例名称',
-    instanceNameHint: '字母开头，可含字母/数字/_/-；节点包通过 executor.ref 引用此名称',
+    instanceNameHint: '字母开头，可含字母/数字/_/-；pipeline YAML 可通过 config.executor.ref 选择此名称',
     description: '描述',
     localDescPlaceholder: '本机 Shell 执行器',
     dockerDescPlaceholder: '如：办公室构建机',

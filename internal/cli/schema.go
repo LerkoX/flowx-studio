@@ -10,7 +10,7 @@ var schemas = map[string]string{
   "type": "object",
   "properties": {
     "name":        {"type": "string", "description": "流水线名称（必填）"},
-    "file":        {"type": "string", "description": "FlowX YAML 文件路径，'-' 表示 stdin（必填）。YAML 要求：Name 非空；Nodes 为非空 map；Graph 以 stateDiagram-v2 开头且至少一条迁移；executor 必须在 Executors 中定义；节点可用 config.nodeRef 引用已导入节点包"},
+    "file":        {"type": "string", "description": "FlowX YAML 文件路径，'-' 表示 stdin（必填）。YAML 要求：Name 非空；Nodes 为非空 map；Graph 以 stateDiagram-v2 开头且至少一条迁移；内联节点 executor 必须在 Executors 中定义；节点可用 config.nodeRef 引用已导入节点包，并可用 config.executor 选择执行器类型（local/docker）或具体实例 ref"},
     "description": {"type": "string", "description": "描述"},
     "intent":      {"type": "string", "description": "意图说明"},
     "status":      {"type": "string", "enum": ["draft", "active", "archived"], "default": "draft"}

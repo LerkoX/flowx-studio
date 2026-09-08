@@ -48,13 +48,18 @@ type NodeExtractConfig struct {
 	MaxOutputSize int               `json:"maxOutputSize,omitempty" db:"max_output_size"`
 }
 
-// NodeExecutorConfig 执行器配置
-// ref 与 type 互斥：ref 引用 Studio 注册的执行器实例；type+config 为内联匿名实例；
-// 两者都缺省时使用全局默认执行器（有 image 时归为 docker）。
+// NodeExecutorConfig 节点包执行器能力声明。
+// supportedTypes/preferredType 是可移植声明：节点包只声明支持的执行器类型与偏好，
+// 不绑定用户环境中的具体执行器实例；pipeline 可在 config.executor 中覆盖类型或实例。
+// ref/type 是旧版固定声明，为兼容已有节点继续支持：ref 引用 Studio 注册实例，
+// type+config 为内联匿名实例；两者都缺省时按 supportedTypes/preferredType、image、
+// 全局默认执行器的顺序解析。
 type NodeExecutorConfig struct {
-	Ref    string                 `json:"ref,omitempty" db:"ref"`
-	Type   string                 `json:"type,omitempty" db:"type"`
-	Config map[string]interface{} `json:"config,omitempty" db:"config"`
+	SupportedTypes []string               `json:"supportedTypes,omitempty" db:"-"`
+	PreferredType  string                 `json:"preferredType,omitempty" db:"-"`
+	Ref            string                 `json:"ref,omitempty" db:"ref"`
+	Type           string                 `json:"type,omitempty" db:"type"`
+	Config         map[string]interface{} `json:"config,omitempty" db:"config"`
 }
 
 // NodeUIConfig 节点自定义 UI 组件配置（module 模式）。
@@ -103,14 +108,14 @@ type NodeFileAsset struct {
 }
 
 // DeriveExecutor 从 PackageConfig 派生顶层 Executor 透出字段（API 只读）。
-// 包未声明 executor（ref/type/config 全空）时保持 nil，交由展开规则兜底。
+// 包未声明 executor（支持类型/偏好/ref/type/config 全空）时保持 nil，交由展开规则兜底。
 func (n *Node) DeriveExecutor() {
 	n.Executor = nil
 	if n.PackageConfig == nil {
 		return
 	}
 	e := n.PackageConfig.Executor
-	if e.Ref == "" && e.Type == "" && e.Config == nil {
+	if len(e.SupportedTypes) == 0 && e.PreferredType == "" && e.Ref == "" && e.Type == "" && e.Config == nil {
 		return
 	}
 	n.Executor = &e
@@ -154,9 +159,8 @@ type Node struct {
 	// 完整的 flowx.json 包配置（运行时展开使用）
 	PackageConfig *NodePackage `json:"-" db:"package_config"`
 
-	// 节点包声明的执行器（来自 PackageConfig.Executor，API 只读透出）。
-	// 编排时据此判断节点默认运行时：ref/type 非空即作者锁定或倾向；
-	// 空则按展开规则兜底（有 image 归 docker，否则全局默认执行器）。
+	// 节点包声明的执行器能力/偏好（来自 PackageConfig.Executor，API 只读透出）。
+	// 编排时据此判断节点支持的执行器类型与默认偏好；pipeline 可通过 config.executor 覆盖。
 	Executor *NodeExecutorConfig `json:"executor,omitempty" db:"-"`
 	// Package 是 PackageConfig 的 API 只读副本（节点详情展示 flowx.json 用）。
 	// 用独立字段而非直接序列化 PackageConfig，是为了保持包配置无法通过

@@ -132,6 +132,13 @@ func (v *WorkflowValidator) validateExecutors(doc map[string]interface{}, nodeMa
 		if !ok {
 			continue
 		}
+		// nodeRef 节点的 executor 由运行时展开器根据节点包能力/偏好或 config.executor
+		// 自动补充；混合内联节点 + nodeRef 节点时，不要求编写态重复声明。
+		if cfgMap, ok := nodeObj["config"].(map[string]interface{}); ok {
+			if ref, _ := cfgMap["nodeRef"].(string); strings.TrimSpace(ref) != "" {
+				continue
+			}
+		}
 		execName, ok := nodeObj["executor"].(string)
 		if !ok || execName == "" {
 			return fmt.Errorf("node '%s' must have a non-empty 'executor'", nodeName)

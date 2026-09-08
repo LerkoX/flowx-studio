@@ -196,7 +196,7 @@ export default {
     deleteConfirmMessage: 'Delete executor "{{name}}"? Nodes referencing it will fail to run.',
     configTitle: '{{type}} executor configuration',
     instanceName: 'Instance name',
-    instanceNameHint: 'Starts with a letter; letters/digits/_/- allowed. Node packages reference this name via executor.ref',
+    instanceNameHint: 'Starts with a letter; letters/digits/_/- allowed. Pipeline YAML selects this instance via config.executor.ref',
     description: 'Description',
     localDescPlaceholder: 'Local shell executor',
     dockerDescPlaceholder: 'e.g. Office build machine',

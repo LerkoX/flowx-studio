@@ -24,7 +24,7 @@ func ExpandNodeToConfig(node *model.Node, paramBindings ...map[string]string) (*
 
 // expandNodeWithExecutorType 同 ExpandNodeToConfig，但允许调用方覆盖执行器类型。
 // 覆盖值来自执行器实例解析（executor.ref / 默认执行器），影响资产引导路径的选择
-//（local → cp 物化；docker → 签名 URL 拉取）。空字符串表示按节点包自身声明推断。
+// （local → cp 物化；docker → 签名 URL 拉取）。空字符串表示按节点包自身声明推断。
 func expandNodeWithExecutorType(node *model.Node, executorTypeOverride string, paramBindings ...map[string]string) (*core.NodeConfig, error) {
 	pkg := node.PackageConfig
 	if pkg == nil {
@@ -174,20 +174,39 @@ func expandNodeWithExecutorType(node *model.Node, executorTypeOverride string, p
 // 由 ExecutorService 实现，供展开器把节点绑定到命名执行器实例。
 type ExecutorResolver func(ref string, useDefault bool) (*model.Executor, error)
 
-// ExpandWorkflowConfig 展开工作流 YAML 中的 nodeRef 引用
-//
-// 执行器解析三级优先级（对每个 nodeRef 节点）：
-//  1. flowx.json 声明 executor.ref → 引用注册的执行器实例（多节点共享同一 Executors 条目）
-//  2. flowx.json 声明 executor.type (+config) → 内联匿名实例（合成 <node名>-executor）
-//  3. 均未声明 → 有 image 归为 docker（默认执行器是 docker 时复用其实例，否则匿名 docker）；
-//     无 image 使用全局默认执行器
-//
-// resolvers 缺省时回退到旧行为（匿名实例合成），便于不挂执行器注册表的场景（测试等）。
+// ExecutorTypeResolver 按类型选择注册执行器实例（docker 可多实例）；
+// 没有该类型实例时返回 nil。由 ExecutorService 实现。
+type ExecutorTypeResolver func(execType string) (*model.Executor, error)
+
+// ExpandWorkflowConfig 展开工作流 YAML 中的 nodeRef 引用。
+// 保持旧签名供测试/兼容场景使用；需要按类型选择注册执行器时使用
+// ExpandWorkflowConfigWithTypeResolver。
 func ExpandWorkflowConfig(configYAML string, lookup func(name string) (*model.Node, error), resolvers ...ExecutorResolver) (string, error) {
 	var resolve ExecutorResolver
 	if len(resolvers) > 0 {
 		resolve = resolvers[0]
 	}
+	return expandWorkflowConfig(configYAML, lookup, resolve, nil)
+}
+
+// ExpandWorkflowConfigWithTypeResolver 展开 nodeRef，并支持 pipeline 对每个节点
+// 通过 config.executor 选择执行器类型或具体执行器实例。
+func ExpandWorkflowConfigWithTypeResolver(configYAML string, lookup func(name string) (*model.Node, error), resolve ExecutorResolver, resolveType ExecutorTypeResolver) (string, error) {
+	return expandWorkflowConfig(configYAML, lookup, resolve, resolveType)
+}
+
+// expandWorkflowConfig 展开工作流 YAML 中的 nodeRef 引用
+//
+// 执行器解析优先级（对每个 nodeRef 节点）：
+//  1. pipeline YAML 的 config.executor 显式选择（type 或 ref，需被节点 supportedTypes 允许）
+//  2. flowx.json 旧版 executor.ref → 引用注册的执行器实例（多节点共享同一 Executors 条目）
+//  3. flowx.json 旧版 executor.type (+config) → 内联匿名实例（合成 <node名>-executor）
+//  4. flowx.json supportedTypes/preferredType → 按偏好选择可用类型，不可用时按声明顺序降级
+//  5. 均未声明 → 有 image 归为 docker（默认执行器是 docker 时复用其实例，否则匿名 docker）；
+//     无 image 使用全局默认执行器
+//
+// resolvers 缺省时回退到旧行为（匿名实例合成），便于不挂执行器注册表的场景（测试等）。
+func expandWorkflowConfig(configYAML string, lookup func(name string) (*model.Node, error), resolve ExecutorResolver, resolveType ExecutorTypeResolver) (string, error) {
 
 	var cfg core.PipelineConfig
 	if err := yaml.Unmarshal([]byte(configYAML), &cfg); err != nil {
@@ -232,9 +251,13 @@ func ExpandWorkflowConfig(configYAML string, lookup func(name string) (*model.No
 		if err != nil {
 			return "", err
 		}
+		selection, err := parseExecutorSelection(nodeName, nodeCfg.Config)
+		if err != nil {
+			return "", err
+		}
 
-		// 解析执行器：ref → 内联 → 默认/docker
-		execName, execType, err := resolveNodeExecutor(node, executors, resolve)
+		// 解析执行器：pipeline 显式选择 → ref → 内联 → 偏好/降级 → 默认/docker
+		execName, execType, err := resolveNodeExecutor(node, executors, resolve, resolveType, selection)
 		if err != nil {
 			return "", fmt.Errorf("failed to expand node %s: %w", ref, err)
 		}
@@ -262,17 +285,53 @@ func ExpandWorkflowConfig(configYAML string, lookup func(name string) (*model.No
 // 命名实例会就地写入 executors map（多节点共享同一条目）；匿名实例合成 <node名>-executor。
 //
 // 镜像注入：节点声明的 image 会写入其 docker/k8s 执行器条目的 Config["image"]
-//（flowx core 执行器按名单例，镜像不同即不同容器）。优先级：节点 image > 条目 config.image。
+// （flowx core 执行器按名单例，镜像不同即不同容器）。优先级：节点 image > 条目 config.image。
 // 共享条目（ref 实例 / 默认实例）在镜像不一致时复制出节点专属条目，避免不同镜像的
 // 节点互相覆盖同一共享容器。
-func resolveNodeExecutor(node *model.Node, executors map[string]core.ExecutorConfig, resolve ExecutorResolver) (string, string, error) {
+func resolveNodeExecutor(node *model.Node, executors map[string]core.ExecutorConfig, resolve ExecutorResolver, resolveType ExecutorTypeResolver, selection *nodeExecutorSelection) (string, string, error) {
 	pkg := node.PackageConfig
 	if pkg == nil {
 		pkg = &model.NodePackage{Image: node.Image}
 	}
 	image := nodeImage(pkg, node)
 
-	// 1. executor.ref：引用注册的执行器实例
+	// 0. pipeline YAML 显式选择：config.executor 可为 "local"/"docker"、实例名，
+	// 或 {type: docker, ref: docker-gpu}。选择类型必须被节点 supportedTypes 允许。
+	if selection != nil {
+		if selection.Ref != "" {
+			if resolve == nil {
+				return "", "", fmt.Errorf("pipeline selects executor %q but no executor registry is available", selection.Ref)
+			}
+			inst, err := resolve(selection.Ref, false)
+			if err != nil {
+				return "", "", err
+			}
+			if selection.Type != "" && inst.Type != selection.Type {
+				return "", "", fmt.Errorf("pipeline selects executor %q of type %q, want %q", selection.Ref, inst.Type, selection.Type)
+			}
+			if err := ensureExecutorTypeAllowed(node.Name, pkg, inst.Type); err != nil {
+				return "", "", err
+			}
+			return addRegisteredExecutor(node, image, inst, executors), inst.Type, nil
+		}
+		if selection.Type != "" {
+			if err := ensureExecutorTypeAllowed(node.Name, pkg, selection.Type); err != nil {
+				return "", "", err
+			}
+			if resolveType != nil {
+				inst, err := resolveType(selection.Type)
+				if err != nil {
+					return "", "", err
+				}
+				if inst != nil {
+					return addRegisteredExecutor(node, image, inst, executors), inst.Type, nil
+				}
+			}
+			return addAnonymousExecutor(node, selection.Type, image, pkg.Executor.Config, executors), selection.Type, nil
+		}
+	}
+
+	// 1. 旧版 executor.ref：引用注册的执行器实例
 	if pkg.Executor.Ref != "" {
 		if resolve == nil {
 			return "", "", fmt.Errorf("node declares executor.ref %q but no executor registry is available", pkg.Executor.Ref)
@@ -281,74 +340,42 @@ func resolveNodeExecutor(node *model.Node, executors map[string]core.ExecutorCon
 		if err != nil {
 			return "", "", err
 		}
-		// 容器执行器且镜像与实例配置不一致：复制实例配置合成节点专属条目
-		if isContainerExecutor(inst.Type) && image != "" && configImage(inst.Config) != image {
-			cfg := copyExecutorConfig(inst.Config)
-			cfg["image"] = image
-			if name := findCompatibleExecutor(executors, inst.Type, cfg); name != "" {
-				return name, inst.Type, nil
-			}
-			name := node.Name + "-executor"
-			executors[name] = core.ExecutorConfig{Type: inst.Type, Description: inst.Description, Config: cfg}
-			return name, inst.Type, nil
-		}
-		executors[inst.Name] = core.ExecutorConfig{
-			Type:        inst.Type,
-			Description: inst.Description,
-			Config:      inst.Config,
-		}
-		return inst.Name, inst.Type, nil
+		return addRegisteredExecutor(node, image, inst, executors), inst.Type, nil
 	}
 
-	// 2. executor.type (+config)：内联匿名实例（条目本来即节点专属，直接注入镜像）
+	// 2. 旧版 executor.type (+config)：内联匿名实例（条目本来即节点专属，直接注入镜像）
 	if pkg.Executor.Type != "" {
-		name := node.Name + "-executor"
-		cfg := pkg.Executor.Config
-		if isContainerExecutor(pkg.Executor.Type) && image != "" && configImage(cfg) != image {
-			cfg = copyExecutorConfig(cfg)
-			cfg["image"] = image
-		}
-		executors[name] = core.ExecutorConfig{
-			Type:   pkg.Executor.Type,
-			Config: cfg,
-		}
-		return name, pkg.Executor.Type, nil
+		return addAnonymousExecutor(node, pkg.Executor.Type, image, pkg.Executor.Config, executors), pkg.Executor.Type, nil
 	}
 
-	// 3. 未声明：有 image 归为 docker，无 image 走全局默认执行器
+	// 3. portable 声明：supportedTypes + preferredType。优先 preferred；该类型没有
+	// 注册实例时按 supportedTypes 声明顺序降级到其他类型。所有类型都没有实例时，
+	// 使用偏好类型合成匿名执行器（docker 会注入节点 image/config）。
+	if candidates := portableExecutorCandidates(pkg); len(candidates) > 0 {
+		if resolveType != nil {
+			for _, execType := range candidates {
+				inst, err := resolveType(execType)
+				if err != nil {
+					return "", "", err
+				}
+				if inst != nil {
+					return addRegisteredExecutor(node, image, inst, executors), inst.Type, nil
+				}
+			}
+		}
+		return addAnonymousExecutor(node, candidates[0], image, pkg.Executor.Config, executors), candidates[0], nil
+	}
+
+	// 4. 未声明：有 image 归为 docker，无 image 走全局默认执行器
 	if image != "" {
 		// 默认执行器是 docker 且镜像一致时复用其实例（继承 host/registry 等配置）；
 		// 镜像不同则继承实例配置合成节点专属条目；无 docker 默认时匿名 docker
 		if resolve != nil {
 			if def, err := resolve("", true); err == nil && def != nil && def.Type == "docker" {
-				if configImage(def.Config) == image {
-					if name := findCompatibleExecutor(executors, def.Type, def.Config); name != "" {
-						return name, "docker", nil
-					}
-					executors[def.Name] = core.ExecutorConfig{
-						Type:        def.Type,
-						Description: def.Description,
-						Config:      def.Config,
-					}
-					return def.Name, "docker", nil
-				}
-				cfg := copyExecutorConfig(def.Config)
-				cfg["image"] = image
-				if name := findCompatibleExecutor(executors, "docker", cfg); name != "" {
-					return name, "docker", nil
-				}
-				name := node.Name + "-executor"
-				executors[name] = core.ExecutorConfig{
-					Type:        "docker",
-					Description: def.Description,
-					Config:      cfg,
-				}
-				return name, "docker", nil
+				return addRegisteredExecutor(node, image, def, executors), "docker", nil
 			}
 		}
-		name := node.Name + "-executor"
-		executors[name] = core.ExecutorConfig{Type: "docker", Config: map[string]interface{}{"image": image}}
-		return name, "docker", nil
+		return addAnonymousExecutor(node, "docker", image, nil, executors), "docker", nil
 	}
 
 	if resolve != nil {
@@ -356,21 +383,135 @@ func resolveNodeExecutor(node *model.Node, executors map[string]core.ExecutorCon
 		if err != nil {
 			return "", "", err
 		}
-		if name := findCompatibleExecutor(executors, def.Type, def.Config); name != "" {
-			return name, def.Type, nil
-		}
-		executors[def.Name] = core.ExecutorConfig{
-			Type:        def.Type,
-			Description: def.Description,
-			Config:      def.Config,
-		}
-		return def.Name, def.Type, nil
+		return addRegisteredExecutor(node, image, def, executors), def.Type, nil
 	}
 
 	// 无注册表（测试/兼容场景）：匿名 local
+	return addAnonymousExecutor(node, "local", image, nil, executors), "local", nil
+}
+
+// nodeExecutorSelection pipeline YAML 中单个 nodeRef 节点的执行器选择。
+// Ref 是用户环境中的具体执行器实例名；Type 是 local/docker 类型级选择。
+type nodeExecutorSelection struct {
+	Ref  string
+	Type string
+}
+
+// parseExecutorSelection 解析 config.executor。支持三种写法：
+//
+//	executor: local                 # 类型级选择
+//	executor: docker-gpu            # 具体实例（字符串形式下 local/docker 保留为类型名）
+//	executor: {type: docker, ref: docker-gpu}
+func parseExecutorSelection(nodeName string, config map[string]interface{}) (*nodeExecutorSelection, error) {
+	if config == nil {
+		return nil, nil
+	}
+	raw, ok := config["executor"]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+
+	switch v := raw.(type) {
+	case string:
+		s := strings.ToLower(strings.TrimSpace(v))
+		if s == "" {
+			return nil, nil
+		}
+		if s == "local" || s == "docker" {
+			return &nodeExecutorSelection{Type: s}, nil
+		}
+		return &nodeExecutorSelection{Ref: strings.TrimSpace(v)}, nil
+	case map[string]interface{}:
+		selection := &nodeExecutorSelection{}
+		for key, value := range v {
+			s, ok := value.(string)
+			if !ok {
+				return nil, fmt.Errorf("node %s: config.executor.%s must be a string", nodeName, key)
+			}
+			switch key {
+			case "type":
+				selection.Type = strings.ToLower(strings.TrimSpace(s))
+			case "ref":
+				selection.Ref = strings.TrimSpace(s)
+			default:
+				return nil, fmt.Errorf("node %s: unknown config.executor key %q (supported: type, ref)", nodeName, key)
+			}
+		}
+		if selection.Type != "" && selection.Type != "local" && selection.Type != "docker" {
+			return nil, fmt.Errorf("node %s: unsupported config.executor.type %q (only local and docker are supported)", nodeName, selection.Type)
+		}
+		if selection.Type == "" && selection.Ref == "" {
+			return nil, nil
+		}
+		return selection, nil
+	default:
+		return nil, fmt.Errorf("node %s: config.executor must be a string or a map with type/ref", nodeName)
+	}
+}
+
+// portableExecutorCandidates 返回节点包声明的执行器类型候选顺序：preferredType 第一，
+// 其余 supportedTypes 保持声明顺序。
+func portableExecutorCandidates(pkg *model.NodePackage) []string {
+	if len(pkg.Executor.SupportedTypes) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(pkg.Executor.SupportedTypes))
+	if pkg.Executor.PreferredType != "" {
+		out = append(out, pkg.Executor.PreferredType)
+	}
+	for _, execType := range pkg.Executor.SupportedTypes {
+		if execType != pkg.Executor.PreferredType {
+			out = append(out, execType)
+		}
+	}
+	return out
+}
+
+// ensureExecutorTypeAllowed 校验 pipeline 选择的类型是否被节点包允许。
+// 旧节点未声明 supportedTypes 时不做限制，保持兼容。
+func ensureExecutorTypeAllowed(nodeName string, pkg *model.NodePackage, execType string) error {
+	if len(pkg.Executor.SupportedTypes) == 0 {
+		return nil
+	}
+	for _, allowed := range pkg.Executor.SupportedTypes {
+		if allowed == execType {
+			return nil
+		}
+	}
+	return fmt.Errorf("node %s does not support executor type %q (supportedTypes: %v)", nodeName, execType, pkg.Executor.SupportedTypes)
+}
+
+// addRegisteredExecutor 把注册实例写入 Executors；容器执行器在镜像不一致时复制配置
+// 并合成节点专属条目，避免修改共享实例。
+func addRegisteredExecutor(node *model.Node, image string, inst *model.Executor, executors map[string]core.ExecutorConfig) string {
+	if isContainerExecutor(inst.Type) && image != "" && configImage(inst.Config) != image {
+		cfg := copyExecutorConfig(inst.Config)
+		cfg["image"] = image
+		if name := findCompatibleExecutor(executors, inst.Type, cfg); name != "" {
+			return name
+		}
+		name := node.Name + "-executor"
+		executors[name] = core.ExecutorConfig{Type: inst.Type, Description: inst.Description, Config: cfg}
+		return name
+	}
+	executors[inst.Name] = core.ExecutorConfig{
+		Type:        inst.Type,
+		Description: inst.Description,
+		Config:      inst.Config,
+	}
+	return inst.Name
+}
+
+// addAnonymousExecutor 合成节点专属匿名执行器条目并注入节点镜像。
+func addAnonymousExecutor(node *model.Node, execType, image string, config map[string]interface{}, executors map[string]core.ExecutorConfig) string {
 	name := node.Name + "-executor"
-	executors[name] = core.ExecutorConfig{Type: "local"}
-	return name, "local", nil
+	cfg := config
+	if isContainerExecutor(execType) && image != "" && configImage(cfg) != image {
+		cfg = copyExecutorConfig(cfg)
+		cfg["image"] = image
+	}
+	executors[name] = core.ExecutorConfig{Type: execType, Config: cfg}
+	return name
 }
 
 // nodeImage 节点声明的容器镜像（包配置优先于顶层 legacy 字段）
@@ -504,7 +645,7 @@ func writeFileHeredoc(sb *strings.Builder, name, content string) {
 	sb.WriteString("FLOWX_FILE_EOF\n")
 }
 
-// shellQuote 单引号包裹，内部单引号转义为 '\''
+// shellQuote 单引号包裹，内部单引号转义为 '\”
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -39,19 +40,27 @@ type nodeJSON struct {
 	Image       string   `json:"image,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
 	Executor    *struct {
-		Ref  string `json:"ref,omitempty"`
-		Type string `json:"type,omitempty"`
+		SupportedTypes []string `json:"supportedTypes,omitempty"`
+		PreferredType  string   `json:"preferredType,omitempty"`
+		Ref            string   `json:"ref,omitempty"`
+		Type           string   `json:"type,omitempty"`
 	} `json:"executor,omitempty"`
 }
 
-// executorLabel 节点默认运行时的人类可读描述：
-// ref 锁定 > 内联 type > 有 image 归 docker > 全局默认执行器。
+// executorLabel 节点执行器能力/默认偏好的人类可读描述：
+// pipeline 显式选择优先；包内旧版 ref/type 固定声明次之；portable 声明展示 preferred 与支持类型。
 func (n nodeJSON) executorLabel() string {
 	switch {
 	case n.Executor != nil && n.Executor.Ref != "":
 		return "ref:" + n.Executor.Ref
 	case n.Executor != nil && n.Executor.Type != "":
 		return n.Executor.Type
+	case n.Executor != nil && len(n.Executor.SupportedTypes) > 0:
+		preferred := n.Executor.PreferredType
+		if preferred == "" {
+			preferred = n.Executor.SupportedTypes[0]
+		}
+		return "pref:" + preferred + " [" + strings.Join(n.Executor.SupportedTypes, ",") + "]"
 	case n.Image != "":
 		return "docker(image)"
 	default:

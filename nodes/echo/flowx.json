@@ -13,7 +13,8 @@
   "language": "bash",
   "entry": "main.sh",
   "executor": {
-    "type": "local"
+    "supportedTypes": ["local"],
+    "preferredType": "local"
   },
   "parameters": [
     {

@@ -71,3 +71,15 @@ func TestDeriveExecutor(t *testing.T) {
 		t.Errorf("re-derive after clearing should reset Executor to nil, got %+v", n.Executor)
 	}
 }
+
+func TestDeriveExecutorPortableDeclaration(t *testing.T) {
+	n := &Node{PackageConfig: &NodePackage{Name: "portable",
+		Executor: NodeExecutorConfig{SupportedTypes: []string{"local", "docker"}, PreferredType: "docker"}}}
+	n.DeriveExecutor()
+	if n.Executor == nil {
+		t.Fatal("Executor = nil, want portable declaration")
+	}
+	if n.Executor.PreferredType != "docker" || len(n.Executor.SupportedTypes) != 2 {
+		t.Errorf("Executor = %+v, want supportedTypes/local,docker preferred docker", n.Executor)
+	}
+}

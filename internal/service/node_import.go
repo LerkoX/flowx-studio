@@ -199,6 +199,9 @@ func (s *NodeImportService) validatePackage(dir string, pkg *model.NodePackage) 
 		if pkg.Executor.Type != "" {
 			return fmt.Errorf("executor.ref and executor.type are mutually exclusive; use ref to reference a registered executor, or type+config for an inline one")
 		}
+		if len(pkg.Executor.SupportedTypes) > 0 || pkg.Executor.PreferredType != "" {
+			return fmt.Errorf("executor.ref is a legacy fixed instance binding and cannot be combined with supportedTypes/preferredType; portable node packages should declare only supportedTypes/preferredType")
+		}
 		if !executorNameRe.MatchString(pkg.Executor.Ref) {
 			return fmt.Errorf("invalid executor.ref %q: must start with a letter and contain only letters, digits, '_' or '-'", pkg.Executor.Ref)
 		}
@@ -208,6 +211,40 @@ func (s *NodeImportService) validatePackage(dir string, pkg *model.NodePackage) 
 		if !isValidExecutorType(pkg.Executor.Type) {
 			return fmt.Errorf("invalid executor type: %s (only local and docker are supported; k8s is not implemented yet)", pkg.Executor.Type)
 		}
+		pkg.Executor.Type = strings.ToLower(pkg.Executor.Type)
+		if len(pkg.Executor.SupportedTypes) > 0 || pkg.Executor.PreferredType != "" {
+			return fmt.Errorf("executor.type is a legacy fixed type and cannot be combined with supportedTypes/preferredType; use supportedTypes/preferredType for portable nodes")
+		}
+	}
+
+	if len(pkg.Executor.SupportedTypes) > 0 {
+		seenTypes := make(map[string]bool, len(pkg.Executor.SupportedTypes))
+		for i, t := range pkg.Executor.SupportedTypes {
+			t = strings.ToLower(strings.TrimSpace(t))
+			if !isValidExecutorType(t) {
+				return fmt.Errorf("invalid executor supportedTypes[%d]: %s (only local and docker are supported)", i, pkg.Executor.SupportedTypes[i])
+			}
+			if seenTypes[t] {
+				return fmt.Errorf("duplicate executor supportedTypes entry: %s", t)
+			}
+			seenTypes[t] = true
+			pkg.Executor.SupportedTypes[i] = t
+		}
+		if pkg.Executor.PreferredType != "" {
+			preferred := strings.ToLower(strings.TrimSpace(pkg.Executor.PreferredType))
+			if !seenTypes[preferred] {
+				return fmt.Errorf("executor.preferredType %q must be one of supportedTypes %v", pkg.Executor.PreferredType, pkg.Executor.SupportedTypes)
+			}
+			pkg.Executor.PreferredType = preferred
+		}
+	} else if pkg.Executor.PreferredType != "" {
+		preferred := strings.ToLower(strings.TrimSpace(pkg.Executor.PreferredType))
+		if !isValidExecutorType(preferred) {
+			return fmt.Errorf("invalid executor.preferredType: %s (only local and docker are supported)", pkg.Executor.PreferredType)
+		}
+		pkg.Executor.PreferredType = preferred
+		// 未显式列 supportedTypes 时，preferredType 即唯一支持类型。
+		pkg.Executor.SupportedTypes = []string{preferred}
 	}
 
 	if pkg.Mock != nil && pkg.Mock.Enabled && strings.TrimSpace(pkg.Mock.Entry) != "" {

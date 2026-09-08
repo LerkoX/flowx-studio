@@ -229,3 +229,30 @@ func TestExecutorService_ResolveForNode(t *testing.T) {
 }
 
 func contains(s, sub string) bool { return strings.Contains(s, sub) }
+
+func TestExecutorService_ResolveTypeForNode(t *testing.T) {
+	svc, cleanup := newExecutorTestService(t)
+	defer cleanup()
+
+	if err := svc.Create(&model.Executor{Name: "docker-b", Type: "docker"}); err != nil {
+		t.Fatalf("Create(docker-b) error = %v", err)
+	}
+	if err := svc.Create(&model.Executor{Name: "docker-a", Type: "docker"}); err != nil {
+		t.Fatalf("Create(docker-a) error = %v", err)
+	}
+
+	e, err := svc.ResolveTypeForNode("local")
+	if err != nil || e == nil || e.Name != "local" {
+		t.Errorf("ResolveTypeForNode(local) = %+v, %v", e, err)
+	}
+
+	e, err = svc.ResolveTypeForNode("docker")
+	if err != nil || e == nil || e.Name != "docker-a" {
+		t.Errorf("ResolveTypeForNode(docker) = %+v, %v, want deterministic first docker-a", e, err)
+	}
+
+	e, err = svc.ResolveTypeForNode("missing")
+	if err != nil || e != nil {
+		t.Errorf("ResolveTypeForNode(missing) = %+v, %v, want nil", e, err)
+	}
+}

@@ -44,7 +44,15 @@ export interface NodePackageConfig {
   entry: string
   files?: string[]
   image?: string
-  executor?: { ref?: string; type?: string; config?: Record<string, unknown> }
+  executor?: {
+    supportedTypes?: Array<'local' | 'docker'>
+    preferredType?: 'local' | 'docker'
+    /** 旧版兼容字段：新节点包不应绑定用户环境中的实例名 */
+    ref?: string
+    /** 旧版兼容字段：新节点包使用 supportedTypes/preferredType */
+    type?: string
+    config?: Record<string, unknown>
+  }
   requirements?: string[]
   parameters: NodeParameter[]
   env?: Record<string, string>

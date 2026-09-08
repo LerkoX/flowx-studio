@@ -13,11 +13,8 @@
   "entry": "main.py",
   "image": "python:3.11-slim",
   "executor": {
-    "type": "local",
-    "config": {
-      "shell": "bash",
-      "workdir": "/data/data/com.termux/files/home/.flowx-studio/workspace"
-    }
+    "supportedTypes": ["local", "docker"],
+    "preferredType": "local"
   },
   "requirements": [
     "requests",

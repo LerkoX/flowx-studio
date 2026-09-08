@@ -10,7 +10,7 @@
 ### 执行器实例化（Executor Registry，已落地）
 - 新增 `executors` 表（迁移 010）：命名执行器实例（`name/type/description/config/is_default`）；**local 全局限一个**（部分唯一索引）、**docker 可多实例**、全局唯一默认执行器（迁移时自动播种 `local`）。
 - `ExecutorService` + `ExecutorHandler`：`GET/POST /api/v1/executors`、`GET/PUT/DELETE /executors/:id`、`PUT /executors/:id/default`；name/type 不可变更、默认执行器禁删；config 按类型做键白名单与类型校验；写操作接审计与事件总线。
-- **flowx.json `executor.ref`**：节点包可引用注册的执行器实例（与 `executor.type` 互斥）。运行时展开三级优先级：`ref`（注册实例，多节点共享）→ `type+config`（内联匿名，原行为）→ 未声明时有 `image` 归为 docker（默认执行器为 docker 时复用其配置）/ 无 `image` 用全局默认执行器。解析结果同时决定资产引导方式（local→cp，docker→签名 URL）。
+- **portable 执行器声明**：flowx.json 推荐用 `executor.supportedTypes` + `executor.preferredType` 声明支持类型与偏好，不绑定用户环境中的实例名；pipeline YAML 可用 `config.executor` 按类型或具体实例覆盖。旧版 `executor.ref`/`executor.type` 继续兼容。运行时解析：pipeline 显式选择 → 旧版 `ref` → 旧版 `type+config` → portable 偏好/降级 → 有 `image` 归 docker / 无 `image` 用全局默认执行器。解析结果同时决定资产引导方式（local→cp，docker→签名 URL）。
 - **k8s 暂不支持**：`executor.type: k8s/kubernetes` 导入拒绝；前端 `/executors` 移除 K8s 卡片。
 - **远程 Docker**（FlowX 核心同步增强）：docker adapter 新增 `host`/`tlsVerify`/`certPath` 配置（`tcp://…`、`ssh://user@host`），client 惰性创建，未配置 `host` 时回退 `DOCKER_HOST` 环境变量（原行为不变）；每个 docker 实例可连不同 daemon。
 - 前端 `/executors` 重写为实例管理页（真实 API 落地 + SSE 实时刷新 + 设为默认/删除），假监控面板移除；CLI 新增 `executor list/create/update/delete/set-default`（含 `--schema`）。

@@ -370,3 +370,148 @@ Nodes:
 		t.Errorf("Executors has %d entries, want 1 shared entry", len(cfg.Executors))
 	}
 }
+
+func staticTypeResolver(instances map[string]*model.Executor) ExecutorTypeResolver {
+	return func(execType string) (*model.Executor, error) {
+		return instances[execType], nil
+	}
+}
+
+func TestExpandWorkflow_PipelineExecutorRefOverride(t *testing.T) {
+	node := newTestNode(&model.NodePackage{
+		Name:     "train",
+		Language: "python",
+		Entry:    "main.py",
+		Executor: model.NodeExecutorConfig{SupportedTypes: []string{"local", "docker"}},
+	})
+	wfYAML := `Name: wf
+Graph: |
+  stateDiagram-v2
+    [*] --> A
+Nodes:
+  A:
+    config:
+      nodeRef: train
+      executor:
+        type: docker
+        ref: docker-gpu
+`
+	inst := &model.Executor{Name: "docker-gpu", Type: "docker", Config: map[string]interface{}{"host": "tcp://gpu:2375"}}
+	out, err := ExpandWorkflowConfigWithTypeResolver(wfYAML,
+		func(name string) (*model.Node, error) { return node, nil },
+		staticResolver(map[string]*model.Executor{"docker-gpu": inst}, nil), nil)
+	if err != nil {
+		t.Fatalf("ExpandWorkflowConfigWithTypeResolver() error = %v", err)
+	}
+	var cfg core.PipelineConfig
+	if err := yaml.Unmarshal([]byte(out), &cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if cfg.Nodes["A"].Executor != "docker-gpu" {
+		t.Errorf("node executor = %q, want docker-gpu", cfg.Nodes["A"].Executor)
+	}
+	if cfg.Executors["docker-gpu"].Config["host"] != "tcp://gpu:2375" {
+		t.Errorf("executor config not propagated: %+v", cfg.Executors["docker-gpu"].Config)
+	}
+}
+
+func TestExpandWorkflow_PipelineExecutorTypeSelectsInstance(t *testing.T) {
+	node := newTestNode(&model.NodePackage{
+		Name:     "train",
+		Language: "python",
+		Entry:    "main.py",
+		Executor: model.NodeExecutorConfig{SupportedTypes: []string{"local", "docker"}},
+	})
+	wfYAML := `Name: wf
+Graph: |
+  stateDiagram-v2
+    [*] --> A
+Nodes:
+  A:
+    config:
+      nodeRef: train
+      executor: docker
+`
+	docker := &model.Executor{Name: "docker-remote", Type: "docker"}
+	out, err := ExpandWorkflowConfigWithTypeResolver(wfYAML,
+		func(name string) (*model.Node, error) { return node, nil },
+		nil, staticTypeResolver(map[string]*model.Executor{"docker": docker}))
+	if err != nil {
+		t.Fatalf("ExpandWorkflowConfigWithTypeResolver() error = %v", err)
+	}
+	var cfg core.PipelineConfig
+	if err := yaml.Unmarshal([]byte(out), &cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if cfg.Nodes["A"].Executor != "docker-remote" {
+		t.Errorf("node executor = %q, want docker-remote", cfg.Nodes["A"].Executor)
+	}
+}
+
+func TestExpandWorkflow_PreferredExecutorFallsBackToSupportedType(t *testing.T) {
+	node := newTestNode(&model.NodePackage{
+		Name:     "portable",
+		Language: "python",
+		Entry:    "main.py",
+		Executor: model.NodeExecutorConfig{
+			SupportedTypes: []string{"docker", "local"},
+			PreferredType:  "docker",
+		},
+	})
+	local := &model.Executor{Name: "local", Type: "local"}
+	cfg := expandWorkflowWithTypes(t, node, nil, staticTypeResolver(map[string]*model.Executor{"local": local}))
+	if cfg.Nodes["A"].Executor != "local" {
+		t.Errorf("node executor = %q, want fallback local", cfg.Nodes["A"].Executor)
+	}
+}
+
+func TestExpandWorkflow_PipelineExecutorRejectsUnsupportedType(t *testing.T) {
+	node := newTestNode(&model.NodePackage{
+		Name:     "local-only",
+		Language: "python",
+		Entry:    "main.py",
+		Executor: model.NodeExecutorConfig{SupportedTypes: []string{"local"}},
+	})
+	wfYAML := `Name: wf
+Graph: |
+  stateDiagram-v2
+    [*] --> A
+Nodes:
+  A:
+    config:
+      nodeRef: local-only
+      executor: docker
+`
+	_, err := ExpandWorkflowConfigWithTypeResolver(wfYAML,
+		func(name string) (*model.Node, error) { return node, nil }, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "does not support executor type") {
+		t.Fatalf("error = %v, want unsupported executor type", err)
+	}
+}
+
+func expandWorkflowWithTypes(t *testing.T, node *model.Node, resolve ExecutorResolver, resolveType ExecutorTypeResolver) *core.PipelineConfig {
+	t.Helper()
+	wfYAML := `Name: test-wf
+Graph: |
+  stateDiagram-v2
+    [*] --> A
+Nodes:
+  A:
+    config:
+      nodeRef: ` + node.Name + `
+`
+	out, err := ExpandWorkflowConfigWithTypeResolver(wfYAML, func(name string) (*model.Node, error) {
+		if name == node.Name {
+			return node, nil
+		}
+		return nil, nil
+	}, resolve, resolveType)
+	if err != nil {
+		t.Fatalf("ExpandWorkflowConfigWithTypeResolver() error = %v", err)
+	}
+	var cfg core.PipelineConfig
+	if err := yaml.Unmarshal([]byte(out), &cfg); err != nil {
+		t.Fatalf("unmarshal expanded yaml: %v", err)
+	}
+	return &cfg
+}

@@ -188,7 +188,7 @@ CLI 调用前可用以下命令探测与启动 server；`status` 退出码恒为
 4. `Graph` 必须是非空字符串，且：
    - 以 `stateDiagram`（即 Mermaid `stateDiagram-v2`）开头；
    - 至少包含一条状态迁移（形如 `A --> B`，支持 `[*]` 起止节点）。
-5. 若存在 `Executors`，其必须是 map，且每个节点声明的 `executor` 必须在 `Executors` 中有定义。
+5. 若存在 `Executors`，其必须是 map；内联节点声明的 `executor` 必须在其中有定义，`nodeRef` 节点由展开器自动补充。
 
 校验失败时服务端返回 400，CLI 将其转换为退出码 1，stderr 输出如：
 
@@ -235,19 +235,27 @@ Graph: |
     download --> [*]
 Nodes:
   download:
-    executor: download-image-executor
     config:
       nodeRef: download-image
-Executors:
-  download-image-executor:
-    type: docker
+```
+
+需要覆盖节点包偏好时，在 `config.executor` 中选择类型或具体实例：
+
+```yaml
+Nodes:
+  download:
+    config:
+      nodeRef: download-image
+      executor:
+        type: docker
+        ref: docker-gpu
 ```
 
 执行前 `ExpandWorkflowConfig`（`internal/runtime/node_expander.go`）会：
 
 1. 按 `nodeRef` 名称查找节点（`node list` 可查可用名称）；
 2. 用 `ExpandNodeToConfig` 把节点包展开为 FlowX 核心 `NodeConfig`：注入环境变量（`env` 映射或默认 `FLOWX_PARAM_<NAME>` 模板）、写入入口文件与附属文件、拼接运行命令（`run` 或按语言默认）；
-3. 自动补充 `<node名>-executor` 的 Executor 定义（`image` 存在时默认 `docker`，否则 `local`）。
+3. 按节点包 `supportedTypes/preferredType`、pipeline `config.executor` 或旧版兼容规则自动补充 Executor 定义。
 
 因此 Agent 生成 YAML 时通常只需关心 `Graph` 拓扑和 `nodeRef` 引用，节点实现细节由节点包承载。
 
@@ -264,7 +272,7 @@ Executors:
 - `language` 必填且受沙箱支持；
 - `entry` 入口文件必须存在，`files` 列出的每个文件必须存在；
 - `parameters` 不允许重名，类型限定为 `string/integer/float/boolean/array/object`；
-- `executor.type` 若提供，限定为 `local/docker/k8s`；
+- `executor.supportedTypes`/`executor.preferredType` 若提供，类型限定为 `local/docker` 且 preferred 必须包含在 supportedTypes 中；旧版 `executor.type` 限定为 `local/docker`（k8s 暂未实现，导入拒绝）；
 - 启用 mock 时 `mock.entry` 文件必须存在。
 
 校验通过后读取入口/附属文件内容、依赖列表（`requirements` 字段或 `requirements.txt`）、mock 与 docker 配置，组装为 `model.Node` 落库，并保留 `source_type/source_url/source_path` 溯源信息。

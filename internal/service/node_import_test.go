@@ -9,6 +9,7 @@ import (
 
 	"github.com/LerkoX/flowx-studio/internal/db"
 	"github.com/LerkoX/flowx-studio/internal/event"
+	"github.com/LerkoX/flowx-studio/internal/model"
 	"github.com/LerkoX/flowx-studio/internal/runtime"
 )
 
@@ -471,5 +472,40 @@ func TestNodeImportService_ExecutorRefValidation(t *testing.T) {
 				t.Errorf("error = %v, want substring %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestNodeImportService_PortableExecutorValidation(t *testing.T) {
+	tmpDir, cleanup := writeTestPackage(t, `{
+  "name": "portable-node",
+  "language": "python",
+  "entry": "main.py",
+  "parameters": []
+}`)
+	defer cleanup()
+
+	svc := &NodeImportService{}
+	valid := &model.NodePackage{
+		Name: "portable-node", Language: "python", Entry: "main.py", Parameters: []model.NodeParameter{},
+		Executor: model.NodeExecutorConfig{SupportedTypes: []string{"local", "docker"}, PreferredType: "docker"},
+	}
+	if err := svc.validatePackage(tmpDir, valid); err != nil {
+		t.Fatalf("portable executor declaration should be valid: %v", err)
+	}
+
+	invalidPreferred := &model.NodePackage{
+		Name: "portable-node", Language: "python", Entry: "main.py", Parameters: []model.NodeParameter{},
+		Executor: model.NodeExecutorConfig{SupportedTypes: []string{"local"}, PreferredType: "docker"},
+	}
+	if err := svc.validatePackage(tmpDir, invalidPreferred); err == nil || !strings.Contains(err.Error(), "preferredType") {
+		t.Fatalf("preferred outside supportedTypes should fail, got: %v", err)
+	}
+
+	legacyRef := &model.NodePackage{
+		Name: "portable-node", Language: "python", Entry: "main.py", Parameters: []model.NodeParameter{},
+		Executor: model.NodeExecutorConfig{Ref: "docker-gpu", SupportedTypes: []string{"docker"}},
+	}
+	if err := svc.validatePackage(tmpDir, legacyRef); err == nil || !strings.Contains(err.Error(), "legacy fixed instance") {
+		t.Fatalf("ref + portable declaration should fail, got: %v", err)
 	}
 }
