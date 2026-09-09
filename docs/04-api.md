@@ -660,8 +660,6 @@ PUT /api/v1/config/system
 | `node import --type git\|folder ... [--overwrite]` | 从 Git 仓库或本地文件夹导入节点（读取 flowx.json）；`--overwrite` 同名时原地更新保持 ID | `POST /nodes/import` |
 | `node delete --id N` | 删除节点 | `DELETE /nodes/:id` |
 | `node mock --id N` | Mock 测试节点 | `POST /nodes/:id/mock` |
-| `ask --key k --prompt ...` | 终端交互式提问（承接原 FAP `ask_input`，纯终端，不访问 server） | 无 |
-| `info --title t --message m` | 终端信息卡片（承接原 FAP `show_info`，纯终端，不访问 server） | 无 |
 | `audit list` | 查询审计日志（`--action`/`--resource-type` 过滤） | `GET /audit-logs` |
 | `executor list` | 列出执行器实例（local 单例 + docker 多实例，`(default)` 标记默认） | `GET /executors` |
 | `executor create --file exec.yaml` | 创建执行器实例（字段：name/type/description/config；docker config 支持 `host` 远程 daemon 地址） | `POST /executors` |

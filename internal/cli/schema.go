@@ -140,29 +140,6 @@ var schemas = map[string]string{
     "host": {"type": "string", "default": "0.0.0.0", "description": "监听地址"}
   }
 }`,
-	"ask": `{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "flowx-studio ask",
-  "type": "object",
-  "properties": {
-    "key":     {"type": "string", "description": "答案输出时的键名（必填）"},
-    "prompt":  {"type": "string", "description": "向用户展示的问题（必填）"},
-    "options": {"type": "string", "description": "逗号分隔的候选项，提供后用户必须从中选择"},
-    "default": {"type": "string", "description": "用户直接回车时的默认值"}
-  },
-  "required": ["key", "prompt"]
-}`,
-	"info": `{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "flowx-studio info",
-  "type": "object",
-  "properties": {
-    "title":   {"type": "string", "description": "卡片标题（必填）"},
-    "message": {"type": "string", "description": "卡片正文（必填）"},
-    "level":   {"type": "string", "enum": ["info", "warn", "error"], "default": "info"}
-  },
-  "required": ["title", "message"]
-}`,
 	"executor create": `{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "flowx-studio executor create",

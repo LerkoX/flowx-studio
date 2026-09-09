@@ -120,7 +120,7 @@
 <td>1.1</td>
 <td>命令树可用</td>
 <td><code>flowx-studio --help</code></td>
-<td>退出 0，输出含 <code>server</code>、<code>pipeline</code>、<code>node</code>、<code>ask</code>、<code>info</code>、<code>version</code></td>
+<td>退出 0，输出含 <code>server</code>、<code>pipeline</code>、<code>node</code>、<code>version</code></td>
 </tr>
 <tr>
 <td>1.2</td>
@@ -310,46 +310,7 @@
 </tbody>
 </table>
 
-<h3 id="1235-交互命令">12.3.5 交互命令</h3>
-
-<table>
-<thead>
-<tr>
-<th>#</th>
-<th>目的</th>
-<th>命令</th>
-<th>预期</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>5.1</td>
-<td>ask 默认值</td>
-<td>`echo "" \</td>
-<td>ask --key env --prompt "?" --default prod`</td>
-</tr>
-<tr>
-<td>5.2</td>
-<td>ask 选项校验</td>
-<td>`printf "bad\nstaging\n" \</td>
-<td>ask --key env --prompt "?" --options prod,staging`</td>
-</tr>
-<tr>
-<td>5.3</td>
-<td>ask EOF</td>
-<td><code>ask --key k --prompt "?" &lt;/dev/null</code></td>
-<td>退出非 0 或输出默认值</td>
-</tr>
-<tr>
-<td>5.4</td>
-<td>info 卡片</td>
-<td><code>info --title T --message M --level warn</code></td>
-<td>退出 0，输出含 <code>T</code>、<code>M</code>、<code>WARN</code></td>
-</tr>
-</tbody>
-</table>
-
-<h3 id="1236-错误路径">12.3.6 错误路径</h3>
+<h3 id="1235-错误路径">12.3.5 错误路径</h3>
 
 <table>
 <thead>
@@ -504,6 +465,69 @@
 <td>启动自动备份</td>
 <td><code>server start</code> 后检查 <code>&lt;data.dir&gt;/backups/</code></td>
 <td>存在至少一个 <code>.db</code> 备份文件</td>
+</tr>
+</tbody>
+</table>
+
+<h3 id="12311-执行器实例">12.3.11 执行器实例</h3>
+
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>目的</th>
+<th>命令</th>
+<th>预期</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>11.1</td>
+<td>播种默认 local</td>
+<td><code>executor list</code></td>
+<td>退出 0，含 <code>local</code> 与 <code>(default)</code> 标记</td>
+</tr>
+<tr>
+<td>11.2</td>
+<td>创建 docker 实例（含远程 host）</td>
+<td><code>executor create --file exec.yaml</code></td>
+<td>退出 0，输出含 <code>Created executor</code></td>
+</tr>
+<tr>
+<td>11.3</td>
+<td>k8s 拒绝</td>
+<td><code>executor create</code>（type: k8s）</td>
+<td>退出 1，stderr 含 <code>not implemented</code></td>
+</tr>
+<tr>
+<td>11.4</td>
+<td>local 单例约束</td>
+<td><code>executor create</code>（第二个 local）</td>
+<td>退出 1，stderr 含 <code>only one local executor</code></td>
+</tr>
+<tr>
+<td>11.5</td>
+<td>实例可查询</td>
+<td><code>executor list --json</code></td>
+<td>能提取到新 docker 实例 id</td>
+</tr>
+<tr>
+<td>11.6</td>
+<td>切换默认执行器</td>
+<td><code>executor set-default --id &lt;N&gt;</code></td>
+<td>退出 0，输出含 <code>Default executor is now</code></td>
+</tr>
+<tr>
+<td>11.7</td>
+<td>默认执行器禁删</td>
+<td><code>executor delete --id &lt;N&gt;</code>（默认实例）</td>
+<td>退出 1，stderr 含 <code>cannot delete the default</code></td>
+</tr>
+<tr>
+<td>11.8</td>
+<td>参数契约含 host</td>
+<td><code>executor create --schema</code></td>
+<td>退出 0，stdout 含 <code>host</code></td>
 </tr>
 </tbody>
 </table>

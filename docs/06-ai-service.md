@@ -21,7 +21,7 @@
 **2026-08-17 架构调整**：移除 `internal/mcpserver` 与 `flowx-studio mcp` 子命令，改为 **SKILL + CLI** 模式：
 
 - **SKILL**：仓库内提供 `skills/flowx-studio/SKILL.md`，安装到 Agent 的技能目录后，Agent 在路由阶段只需加载一份简短速查表，便知道「何时用、用什么命令」。
-- **CLI 客户端**：`flowx-studio` 在 `server` 子命令之外提供一组客户端子命令（`pipeline` / `node` / `ask` / `info` 等），它们是 `flowx-studio server` 的 **HTTP 客户端**，通过 REST API 完成全部读写。
+- **CLI 客户端**：`flowx-studio` 在 `server` 子命令之外提供一组客户端子命令（`pipeline` / `node` / `executor` / `execution` 等），它们是 `flowx-studio server` 的 **HTTP 客户端**，通过 REST API 完成全部读写。
 - **渐进式披露**：SKILL.md 只放最小必要信息；详细用法由 `flowx-studio <cmd> --help` 按需展开；机器可读的参数契约由 `flowx-studio <cmd> --schema` 输出。Agent 只在需要时才加载更深层的信息，上下文开销最小。
 
 职责划分：
@@ -51,7 +51,7 @@ flowchart LR
     end
 
     subgraph FlowX Studio
-        CLI["flowx-studio CLI<br/>pipeline / node / ask / info<br/>(HTTP 客户端)"]
+        CLI["flowx-studio CLI<br/>pipeline / node / executor / execution<br/>(HTTP 客户端)"]
         HTTP["flowx-studio server<br/>Gin HTTP Server"]
         VAL[WorkflowValidator<br/>internal/validator]
         SVC[WorkflowService / NodeService<br/>NodeImportService]
@@ -163,18 +163,18 @@ CLI 调用前可用以下命令探测与启动 server；`status` 退出码恒为
 | `flowx-studio backup download --name f [-o out]` | 下载备份文件 |
 | `flowx-studio backup restore --file f` | 恢复数据库；要求 server 已停止，恢复前自动保留 `.pre-restore` 回滚副本 |
 
-### 6.4.5 交互命令（原 FAP 动作的 CLI 等价物）
+### 6.4.5 原 FAP 动作的承接
 
-原 FAP（FlowX Action Protocol）定义了 `create_node` / `update_workflow` / `ask_input` / `show_info` 四种动作标签。FAP 协议本身已移除，其语义由以下 CLI 命令承接：
+原 FAP（FlowX Action Protocol）定义了 `create_node` / `update_workflow` / `ask_input` / `show_info` 四种动作标签。FAP 协议本身已移除，其语义按以下方式承接：
 
-| 原 FAP 标签 | CLI 命令 | 行为 |
+| 原 FAP 标签 | 承接方式 | 行为 |
 | --- | --- | --- |
 | `[[ACTION:create_node]]` | `flowx-studio node create --file node.yaml` | 创建节点，输出新节点摘要 |
 | `[[ACTION:update_workflow]]` | `flowx-studio pipeline update --id N --file wf.yaml` | 更新流水线，非法 YAML 拒绝并给出重试指引 |
-| `[[ACTION:ask_input]]` | `flowx-studio ask --key name --prompt "请输入环境" [--options a,b,c] [--default v]` | 在终端向用户发起一次交互式提问，把用户回答以 `<key>=<value>` 输出到 stdout，供 Agent 捕获后继续 |
-| `[[ACTION:show_info]]` | `flowx-studio info --title "构建完成" --message "..." [--level info\|warn\|error]` | 在终端渲染一张信息卡片（标题 + 正文 + 级别着色），用于向用户汇报阶段性结果 |
+| `[[ACTION:ask_input]]` | 已移除 | 对话式 Agent 可直接在会话中向用户提问，无需专用命令 |
+| `[[ACTION:show_info]]` | 已移除 | 对话式 Agent 可直接在会话中汇报结果，无需专用命令 |
 
-`ask` 与 `info` 不访问 HTTP server，是纯粹的终端交互命令：Agent 在 Shell 会话中执行它们即可与用户完成「提问 / 展示」闭环，替代了原 FAP 需要前端配合渲染表单与卡片的能力。
+早期的 `ask` / `info` 终端交互命令已随 FAP 语义一同移除：消费 SKILL 的是对话式 Agent，提问与汇报直接发生在会话中，不再需要 CLI 中介。
 
 ## 6.5 YAML 生成与校验约定
 
@@ -324,8 +324,6 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 | 创建流水线 | `flowx-studio pipeline create --name <n> --file wf.yaml` |
 | 更新流水线 | `flowx-studio pipeline update --id <N> --file wf.yaml` |
 | 运行流水线 | `flowx-studio pipeline run --id <N> [--follow]` |
-| 向用户提问 | `flowx-studio ask --key <k> --prompt "<问题>"` |
-| 展示信息卡片 | `flowx-studio info --title <t> --message <m>` |
 
 ## 约定
 
@@ -347,7 +345,7 @@ flowchart TD
     C -.需要新节点.-> G[Agent: 编写 flowx.json + 代码]
     G --> H[Agent: node import --type folder --path ./pkg]
     H --> C
-    D -.需要用户决策.-> I[Agent: ask --key env --prompt 部署到哪个环境]
+    D -.需要用户决策.-> I[Agent: 在对话中向用户提问]
     I --> C
-    E --> J[Agent: info --title 执行完成 --message ...]
+    E --> J[Agent: 在对话中向用户汇报结果]
 ```

@@ -349,6 +349,12 @@
 <td>folder 时必填</td>
 <td>本地文件夹路径</td>
 </tr>
+<tr>
+<td>overwrite</td>
+<td>bool</td>
+<td>否</td>
+<td>同名节点已存在时原地更新（保持节点 ID 不变），缺省 false 时同名冲突返回 409</td>
+</tr>
 </tbody>
 </table>
 
@@ -686,6 +692,55 @@ data: {"execution_id": 42, "status": "success", "duration_ms": 135000, "timestam
   }
 }</code></pre>
 
+<h3 id="456-暂停-恢复运行中的执行实例">4.5.6 暂停 / 恢复运行中的执行实例</h3>
+
+<pre><code class="language-http">POST /api/v1/executions/:id/pause
+POST /api/v1/executions/:id/resume</code></pre>
+
+<ul>
+<li><code>pause</code>：仅 <code>running</code> 状态可暂停。层边界暂停——状态立即置为 <code>paused</code>（立即落库并广播</li>
+</ul>
+<p>  <code>execution_paused</code> SSE 事件），当前并发层的节点执行完后在层边界挂起，<strong>不中断运行中的节点</strong></p>
+<ul>
+<li><code>resume</code>：仅 <code>paused</code> 状态可恢复，恢复后状态回到 <code>running</code>（广播 <code>execution_resumed</code>）。</li>
+</ul>
+<p>  实例在内存时直接 Resume；<strong>server 重启后也可恢复</strong>：暂停时会导出运行时快照</p>
+<p>  （调用 pause 时立即导出一次 + 层边界生效时 <code>PipelinePaused</code> 事件再导出一次干净状态），</p>
+<p>  resume 发现实例不在内存时自动从快照重建并增量续跑（已终结节点跳过；若崩溃发生在</p>
+<p>  层边界之前，当时 RUNNING 的节点会重跑，at-least-once 语义）</p>
+<ul>
+<li><code>paused</code> 状态的执行不可续跑（<code>continue</code> 会拒绝），也不计入已结束状态</li>
+</ul>
+<h3 id="457-续跑已结束的执行实例">4.5.7 续跑已结束的执行实例</h3>
+
+<pre><code class="language-http">POST /api/v1/executions/:id/continue
+Content-Type: application/json
+
+{
+  "yaml": "Name: my-workflow\n..."  // 可选：新的 FlowX YAML
+}</code></pre>
+
+<p>对已结束（success/failed/cancelled）的执行实例增量续跑：</p>
+
+<ul>
+<li>不提供 <code>yaml</code>：直接重新运行，已终结状态（SUCCESS/FAILED/CANCELLED）的节点自动跳过</li>
+<li>提供 <code>yaml</code>：先由 FlowX <code>UpdateConfig</code> 比对差异更新执行实例的图（可追加节点、修改未运行节点；<code>Version</code>/<code>Name</code> 等不可变字段必须与原配置一致，已执行节点不可删除/替换），再继续运行</li>
+<li>续跑沿用同一执行 ID：状态回到 running，节点记录与日志追加到原实例</li>
+<li>仅影响该执行实例，不修改流水线定义（需要时用 <code>PUT /workflows/:id</code>）</li>
+</ul>
+<p><strong>无状态恢复</strong>：执行结束时服务端会同步导出运行时快照（<code>flowx ExportConfig</code>，含各节点/步骤状态，</p>
+<p>不含大体积 metadata）存入 <code>executions.runtime_yaml</code>；续跑时经 <code>LoadPipeline</code> 从快照重建实例，</p>
+<p>并从 <code>metadata_json</code> 恢复节点输出数据（下游 <code>{{ NodeId.key }}</code> 引用不受影响）。</p>
+<p><strong>server 重启后仍可续跑</strong>；仅快照功能上线前创建的旧执行（runtime_yaml 为空）无法续跑。</p>
+
+<p><strong>响应示例</strong>：</p>
+
+<pre><code class="language-json">{
+  "code": 200,
+  "message": "success",
+  "data": { "executionId": 42, "status": "running" }
+}</code></pre>
+
 <h2 id="46-全局事件流-api">4.6 全局事件流 API</h2>
 
 <h3 id="461-订阅全局事件">4.6.1 订阅全局事件</h3>
@@ -773,6 +828,41 @@ data: {"execution_id": 42, "status": "success", "duration_ms": 135000, "timestam
 <td><code>POST /workflows/:id/run</code>、<code>GET /executions/:id/stream</code></td>
 </tr>
 <tr>
+<td><code>execution list [--pipeline N] [--status S]</code></td>
+<td>列出执行实例</td>
+<td><code>GET /executions</code></td>
+</tr>
+<tr>
+<td><code>execution get --id E</code></td>
+<td>执行详情（含 metadata/参数）</td>
+<td><code>GET /executions/:id</code></td>
+</tr>
+<tr>
+<td><code>execution nodes --id E</code></td>
+<td>节点状态与返回数据</td>
+<td><code>GET /executions/:id/nodes</code></td>
+</tr>
+<tr>
+<td><code>execution logs --id E [--node X] [--level L]</code></td>
+<td>查询执行日志</td>
+<td><code>GET /executions/:id/logs</code></td>
+</tr>
+<tr>
+<td><code>execution continue --id E [--file wf.yaml] [--follow]</code></td>
+<td>续跑已结束的执行，可追加节点</td>
+<td><code>POST /executions/:id/continue</code></td>
+</tr>
+<tr>
+<td><code>execution pause --id E</code></td>
+<td>暂停运行中的执行（层边界生效）</td>
+<td><code>POST /executions/:id/pause</code></td>
+</tr>
+<tr>
+<td><code>execution resume --id E [--follow]</code></td>
+<td>恢复已暂停的执行</td>
+<td><code>POST /executions/:id/resume</code></td>
+</tr>
+<tr>
 <td><code>node list</code></td>
 <td>列出节点</td>
 <td><code>GET /nodes</code></td>
@@ -783,9 +873,14 @@ data: {"execution_id": 42, "status": "success", "duration_ms": 135000, "timestam
 <td><code>POST /nodes</code></td>
 </tr>
 <tr>
+<td><code>node update --id N --file node.yaml</code></td>
+<td>原地更新节点定义（保持节点 ID；全量替换）</td>
+<td><code>PUT /nodes/:id</code></td>
+</tr>
+<tr>
 <td>`node import --type git\</td>
-<td>folder ...`</td>
-<td>从 Git 仓库或本地文件夹导入节点（读取 flowx.json）</td>
+<td>folder ... [--overwrite]`</td>
+<td>从 Git 仓库或本地文件夹导入节点（读取 flowx.json）；<code>--overwrite</code> 同名时原地更新保持 ID</td>
 </tr>
 <tr>
 <td><code>node delete --id N</code></td>
@@ -798,28 +893,43 @@ data: {"execution_id": 42, "status": "success", "duration_ms": 135000, "timestam
 <td><code>POST /nodes/:id/mock</code></td>
 </tr>
 <tr>
-<td><code>ask --key k --prompt ...</code></td>
-<td>终端交互式提问（承接原 FAP <code>ask_input</code>，纯终端，不访问 server）</td>
-<td>无</td>
-</tr>
-<tr>
-<td><code>info --title t --message m</code></td>
-<td>终端信息卡片（承接原 FAP <code>show_info</code>，纯终端，不访问 server）</td>
-<td>无</td>
-</tr>
-<tr>
 <td><code>audit list</code></td>
 <td>查询审计日志（<code>--action</code>/<code>--resource-type</code> 过滤）</td>
 <td><code>GET /audit-logs</code></td>
 </tr>
 <tr>
+<td><code>executor list</code></td>
+<td>列出执行器实例（local 单例 + docker 多实例，<code>(default)</code> 标记默认）</td>
+<td><code>GET /executors</code></td>
+</tr>
+<tr>
+<td><code>executor create --file exec.yaml</code></td>
+<td>创建执行器实例（字段：name/type/description/config；docker config 支持 <code>host</code> 远程 daemon 地址）</td>
+<td><code>POST /executors</code></td>
+</tr>
+<tr>
+<td><code>executor update --id N --file exec.yaml</code></td>
+<td>更新执行器 description/config（name/type 不可变更）</td>
+<td><code>PUT /executors/:id</code></td>
+</tr>
+<tr>
+<td><code>executor delete --id N</code></td>
+<td>删除执行器（默认执行器需先 set-default 切换）</td>
+<td><code>DELETE /executors/:id</code></td>
+</tr>
+<tr>
+<td><code>executor set-default --id N</code></td>
+<td>设为全局默认执行器（未声明 executor 的 nodeRef 节点将使用它）</td>
+<td><code>PUT /executors/:id/default</code></td>
+</tr>
+<tr>
 <td><code>backup create</code> / <code>backup list</code> / <code>backup download</code></td>
-<td>数据库备份创建/列表/下载</td>
+<td>备份创建/列表/下载（<code>.db</code> + 配套 <code>.assets.tar.gz</code> 节点资产包）</td>
 <td><code>POST /backups</code>、<code>GET /backups</code>、<code>GET /backups/:name/download</code></td>
 </tr>
 <tr>
 <td><code>backup restore --file f</code></td>
-<td>恢复数据库（要求 server 已停止，自动保留 <code>.pre-restore</code> 回滚副本）</td>
+<td>恢复备份（要求 server 已停止；<code>f</code> 旁存在 <code>.assets.tar.gz</code> 时自动恢复资产，自动保留 <code>.pre-restore</code> 回滚副本）</td>
 <td>无（直接操作数据库文件）</td>
 </tr>
 </tbody>
@@ -854,7 +964,10 @@ data: {"execution_id": 42, "status": "success", "duration_ms": 135000, "timestam
 │   ├── GET    /:id/nodes 获取执行节点状态
 │   ├── GET    /:id/stream 实时日志流 (SSE)
 │   ├── GET    /:id/logs  查询执行日志
-│   └── GET    /:id/logs/export?format=json|txt|markdown  导出执行日志
+│   ├── GET    /:id/logs/export?format=json|txt|markdown  导出执行日志
+│   ├── POST   /:id/continue  续跑已结束的执行（可选携带新 YAML 追加节点）
+│   ├── POST   /:id/pause     暂停运行中的执行（层边界暂停，不中断运行中节点）
+│   └── POST   /:id/resume    恢复已暂停的执行（仅内存中存活的实例）
 │
 ├── /events
 │   └── GET    /          全局事件流 (SSE)
@@ -864,8 +977,19 @@ data: {"execution_id": 42, "status": "success", "duration_ms": 135000, "timestam
 │
 ├── /backups
 │   ├── GET    /          备份列表
-│   ├── POST   /          创建备份（VACUUM INTO）
-│   └── GET    /:name/download  下载备份文件
+│   ├── POST   /          创建备份（VACUUM INTO + 资产 tar.gz）
+│   └── GET    /:name/download  下载备份文件（.db 或 .assets.tar.gz）
+│
+├── /executors
+│   ├── GET    /          执行器实例列表（local 单例 + N 个 docker）
+│   ├── POST   /          创建执行器（type=local 已存在 → 409；type=k8s → 400）
+│   ├── GET    /:id       执行器详情
+│   ├── PUT    /:id       更新（name/type 不可变更，仅 description/config）
+│   ├── DELETE /:id       删除（默认执行器禁止删除 → 409）
+│   └── PUT    /:id/default  设为全局默认执行器
+│
+├── /assets                    ※ 免认证（签名 URL 自校验，供 docker/k8s 执行器拉取节点资产）
+│   └── GET    /nodes/:nodeRef/*filepath?expires&amp;sig  签名 URL 拉取节点文件（HMAC-SHA256 + 时效）
 │
 └── /config
     ├── GET    /system    获取系统配置

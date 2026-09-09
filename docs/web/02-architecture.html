@@ -133,7 +133,7 @@
     end
     
     subgraph CLILayer["CLI 客户端层"]
-        CLICmd["CLI 子命令 (internal/cli)<br/>pipeline / node / ask / info"]
+        CLICmd["CLI 子命令 (internal/cli)<br/>pipeline / node / executor / execution"]
     end
     
     subgraph StorageLayer["存储服务层"]
@@ -205,7 +205,6 @@
 <li><code>cli.NewHTTPClient</code>：基于全局 <code>--server</code> flag / <code>FLOWX_STUDIO_SERVER_URL</code> 环境变量构造 REST 客户端</li>
 <li>流水线命令组：<code>pipeline list / create / update / delete / run</code></li>
 <li>节点命令组：<code>node list / create / delete / import / mock</code></li>
-<li>终端交互命令：<code>ask</code>（向用户提问）、<code>info</code>（展示信息卡片），承接原 FAP 动作语义，不访问 HTTP server</li>
 </ul>
 <p><strong>设计要点</strong>：</p>
 <ul>
@@ -404,7 +403,7 @@
 <tr>
 <td>CLI 框架</td>
 <td>Cobra (<code>github.com/spf13/cobra</code>)</td>
-<td>子命令管理（server / pipeline / node / ask / info）</td>
+<td>子命令管理（server / pipeline / node / executor / execution）</td>
 </tr>
 <tr>
 <td>进程管理</td>
@@ -566,8 +565,6 @@ func main() {
     // 客户端子命令（HTTP client，见 internal/cli）
     rootCmd.AddCommand(cli.NewPipelineCmd()) // pipeline list/create/update/delete/run
     rootCmd.AddCommand(cli.NewNodeCmd())     // node list/create/delete/import/mock
-    rootCmd.AddCommand(cli.NewAskCmd())      // ask（原 FAP ask_input）
-    rootCmd.AddCommand(cli.NewInfoCmd())     // info（原 FAP show_info）
 
     if err := rootCmd.Execute(); err != nil {
         log.Fatal(err)
@@ -577,7 +574,6 @@ func main() {
 <ul>
 <li><code>flowx-studio server [--port 8080] [--host 0.0.0.0]</code>：启动 HTTP server（Web UI + RESTful API）</li>
 <li><code>flowx-studio pipeline ...</code> / <code>flowx-studio node ...</code>：HTTP 客户端子命令，供 AI Agent（经 SKILL）与终端用户调用</li>
-<li><code>flowx-studio ask</code> / <code>flowx-studio info</code>：终端交互命令，承接原 FAP 动作语义</li>
 <li>裸运行 <code>flowx-studio</code>（不带子命令）仅打印帮助信息；<code>version</code> 子命令输出版本信息（由 <code>-ldflags</code> 注入）</li>
 </ul>
 <p><strong>注意</strong>：FlowX 核心库（<code>github.com/LerkoX/flowx</code>）为纯库，不包含 <code>cmd/</code> 目录与 CLI 入口。</p>

@@ -85,7 +85,7 @@
 
 <ul>
 <li><strong>SKILL</strong>：仓库内提供 <code>skills/flowx-studio/SKILL.md</code>，安装到 Agent 的技能目录后，Agent 在路由阶段只需加载一份简短速查表，便知道「何时用、用什么命令」。</li>
-<li><strong>CLI 客户端</strong>：<code>flowx-studio</code> 在 <code>server</code> 子命令之外提供一组客户端子命令（<code>pipeline</code> / <code>node</code> / <code>ask</code> / <code>info</code> 等），它们是 <code>flowx-studio server</code> 的 <strong>HTTP 客户端</strong>，通过 REST API 完成全部读写。</li>
+<li><strong>CLI 客户端</strong>：<code>flowx-studio</code> 在 <code>server</code> 子命令之外提供一组客户端子命令（<code>pipeline</code> / <code>node</code> / <code>executor</code> / <code>execution</code> 等），它们是 <code>flowx-studio server</code> 的 <strong>HTTP 客户端</strong>，通过 REST API 完成全部读写。</li>
 <li><strong>渐进式披露</strong>：SKILL.md 只放最小必要信息；详细用法由 <code>flowx-studio &lt;cmd&gt; --help</code> 按需展开；机器可读的参数契约由 <code>flowx-studio &lt;cmd&gt; --schema</code> 输出。Agent 只在需要时才加载更深层的信息，上下文开销最小。</li>
 </ul>
 <p>职责划分：</p>
@@ -145,7 +145,7 @@
     end
 
     subgraph FlowX Studio
-        CLI["flowx-studio CLI<br/>pipeline / node / ask / info<br/>(HTTP 客户端)"]
+        CLI["flowx-studio CLI<br/>pipeline / node / executor / execution<br/>(HTTP 客户端)"]
         HTTP["flowx-studio server<br/>Gin HTTP Server"]
         VAL[WorkflowValidator<br/>internal/validator]
         SVC[WorkflowService / NodeService<br/>NodeImportService]
@@ -276,7 +276,7 @@
 </tr>
 <tr>
 <td><code>flowx-studio server start [--port 8080] [--host 0.0.0.0]</code></td>
-<td>后台守护启动（Setsid 脱离终端，日志写入 <code>&lt;data.dir&gt;/server.log</code>），阻塞轮询就绪（复用 <code>GET /api/v1/config/system</code> 探测，任意 HTTP 响应即就绪，超时 10s）；已在运行时幂等输出 <code>Server already running</code> 并退出 0</td>
+<td>后台守护启动（Setsid 脱离终端，日志写入 <code>&lt;data.dir&gt;/server.log</code>），阻塞轮询就绪（复用免认证的 <code>GET /api/v1/health</code> 探测，超时 10s）；已在运行时幂等输出 <code>Server already running</code> 并退出 0</td>
 </tr>
 <tr>
 <td><code>flowx-studio server stop</code></td>
@@ -349,9 +349,14 @@
 <td><code>list_nodes</code></td>
 </tr>
 <tr>
-<td><code>flowx-studio node import --type git --url &lt;repo&gt;</code> / <code>flowx-studio node import --type folder --path &lt;dir&gt;</code></td>
-<td>从 Git 仓库或本地文件夹导入节点包（读取 <code>flowx.json</code>）</td>
+<td><code>flowx-studio node import --type git --url &lt;repo&gt;</code> / <code>flowx-studio node import --type folder --path &lt;dir&gt;</code> [--overwrite]</td>
+<td>从 Git 仓库或本地文件夹导入节点包（读取 <code>flowx.json</code>）；<code>--overwrite</code> 同名时原地更新保持节点 ID</td>
 <td><code>import_node</code></td>
+</tr>
+<tr>
+<td><code>flowx-studio node update --id N --file node.yaml</code></td>
+<td>原地更新节点定义（保持节点 ID，全量替换）</td>
+<td>无（新增）</td>
 </tr>
 <tr>
 <td><code>flowx-studio node create --file node.yaml</code></td>
@@ -404,15 +409,15 @@
 </tbody>
 </table>
 
-<h3 id="645-交互命令原-fap-动作的-cli-等价物">6.4.5 交互命令（原 FAP 动作的 CLI 等价物）</h3>
+<h3 id="645-原-fap-动作的承接">6.4.5 原 FAP 动作的承接</h3>
 
-<p>原 FAP（FlowX Action Protocol）定义了 <code>create_node</code> / <code>update_workflow</code> / <code>ask_input</code> / <code>show_info</code> 四种动作标签。FAP 协议本身已移除，其语义由以下 CLI 命令承接：</p>
+<p>原 FAP（FlowX Action Protocol）定义了 <code>create_node</code> / <code>update_workflow</code> / <code>ask_input</code> / <code>show_info</code> 四种动作标签。FAP 协议本身已移除，其语义按以下方式承接：</p>
 
 <table>
 <thead>
 <tr>
 <th>原 FAP 标签</th>
-<th>CLI 命令</th>
+<th>承接方式</th>
 <th>行为</th>
 </tr>
 </thead>
@@ -429,18 +434,18 @@
 </tr>
 <tr>
 <td><code>[[ACTION:ask_input]]</code></td>
-<td><code>flowx-studio ask --key name --prompt "请输入环境" [--options a,b,c] [--default v]</code></td>
-<td>在终端向用户发起一次交互式提问，把用户回答以 <code>&lt;key&gt;=&lt;value&gt;</code> 输出到 stdout，供 Agent 捕获后继续</td>
+<td>已移除</td>
+<td>对话式 Agent 可直接在会话中向用户提问，无需专用命令</td>
 </tr>
 <tr>
 <td><code>[[ACTION:show_info]]</code></td>
-<td>`flowx-studio info --title "构建完成" --message "..." [--level info\</td>
-<td>warn\</td>
+<td>已移除</td>
+<td>对话式 Agent 可直接在会话中汇报结果，无需专用命令</td>
 </tr>
 </tbody>
 </table>
 
-<p><code>ask</code> 与 <code>info</code> 不访问 HTTP server，是纯粹的终端交互命令：Agent 在 Shell 会话中执行它们即可与用户完成「提问 / 展示」闭环，替代了原 FAP 需要前端配合渲染表单与卡片的能力。</p>
+<p>早期的 <code>ask</code> / <code>info</code> 终端交互命令已随 FAP 语义一同移除：消费 SKILL 的是对话式 Agent，提问与汇报直接发生在会话中，不再需要 CLI 中介。</p>
 
 <h2 id="65-yaml-生成与校验约定">6.5 YAML 生成与校验约定</h2>
 
@@ -455,7 +460,7 @@
 <li><code>Graph</code> 必须是非空字符串，且：</li>
 <li>以 <code>stateDiagram</code>（即 Mermaid <code>stateDiagram-v2</code>）开头；</li>
 <li>至少包含一条状态迁移（形如 <code>A --&gt; B</code>，支持 <code>[*]</code> 起止节点）。</li>
-<li>若存在 <code>Executors</code>，其必须是 map，且每个节点声明的 <code>executor</code> 必须在 <code>Executors</code> 中有定义。</li>
+<li>若存在 <code>Executors</code>，其必须是 map；内联节点声明的 <code>executor</code> 必须在其中有定义，<code>nodeRef</code> 节点由展开器自动补充。</li>
 </ol>
 <p>校验失败时服务端返回 400，CLI 将其转换为退出码 1，stderr 输出如：</p>
 
@@ -509,19 +514,25 @@ Graph: |
     download --&gt; [*]
 Nodes:
   download:
-    executor: download-image-executor
+    config:
+      nodeRef: download-image</code></pre>
+
+<p>需要覆盖节点包偏好时，在 <code>config.executor</code> 中选择类型或具体实例：</p>
+
+<pre><code class="language-yaml">Nodes:
+  download:
     config:
       nodeRef: download-image
-Executors:
-  download-image-executor:
-    type: docker</code></pre>
+      executor:
+        type: docker
+        ref: docker-gpu</code></pre>
 
 <p>执行前 <code>ExpandWorkflowConfig</code>（<code>internal/runtime/node_expander.go</code>）会：</p>
 
 <ol>
 <li>按 <code>nodeRef</code> 名称查找节点（<code>node list</code> 可查可用名称）；</li>
 <li>用 <code>ExpandNodeToConfig</code> 把节点包展开为 FlowX 核心 <code>NodeConfig</code>：注入环境变量（<code>env</code> 映射或默认 <code>FLOWX_PARAM_&lt;NAME&gt;</code> 模板）、写入入口文件与附属文件、拼接运行命令（<code>run</code> 或按语言默认）；</li>
-<li>自动补充 <code>&lt;node名&gt;-executor</code> 的 Executor 定义（<code>image</code> 存在时默认 <code>docker</code>，否则 <code>local</code>）。</li>
+<li>按节点包 <code>supportedTypes/preferredType</code>、pipeline <code>config.executor</code> 或旧版兼容规则自动补充 Executor 定义。</li>
 </ol>
 <p>因此 Agent 生成 YAML 时通常只需关心 <code>Graph</code> 拓扑和 <code>nodeRef</code> 引用，节点实现细节由节点包承载。</p>
 
@@ -540,7 +551,7 @@ Executors:
 <li><code>language</code> 必填且受沙箱支持；</li>
 <li><code>entry</code> 入口文件必须存在，<code>files</code> 列出的每个文件必须存在；</li>
 <li><code>parameters</code> 不允许重名，类型限定为 <code>string/integer/float/boolean/array/object</code>；</li>
-<li><code>executor.type</code> 若提供，限定为 <code>local/docker/k8s</code>；</li>
+<li><code>executor.supportedTypes</code>/<code>executor.preferredType</code> 若提供，类型限定为 <code>local/docker</code> 且 preferred 必须包含在 supportedTypes 中；旧版 <code>executor.type</code> 限定为 <code>local/docker</code>（k8s 暂未实现，导入拒绝）；</li>
 <li>启用 mock 时 <code>mock.entry</code> 文件必须存在。</li>
 </ul>
 <p>校验通过后读取入口/附属文件内容、依赖列表（<code>requirements</code> 字段或 <code>requirements.txt</code>）、mock 与 docker 配置，组装为 <code>model.Node</code> 落库，并保留 <code>source_type/source_url/source_path</code> 溯源信息。</p>
@@ -590,8 +601,6 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 | 创建流水线 | `flowx-studio pipeline create --name &lt;n&gt; --file wf.yaml` |
 | 更新流水线 | `flowx-studio pipeline update --id &lt;N&gt; --file wf.yaml` |
 | 运行流水线 | `flowx-studio pipeline run --id &lt;N&gt; [--follow]` |
-| 向用户提问 | `flowx-studio ask --key &lt;k&gt; --prompt "&lt;问题&gt;"` |
-| 展示信息卡片 | `flowx-studio info --title &lt;t&gt; --message &lt;m&gt;` |
 
 ## 约定
 
@@ -621,9 +630,9 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
     C -.需要新节点.-> G[Agent: 编写 flowx.json + 代码]
     G --> H[Agent: node import --type folder --path ./pkg]
     H --> C
-    D -.需要用户决策.-> I[Agent: ask --key env --prompt 部署到哪个环境]
+    D -.需要用户决策.-> I[Agent: 在对话中向用户提问]
     I --> C
-    E --> J[Agent: info --title 执行完成 --message ...]</pre>
+    E --> J[Agent: 在对话中向用户汇报结果]</pre>
     </div>
 </div>
 

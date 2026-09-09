@@ -184,10 +184,6 @@ flowx-studio pipeline list|create|update|delete|run
 # 节点管理（HTTP 客户端）
 flowx-studio node list|create|delete|import|mock
 
-# 终端交互（原 FAP 动作语义，纯终端）
-flowx-studio ask --key env --prompt "部署到哪个环境？"
-flowx-studio info --title "执行完成" --message "..."
-
 # 裸运行：仅打印帮助信息，不启动 server
 flowx-studio
 
@@ -203,7 +199,6 @@ flowx-studio version</code></pre>
 <ul>
 <li>裸运行 <code>flowx-studio</code> 不带子命令时只打印帮助，不会启动 server。</li>
 <li>客户端子命令默认连接 <code>http://127.0.0.1:8080</code>，可用 <code>--server</code> flag 或 <code>FLOWX_STUDIO_SERVER_URL</code> 环境变量覆盖；使用前需先运行 <code>flowx-studio server</code>。</li>
-<li><code>ask</code> / <code>info</code> 为纯终端交互命令，不访问 HTTP server。</li>
 <li><code>pipeline</code> 命令组有别名 <code>workflow</code>。</li>
 <li>运行 YAML 工作流的 CLI 功能保留在 FlowX 核心库中（<code>flowx run workflow.yaml</code>），不在 flowx-studio 中提供。</li>
 </ul>
@@ -250,8 +245,6 @@ func main() {
     // 客户端子命令（HTTP client，实现见 internal/cli）
     rootCmd.AddCommand(cli.NewPipelineCmd())
     rootCmd.AddCommand(cli.NewNodeCmd())
-    rootCmd.AddCommand(cli.NewAskCmd())
-    rootCmd.AddCommand(cli.NewInfoCmd())
 
     if err := rootCmd.Execute(); err != nil {
         log.Fatal(err)

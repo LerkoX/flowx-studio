@@ -64,7 +64,7 @@ FXS_LOCAL() { FLOWX_STUDIO_DATA_DIR="${DATA_DIR}" "${BINARY}" "$@"; }  # server 
 # ---------- 1. CLI 基础 ----------
 say "== 1. CLI basics =="
 assert_exit "1.1 help lists command tree" 0 "${BINARY}" --help
-for c in server pipeline node ask info version; do
+for c in server pipeline node version; do
     assert_contains "1.1 help contains '$c'" "$c"
 done
 assert_exit "1.2 pipeline create --schema" 0 FXS pipeline create --schema
@@ -304,19 +304,7 @@ assert_contains "11.7 refuse message" "cannot delete the default"
 assert_exit "11.8 schema output" 0 FXS executor create --schema
 assert_contains "11.8 schema has host" "host"
 
-# ---------- 5. 交互命令 ----------
-say "== 5. interaction commands =="
-OUT=$(echo "" | FXS ask --key env --prompt "pick env" --default prod 2>/dev/null)
-[ "${OUT}" = "env=prod" ] && ok "5.1 ask default" || bad "5.1 ask default (got: ${OUT})"
-OUT=$(printf 'bad\nstaging\n' | FXS ask --key env --prompt "pick env" --options prod,staging 2>/dev/null)
-[ "${OUT}" = "env=staging" ] && ok "5.2 ask options retry" || bad "5.2 ask options retry (got: ${OUT})"
-OUT=$(FXS ask --key k --prompt "?" --default d </dev/null 2>/dev/null); CODE=$?
-if [ "${OUT}" = "k=d" ] || [ "${CODE}" -ne 0 ]; then ok "5.3 ask EOF"; else bad "5.3 ask EOF (got: ${OUT}, exit 0)"; fi
-assert_exit "5.4 info card" 0 FXS info --title "E2E" --message "card body" --level warn
-assert_contains "5.4 card title" "E2E"
-assert_contains "5.4 card level" "WARN"
-
-# ---------- 6. 其余错误路径 ----------
+# ---------- 5. 其余错误路径 ----------
 say "== 6. error paths =="
 assert_exit "6.2 unknown flag" 2 FXS pipeline list --nope
 assert_contains "6.2 unknown flag message" "unknown flag"

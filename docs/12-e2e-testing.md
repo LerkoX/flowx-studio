@@ -25,7 +25,7 @@
 
 | # | 目的 | 命令 | 预期 |
 |---|------|------|------|
-| 1.1 | 命令树可用 | `flowx-studio --help` | 退出 0，输出含 `server`、`pipeline`、`node`、`ask`、`info`、`version` |
+| 1.1 | 命令树可用 | `flowx-studio --help` | 退出 0，输出含 `server`、`pipeline`、`node`、`version` |
 | 1.2 | 参数契约可解析 | `flowx-studio pipeline create --schema` | 退出 0，stdout 是合法 JSON 且含 `"required"` |
 | 1.3 | 版本输出 | `flowx-studio version` | 退出 0，输出含 `flowx-studio` |
 
@@ -67,16 +67,7 @@
 | 4.6 | 失败执行退出码 | 创建必失败工作流（`run: exit 1`）后 `pipeline run --id <M> --follow` | 退出 1，输出含 `FAILED` |
 | 4.7 | 删除流水线 | `pipeline delete --id <N>` | 退出 0，输出含 `Deleted pipeline id=` |
 
-### 12.3.5 交互命令
-
-| # | 目的 | 命令 | 预期 |
-|---|------|------|------|
-| 5.1 | ask 默认值 | `echo "" \| ask --key env --prompt "?" --default prod` | 退出 0，stdout 为 `env=prod` |
-| 5.2 | ask 选项校验 | `printf "bad\nstaging\n" \| ask --key env --prompt "?" --options prod,staging` | 退出 0，最终 stdout 含 `env=staging`（非法输入被拒绝后重试） |
-| 5.3 | ask EOF | `ask --key k --prompt "?" </dev/null` | 退出非 0 或输出默认值 |
-| 5.4 | info 卡片 | `info --title T --message M --level warn` | 退出 0，输出含 `T`、`M`、`WARN` |
-
-### 12.3.6 错误路径
+### 12.3.5 错误路径
 
 | # | 目的 | 命令 | 预期 |
 |---|------|------|------|

@@ -48,8 +48,6 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 | 续跑已结束的执行（可追加节点） | `flowx-studio execution continue --id <E> [--file wf.yaml] [--follow]` |
 | 暂停运行中的执行（层边界生效） | `flowx-studio execution pause --id <E>` |
 | 恢复已暂停的执行 | `flowx-studio execution resume --id <E> [--follow]` |
-| 向用户提问 | `flowx-studio ask --key <k> --prompt "<问题>" [--options a,b,c] [--default v]` |
-| 展示信息卡片 | `flowx-studio info --title <t> --message <m> [--level info\|warn\|error]` |
 
 ## 约定
 
@@ -60,7 +58,6 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 - 节点间传参：flowx.json 模板只允许 `{{ Param.* }}`；上游节点数据在 pipeline YAML 节点 `config.params` 中绑定（如 `weatherCity: "{{ GetWeather.city }}"`，实例 ID 用本 YAML `Nodes` 的键）。节点参数上的 `source` 字段标注了推荐来源节点包和输出字段，可依此接线；未绑定的参数回退到 pipeline 级 `Param`。详见 `docs/11-node-package.md` 11.7 节。
 - YAML 要求：`Name` 非空；`Nodes` 为非空 map；`Graph` 以 `stateDiagram-v2` 开头且至少一条迁移（支持 `[*]` 起止节点）；内联节点声明的 `executor` 必须在 `Executors` 中定义，`nodeRef` 节点由展开器自动补充。
 - **节点 ID 仅支持 ASCII**（字母/数字/下划线/连字符）：`Nodes` 的键与 `Graph` 中的节点名禁止使用中文等非 ASCII 字符（底层 mermaid 解析器会静默丢弃含非 ASCII 标识符的边，导致接线断裂、节点变孤立起点）。显示名可用中文——通过节点的 `name` 字段设置（如 `name: 回声`），不影响图解析。
-- `ask` 的回答从 stdout 以 `key=value` 形式输出；`info` 为纯终端卡片，两者都不访问 server。
 - `pipeline update` 省略的字段会保留原值（CLI 自动合并）。
 - `execution pause` / `execution resume`：暂停/恢复运行中的执行。层边界暂停——状态立即置为 `paused`，当前并发层节点执行完后挂起（不中断运行中的节点）。暂停时自动导出运行时快照，**server 重启后 resume 会从快照重建并增量续跑**（已终结节点跳过，崩溃时 RUNNING 的节点重跑）。`paused` 状态不可 `continue`
 - `execution continue` 用于已结束（success/failed/cancelled）的执行实例：不带 `--file` 时增量重跑（已终结节点跳过）；带 `--file` 时更新该执行的**运行时快照**（可追加节点）再继续运行。续跑沿用同一执行 ID，日志与节点记录追加，可通过 `execution logs/nodes/get` 查询。
@@ -198,7 +195,7 @@ Executors:
 
 1. 先按各节点 `preferredType` 生成 YAML，**不逐节点询问**。
 2. 只有用户明确要求指定/切换执行器，或偏好类型不可用且存在多个可降级类型时才询问；按“执行器类型”聚合询问，不按节点逐个询问。
-3. 若选中 `docker` 且系统有多个 Docker 实例，再用一次 `ask` 选择具体实例；同一 pipeline 中所有被选为 Docker 的节点默认复用该实例。
+3. 若选中 `docker` 且系统有多个 Docker 实例，再询问一次以选择具体实例；同一 pipeline 中所有被选为 Docker 的节点默认复用该实例。
 4. 对单个节点有特殊要求时，只覆盖该节点的 `config.executor`。
 
 nodeRef 节点显式选择写法（推荐对象形式）：
@@ -242,8 +239,8 @@ config:
 1. `node list --json` 查询可用节点 → 按「Pipeline YAML 最小契约」生成 YAML 写入临时文件
 2. `pipeline create --name ... --file wf.yaml`（失败则按 stderr 修正重试）
 3. 需要新节点时：编写 `flowx.json` + 代码 → `node import --type folder --path <dir>` → 回到第 2 步
-4. 需要用户决策时：`ask --key ... --prompt ...`，读取 stdout 的 `key=value`
+4. 需要用户决策时：直接在对话中向用户提问
 5. `pipeline run --id <N> --follow` 执行并跟随日志
 6. 执行后排查/取数：`execution get`（metadata）、`execution nodes`（节点返回）、`execution logs`（节点日志）
 7. 需要在已结束的执行上追加节点继续跑：`execution yaml --id <E> > snap.yaml` 导出快照 → 编辑（新节点写编写态即可）→ `execution continue --id <E> --file snap.yaml --follow`
-8. `info --title 执行完成 --message ...` 向用户汇报结果
+8. 在对话中向用户汇报执行结果

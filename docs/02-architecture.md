@@ -64,7 +64,7 @@ flowchart TD
     end
     
     subgraph CLILayer["CLI 客户端层"]
-        CLICmd["CLI 子命令 (internal/cli)<br/>pipeline / node / ask / info"]
+        CLICmd["CLI 子命令 (internal/cli)<br/>pipeline / node / executor / execution"]
     end
     
     subgraph StorageLayer["存储服务层"]
@@ -130,7 +130,6 @@ flowchart TD
 - `cli.NewHTTPClient`：基于全局 `--server` flag / `FLOWX_STUDIO_SERVER_URL` 环境变量构造 REST 客户端
 - 流水线命令组：`pipeline list / create / update / delete / run`
 - 节点命令组：`node list / create / delete / import / mock`
-- 终端交互命令：`ask`（向用户提问）、`info`（展示信息卡片），承接原 FAP 动作语义，不访问 HTTP server
 
 **设计要点**：
 - 每个数据写入类子命令支持 `--schema` 输出参数 JSON Schema，配合 `skills/flowx-studio/SKILL.md` 实现渐进式披露
@@ -246,7 +245,7 @@ flowchart TD
 | 构建工具 | Vite | 快速构建，热更新 |
 | 图可视化 | `@xyflow/react`（React Flow 12） | 专业的工作流图渲染 |
 | 代码查看 | `react-syntax-highlighter` | 只读代码高亮，轻量无编辑器开销 |
-| CLI 框架 | Cobra (`github.com/spf13/cobra`) | 子命令管理（server / pipeline / node / ask / info） |
+| CLI 框架 | Cobra (`github.com/spf13/cobra`) | 子命令管理（server / pipeline / node / executor / execution） |
 | 进程管理 | `os/exec` + Docker API | 复用现有执行器能力 |
 | 实时通信 | SSE (Server-Sent Events) | 单向推送足够，比 WebSocket 简单 |
 
@@ -401,8 +400,6 @@ func main() {
     // 客户端子命令（HTTP client，见 internal/cli）
     rootCmd.AddCommand(cli.NewPipelineCmd()) // pipeline list/create/update/delete/run
     rootCmd.AddCommand(cli.NewNodeCmd())     // node list/create/delete/import/mock
-    rootCmd.AddCommand(cli.NewAskCmd())      // ask（原 FAP ask_input）
-    rootCmd.AddCommand(cli.NewInfoCmd())     // info（原 FAP show_info）
 
     if err := rootCmd.Execute(); err != nil {
         log.Fatal(err)
@@ -412,7 +409,6 @@ func main() {
 
 - `flowx-studio server [--port 8080] [--host 0.0.0.0]`：启动 HTTP server（Web UI + RESTful API）
 - `flowx-studio pipeline ...` / `flowx-studio node ...`：HTTP 客户端子命令，供 AI Agent（经 SKILL）与终端用户调用
-- `flowx-studio ask` / `flowx-studio info`：终端交互命令，承接原 FAP 动作语义
 - 裸运行 `flowx-studio`（不带子命令）仅打印帮助信息；`version` 子命令输出版本信息（由 `-ldflags` 注入）
 
 **注意**：FlowX 核心库（`github.com/LerkoX/flowx`）为纯库，不包含 `cmd/` 目录与 CLI 入口。
