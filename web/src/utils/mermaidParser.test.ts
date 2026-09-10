@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseWorkflowGraph, parseNodeRefs } from './mermaidParser'
+import { parseWorkflowGraph, parseNodeRefs, parseParamSources } from './mermaidParser'
 
 const yamlConfig = `
 Name: demo
@@ -107,5 +107,100 @@ Nodes:
     nodeRef: some-node
 `
     expect(parseNodeRefs(yaml)).toEqual({ A: 'some-node' })
+  })
+})
+
+describe('parseParamSources', () => {
+  const yaml = `
+Name: sd
+Param:
+  seed: -1
+  prompt:
+    value: a cat
+    description: 提示词
+  token: ''
+Graph: |
+  stateDiagram-v2
+    [*] --> Ensure
+    Ensure --> KSampler
+Nodes:
+  Ensure:
+    name: 服务健康检查
+    config:
+      nodeRef: inference-ensure@1.0.0
+      params:
+        service_url: '{{ Param.service_url }}'
+        wait_seconds: 60
+  KSampler:
+    name: KSampler采样
+    config:
+      nodeRef: ksampler@1.0.0
+      params:
+        seed: '{{ Param.seed }}'
+        prompt: '{{ Param.prompt }}'
+        token: '{{ Param.token }}'
+        missing: '{{ Param.not_defined }}'
+        service_url: '{{ Ensure.service_url }}'
+        nested: '{{ Ensure.a.b }}'
+        filtered: '{{ Param.seed | default(1) }}'
+        steps: 20
+        mixed: 'prefix {{ Param.seed }} suffix'
+`
+
+  it('识别流水线参数引用并附当前值', () => {
+    const sources = parseParamSources(yaml)
+    expect(sources.KSampler.seed).toEqual({ kind: 'pipeline', paramName: 'seed', paramValue: '-1' })
+    expect(sources.KSampler.steps).toEqual({ kind: 'literal' })
+  })
+
+  it('解包 { value, description } 形式的流水线参数', () => {
+    const sources = parseParamSources(yaml)
+    expect(sources.KSampler.prompt).toEqual({ kind: 'pipeline', paramName: 'prompt', paramValue: 'a cat' })
+  })
+
+  it('空字符串参数值正常下发', () => {
+    const sources = parseParamSources(yaml)
+    expect(sources.KSampler.token).toEqual({ kind: 'pipeline', paramName: 'token', paramValue: '' })
+  })
+
+  it('引用未定义的流水线参数时 paramValue 缺省', () => {
+    const sources = parseParamSources(yaml)
+    expect(sources.KSampler.missing).toEqual({ kind: 'pipeline', paramName: 'not_defined' })
+    expect(sources.KSampler.missing.paramValue).toBeUndefined()
+  })
+
+  it('识别节点引用并附节点显示名', () => {
+    const sources = parseParamSources(yaml)
+    expect(sources.KSampler.service_url).toEqual({
+      kind: 'node',
+      nodeId: 'Ensure',
+      nodeName: '服务健康检查',
+      field: 'service_url',
+    })
+  })
+
+  it('节点引用支持嵌套字段路径', () => {
+    const sources = parseParamSources(yaml)
+    expect(sources.KSampler.nested).toMatchObject({ kind: 'node', nodeId: 'Ensure', field: 'a.b' })
+  })
+
+  it('剥离模板过滤器', () => {
+    const sources = parseParamSources(yaml)
+    expect(sources.KSampler.filtered).toEqual({ kind: 'pipeline', paramName: 'seed', paramValue: '-1' })
+  })
+
+  it('混合文本（多模板/拼接）按字面值处理', () => {
+    const sources = parseParamSources(yaml)
+    expect(sources.KSampler.mixed).toEqual({ kind: 'literal' })
+  })
+
+  it('数字字面值统一转 string 判定为 literal', () => {
+    const sources = parseParamSources(yaml)
+    expect(sources.Ensure.wait_seconds).toEqual({ kind: 'literal' })
+  })
+
+  it('非法 YAML 返回空对象', () => {
+    expect(parseParamSources('invalid: [yaml')).toEqual({})
+    expect(parseParamSources('')).toEqual({})
   })
 })

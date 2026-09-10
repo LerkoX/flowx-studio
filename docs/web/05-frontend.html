@@ -285,6 +285,7 @@
 │   │   ├── GlassPanel.tsx          # 毛玻璃面板容器
 │   │   ├── SpotlightCard.tsx       # 鼠标跟随高光卡片
 │   │   ├── GlowNode.tsx            # 自定义节点（React Flow）
+│   │   ├── ModuleNodeWidget.tsx    # 节点自定义 UI 组件宿主（module 模式）
 │   │   ├── TerminalNode.tsx        # Start / End 圆形终端节点
 │   │   ├── GradientEdge.tsx        # 渐变流动连线
 │   │   └── LogViewer.tsx           # 日志查看器
@@ -421,6 +422,7 @@
 <li><strong>连接点</strong>：输入 Handle（target）和输出 Handle（source），位置随画布方向（TB/LR）自适应；移动端尺寸更小</li>
 <li><strong>入场动画</strong>：spring 动画从 scale 0.85 + 下移 10px 过渡到正常状态</li>
 <li><strong>响应式</strong>：移动端节点更窄（min-w 140px / max-w 200px），桌面端 min-w 200px / max-w 280px</li>
+<li><strong>内嵌自定义 UI 组件</strong>：节点包在 <code>flowx.json</code> 中声明 <code>ui</code> 字段时，节点卡片内嵌渲染 <code>ModuleNodeWidget</code>（见 5.6.7 节）：卡片按 <code>ui.width/height</code> 撑开，桌面端原生“入参/返回”摘要折叠为「查看数据」开关，移动端组件随详情展开（<code>ui.collapsed</code> 控制默认收起）；移动端组件宽度上限跟随视口宽度（viewport - 64，下限 180px），<code>ui.width</code> 小于上限时按原宽撑开，超过上限时组件按原始尺寸挂载后用 <code>transform: scale()</code> 等比缩小（宽高比不变、UI 完整可见）</li>
 </ul>
 <h3 id="565-gradientedge-组件渐变流动连线">5.6.5 GradientEdge 组件（渐变流动连线）</h3>
 
@@ -442,6 +444,20 @@
 <li>36px 圆形，半透明背景 + 品牌色微光阴影，内部为 Play（Start）/ Flag（End）图标</li>
 <li>Start 节点只有输出 Handle，End 节点只有输入 Handle，位置随画布方向自适应</li>
 <li>解析层将 <code>[<em>] --&gt; A</code> / <code>A --&gt; [</em>]</code> 转换为 <code>__start__</code> / <code>__end__</code> 虚拟节点，移除断线</li>
+</ul>
+<h3 id="567-modulenodewidget-组件节点自定义-ui-宿主">5.6.7 ModuleNodeWidget 组件（节点自定义 UI 宿主）</h3>
+
+<p>节点包自定义 UI 组件（module 模式）的宿主组件（<code>components/ModuleNodeWidget.tsx</code>）。契约详见 <code>docs/11-node-package.md</code> 11.13 节。核心机制：</p>
+
+<ul>
+<li><strong>加载</strong>：通过 <code>GET /api/v1/nodes/:id/ui/&lt;entry&gt;?v=&lt;updatedAt&gt;</code> 获取 bundle；优先动态 <code>import()</code>（ESM 默认导出 <code>mount</code>），失败回退 script 标签加载（IIFE/UMD 通过 <code>window.FlowXNodeWidget.define(mount)</code> 注册）</li>
+<li><strong>缓存</strong>：模块级 <code>Map&lt;url, Promise&lt;mount&gt;&gt;</code> 缓存，同一节点包多实例只加载一次；串行加载队列避免 IIFE 全局注册并发串扰；加载失败自动清缓存允许重试</li>
+<li><strong>生命周期</strong>：<code>mount(el, props)</code> 挂载 → props 变化时 <code>update(props)</code>（以 JSON 序列化去重）→ 卸载时 <code>unmount()</code>，组件未清理 DOM 时兜底清空容器</li>
+<li><strong>数据装配</strong>：<code>GlowNode</code> 订阅 <code>executionStore.selectedExecution</code>，将节点状态/入参/输出与流水线执行实例实时 metadata 组装为 <code>NodeWidgetProps</code>（<code>types/nodeWidget.ts</code>，apiVersion 1，只读契约）</li>
+<li><strong>错误兜底</strong>：加载/mount 失败显示警示条，不影响节点卡片其余部分</li>
+<li><strong>画布交互隔离</strong>：容器带 <code>nodrag nowheel</code> class 并拦截点击/指针事件，防止误拖画布节点</li>
+<li><strong>布局</strong>：<code>AutoLayout.ts</code>（dagre）对带 ui 节点按组件尺寸动态计算占位</li>
+<li><strong>数据链路</strong>：<code>WorkflowCanvas</code> 通过 <code>parseNodeRefs</code>（<code>utils/mermaidParser.ts</code>）提取 YAML 中各节点实例的 <code>config.nodeRef</code>，从 <code>nodeStore</code> 匹配节点包并注入 <code>ui</code> 配置与节点 DB id</li>
 </ul>
 <hr>
 
@@ -482,17 +498,19 @@
 </ul>
 <h3 id="574-界面-4-执行器配置-executorconfigpage">5.7.4 界面 4: 执行器配置 (ExecutorConfigPage)</h3>
 
-<p>两栏布局（移动端为纵向滚动 + 横向类型卡片）：</p>
+<p>执行器<strong>实例</strong>管理页（2026-09-01 重写，数据落地到后端 <code>/api/v1/executors</code>，不再是纯前端假页面）：</p>
 
 <ul>
-<li><strong>左侧</strong>：执行器类型列表，三种类型：</li>
-<li>Local（本地 Shell 执行器）</li>
-<li>Docker（Docker 容器执行器）</li>
-<li>Kubernetes（K8s Pod 执行器）</li>
-<li>每项包含图标、名称、描述，选中项高亮</li>
-<li><strong>右侧</strong>：上下两部分：</li>
-<li>上部：<code>ExecutorForm</code> 配置表单（根据选中的执行器类型渲染不同表单字段）</li>
-<li>下部：<code>ExecutorMonitor</code> 监控面板（显示状态和资源使用）</li>
+<li><strong>左侧</strong>：执行器实例列表 + 「新增 Docker 执行器」按钮：</li>
+<li><code>local</code> 本地 Shell 执行器（全局限一个，迁移时自动播种）</li>
+<li>N 个 docker 实例（可配置不同 daemon 地址、网络、卷挂载等）</li>
+<li>默认执行器带星标；无 K8s（暂不支持，导入含 <code>executor.type: k8s</code> 的节点包会被后端拒绝）</li>
+<li><strong>右侧</strong>：<code>ExecutorForm</code> 配置表单（按选中实例类型渲染真实字段，读写后端）：</li>
+<li>local：shell / workdir / timeout / env / pty</li>
+<li>docker：<strong>host（远程 daemon 地址，支持 <code>tcp://</code> / <code>ssh://</code>，留空读 <code>DOCKER_HOST</code>）</strong> / tlsVerify / certPath / registry / network / workdir / volumes / env / tty</li>
+<li>操作区：设为默认执行器、删除（仅非默认的 docker 实例可删）</li>
+<li>数据源：<code>executorService.ts</code> + <code>executorStore.ts</code>（Zustand），订阅全局 SSE 的 <code>executor.*</code> 事件实时刷新</li>
+<li>假监控面板 <code>ExecutorMonitor</code> 已移除（无真实数据源）</li>
 </ul>
 <h3 id="575-界面-5-设置-settingspage">5.7.5 界面 5: 设置 (SettingsPage)</h3>
 
@@ -795,6 +813,11 @@
 <td>日志查看器（级别/节点过滤 + 搜索高亮）</td>
 </tr>
 <tr>
+<td><strong>ModuleNodeWidget</strong></td>
+<td><code>components/ModuleNodeWidget.tsx</code></td>
+<td>节点自定义 UI 组件宿主（module 模式动态加载/挂载/错误兜底）</td>
+</tr>
+<tr>
 <td><strong>Sidebar</strong></td>
 <td><code>components/Sidebar.tsx</code></td>
 <td>桌面 hover 展开 / 移动端抽屉导航，带激活指示条动画</td>
@@ -820,6 +843,7 @@
 <li><code>历史</code>：展示执行历史列表，点击执行后可在画布上回显该次执行的节点状态，点击节点可过滤日志。</li>
 <li><code>日志</code>：默认展示整条流水线日志，支持节点过滤和清除过滤。</li>
 <li><strong>画布方向切换</strong>：右上角状态面板提供横向/竖向布局切换按钮，React Flow 自动重新布局，节点连接点（Handle）随方向自适应。</li>
+<li><strong>内页运行</strong>：画布右上角悬浮「运行」按钮，携带参数面板的参数调用 <code>POST /workflows/:id/run</code>；执行中按钮禁用并显示「执行中」，触发后自动切换到「日志」Tab（移动端同时展开底部抽屉），画布节点状态由 SSE 事件驱动实时更新。</li>
 <li><strong>终端节点</strong>：Mermaid <code>stateDiagram-v2</code> 中的 <code>[*]</code> 不再渲染为普通节点，而是渲染为圆形 <code>Start</code> / <code>End</code> 节点，移除断线。</li>
 </ul>
 <h3 id="5163-移动端适配">5.16.3 移动端适配</h3>
@@ -837,6 +861,12 @@
 <li><code>executionStore</code> 新增 <code>selectedExecution</code> 完整对象，<code>selectExecution</code> 会调用 <code>getExecution(id)</code> 加载详情。</li>
 <li>新增 <code>updateExecutionMetadata</code>，根据 SSE 的 <code>execution_start</code> / <code>execution_complete</code> 实时合并运行时参数和元数据。</li>
 <li>运行时事件到达时自动选中当前执行，保证元数据面板切换到运行视图。</li>
+</ul>
+<h3 id="5166-节点自定义-ui-组件module-模式">5.16.6 节点自定义 UI 组件（module 模式）</h3>
+<ul>
+<li>节点包可在 <code>flowx.json</code> 中声明 <code>ui.entry</code> 携带预编译单文件 JS bundle，画布节点内嵌渲染（见 5.6.7 节与 <code>docs/11-node-package.md</code> 11.13 节）。</li>
+<li><code>NodeTestPanel</code> 新增「UI 预览」区域：Mock 测试后以真实输出驱动组件，供节点作者验证。</li>
+<li><code>NodeDetailModal</code> 对含自定义 UI 的节点显示「自定义 UI 组件」标记（安全提示）。</li>
 </ul>
 <hr>
 <p><em>主要变更: 从"AI 对话驱动"设计稿修订为与代码一致的现状文档——5 页面架构（工作流列表/画布/节点管理/执行器/设置），Zustand + axios service 层 + SSE 事件流，Taskade/n8n 深色主题风格</em></p>

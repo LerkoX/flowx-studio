@@ -5,10 +5,11 @@ import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useIsMobile, useViewportWidth } from '@/hooks/useMediaQuery'
 import { useExecutionStore } from '@/stores/executionStore'
+import { useWorkflowStore } from '@/stores/workflowStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { getCurrentTheme } from '@/utils/theme'
 import ModuleNodeWidget, { buildWidgetUrl } from '@/components/ModuleNodeWidget'
-import type { NodeWidgetExecution, NodeWidgetProps } from '@/types/nodeWidget'
+import type { NodeWidgetExecution, NodeWidgetParamSource, NodeWidgetProps } from '@/types/nodeWidget'
 import type { NodeUIConfig } from '@/types/node'
 import type { ExecutionStatus } from '@/types/execution'
 
@@ -33,10 +34,14 @@ interface GlowNodeData {
   ui?: NodeUIConfig
   /** 节点实例当前参数绑定（pipeline YAML config.params），供自定义 UI 展示 */
   params?: Record<string, string>
+  /** 各参数绑定的来源信息（Studio 解析 YAML 生成；node 类的 runtimeValue 由本组件补充） */
+  paramSources?: Record<string, NodeWidgetParamSource>
   /** 参数写回回调（编辑态提供；回放态缺省，组件进入只读） */
   onParamsChange?: (params: Record<string, string>) => void
   /** 画布编辑模式标记：false 时节点不可选中、内嵌 UI 不可交互（缺省视为 true） */
   interactive?: boolean
+  /** 离场标记：节点被外部删除后先播缩小淡出动画，再由画布移除 */
+  leaving?: boolean
 }
 
 function toWidgetExecution(exec: ExecutionStatus | null): NodeWidgetExecution | null {
@@ -92,8 +97,26 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
 
   // 仅带 UI 组件的节点订阅执行实例 metadata，避免无关重渲染
   const selectedExecution = useExecutionStore((s) => (hasUI ? s.selectedExecution : null))
+  // 仅带 UI 组件的节点订阅全图运行时数据：解析 {{ 节点.字段 }} 绑定的运行时值
+  const nodeRuntimeData = useWorkflowStore((s) => (hasUI ? s.nodeRuntimeData : null))
   // 订阅主题偏好，切换主题时重渲染 widget
   useSettingsStore((s) => s.systemSettings.theme)
+
+  // 为 node 类参数来源补充上游节点的运行时输出值（执行中/回放有数据时）
+  const paramSources = useMemo(() => {
+    const src = nodeData.paramSources
+    if (!src) return undefined
+    let merged = src
+    for (const [key, s] of Object.entries(src)) {
+      if (s.kind !== 'node' || !s.nodeId || !s.field) continue
+      const rv = nodeRuntimeData?.[s.nodeId]?.outputs?.[s.field]
+      if (rv !== undefined && rv !== s.runtimeValue) {
+        if (merged === src) merged = { ...src }
+        merged[key] = { ...s, runtimeValue: rv }
+      }
+    }
+    return merged
+  }, [nodeData.paramSources, nodeRuntimeData])
 
   const widgetProps = useMemo<NodeWidgetProps>(
     () => ({
@@ -103,18 +126,20 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
       inputs: nodeData.inputs || [],
       outputs: nodeData.outputs || {},
       params: nodeData.params || {},
+      paramSources,
       onParamsChange: interactive ? nodeData.onParamsChange : undefined,
       execution: toWidgetExecution(selectedExecution),
       theme: getCurrentTheme(),
       locale: typeof navigator !== 'undefined' ? navigator.language : 'zh-CN',
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }),
-    [nodeData.id, nodeData.nodeRef, status, nodeData.inputs, nodeData.outputs, nodeData.params, nodeData.onParamsChange, interactive, selectedExecution]
+    [nodeData.id, nodeData.nodeRef, status, nodeData.inputs, nodeData.outputs, nodeData.params, paramSources, nodeData.onParamsChange, interactive, selectedExecution]
   )
 
   const hasInputs = nodeData.inputs && nodeData.inputs.length > 0
   const hasOutputs = nodeData.outputs && Object.keys(nodeData.outputs).length > 0
   const hasDetails = hasInputs || hasOutputs
+  const leaving = nodeData.leaving === true
 
   const isHorizontal = nodeData.direction === 'LR'
   const targetPosition = isHorizontal ? Position.Left : Position.Top
@@ -123,9 +148,14 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
   return (
     <motion.div
       className="relative"
+      style={leaving ? { pointerEvents: 'none' } : undefined}
       initial={{ scale: 0.85, opacity: 0, y: 10 }}
-      animate={{ scale: 1, opacity: 1, y: 0 }}
-      transition={{ type: 'spring', stiffness: 300, damping: 25, mass: 0.8 }}
+      animate={leaving ? { scale: 0.6, opacity: 0, y: 8 } : { scale: 1, opacity: 1, y: 0 }}
+      transition={
+        leaving
+          ? { duration: 0.3, ease: 'easeIn' }
+          : { type: 'spring', stiffness: 300, damping: 25, mass: 0.8 }
+      }
     >
       {/* 选中高亮发光层 */}
       {selected && (

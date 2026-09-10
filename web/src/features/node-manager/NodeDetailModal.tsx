@@ -9,10 +9,11 @@ import JsonViewer from '@/components/JsonViewer'
 interface NodeDetailModalProps {
   node: NodeDefinition | null
   isOpen: boolean
+  loading?: boolean
   onClose: () => void
 }
 
-export default function NodeDetailModal({ node, isOpen, onClose }: NodeDetailModalProps) {
+export default function NodeDetailModal({ node, isOpen, loading, onClose }: NodeDetailModalProps) {
   const { t, i18n } = useTranslation()
   const [activeTab, setActiveTab] = useState<'overview' | 'params' | 'outputs' | 'raw'>('overview')
   const [copied, setCopied] = useState(false)
@@ -252,7 +253,11 @@ export default function NodeDetailModal({ node, isOpen, onClose }: NodeDetailMod
                   </div>
                 )}
                 {activeTab === 'raw' && (
-                  !node.package ? (
+                  loading && !node.package ? (
+                    <div className="text-center py-8 text-white/30 text-sm">
+                      {t('common.loading')}
+                    </div>
+                  ) : !node.package ? (
                     <div className="text-center py-8 text-white/30 text-sm">
                       {t('node.noPackageConfig')}
                     </div>

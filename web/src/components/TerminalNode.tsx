@@ -1,4 +1,5 @@
 import { memo } from 'react'
+import { motion } from 'framer-motion'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { Play, Flag } from 'lucide-react'
 
@@ -6,6 +7,8 @@ interface TerminalNodeData {
   id: string
   name: string
   direction?: 'TB' | 'LR'
+  /** 离场标记：节点被外部删除后先播缩小淡出动画，再由画布移除 */
+  leaving?: boolean
 }
 
 const TerminalNode = memo(({ data }: NodeProps) => {
@@ -13,12 +16,23 @@ const TerminalNode = memo(({ data }: NodeProps) => {
   const isStart = nodeData.id === '__start__'
   const Icon = isStart ? Play : Flag
   const isHorizontal = nodeData.direction === 'LR'
+  const leaving = nodeData.leaving === true
 
   const targetPosition = isHorizontal ? Position.Left : Position.Top
   const sourcePosition = isHorizontal ? Position.Right : Position.Bottom
 
   return (
-    <div className="flex flex-col items-center gap-1">
+    <motion.div
+      className="flex flex-col items-center gap-1"
+      style={leaving ? { pointerEvents: 'none' } : undefined}
+      initial={{ scale: 0.5, opacity: 0 }}
+      animate={leaving ? { scale: 0.3, opacity: 0 } : { scale: 1, opacity: 1 }}
+      transition={
+        leaving
+          ? { duration: 0.3, ease: 'easeIn' }
+          : { type: 'spring', stiffness: 300, damping: 22 }
+      }
+    >
       {/* 输入连接点（结束节点需要） */}
       {!isStart && (
         <Handle
@@ -51,7 +65,7 @@ const TerminalNode = memo(({ data }: NodeProps) => {
           className="w-2 h-2 !bg-white/20 !border-white/30"
         />
       )}
-    </div>
+    </motion.div>
   )
 })
 

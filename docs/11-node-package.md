@@ -576,6 +576,10 @@ interface NodeWidgetProps {
   outputs: Record<string, string>  // 节点运行时输出
   params: Record<string, string>   // 节点实例当前参数绑定（config.params）：
                                    // 常量或 {{ 上游.输出 }} 模板，原样下发
+  paramSources?: Record<string, NodeWidgetParamSource>
+                                  // 各参数绑定的来源标注（键与 params 对应），Studio 解析
+                                  // pipeline YAML 后下发；可选字段，旧版 Studio 不下发，
+                                  // 组件需判空并回退展示 params 原始绑定串
   onParamsChange?: (params: Record<string, string>) => void
                                   // 参数写回：全量替换该节点的 config.params（传 {} 清空），
                                   // Studio 写回 pipeline YAML 并防抖持久化；回放态（执行快照）
@@ -593,6 +597,17 @@ interface NodeWidgetProps {
   } | null
   theme: 'dark'                 // 预留
   locale: string                // 预留
+}
+
+// 参数绑定来源（paramSources 的值类型）
+interface NodeWidgetParamSource {
+  kind: 'pipeline' | 'node' | 'literal'
+  paramName?: string    // kind=pipeline：流水线参数名（YAML Param 区键名）
+  paramValue?: string   // kind=pipeline：流水线参数当前值（随参数面板编辑实时更新；未定义时缺省）
+  nodeId?: string       // kind=node：被引用的上游节点实例 ID
+  nodeName?: string     // kind=node：被引用节点显示名（Nodes.<id>.name，缺省时回退 nodeId）
+  field?: string        // kind=node：引用的输出字段名
+  runtimeValue?: string // kind=node：上游节点运行时输出值（执行中/回放有数据时下发）
 }
 ```
 

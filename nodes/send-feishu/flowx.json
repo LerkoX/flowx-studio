@@ -13,8 +13,11 @@
   "entry": "main.py",
   "image": "python:3.11-slim",
   "executor": {
-    "supportedTypes": ["local", "docker"],
-    "preferredType": "local"
+    "supportedTypes": [
+      "local",
+      "docker"
+    ],
+    "preferredType": "docker"
   },
   "requirements": [
     "requests"

@@ -18,6 +18,7 @@
     "ui/three.module.min.js",
     "ui/textures.js"
   ],
+  "image": "bash:5",
   "parameters": [
     {
       "name": "auto_rotate",
@@ -98,5 +99,12 @@
     "collapsed": false,
     "apiVersion": 1
   },
-  "timeout": 30
+  "timeout": 30,
+  "executor": {
+    "supportedTypes": [
+      "local",
+      "docker"
+    ],
+    "preferredType": "docker"
+  }
 }

@@ -3,6 +3,7 @@
  * 天气报告文本卡片：顶部 city 参数输入，下方渲染节点输出 text（Markdown 天气报告）。
  * 契约：mount(el, props) => { update(props), unmount() }
  *   props.params — 当前 config.params 绑定（模板值只读展示）
+ *   props.paramSources — 参数绑定来源标注（可选）：pipeline=流水线参数(含当前值) / node=上游节点(含显示名与运行时值) / literal=字面值
  *   props.onParamsChange(params) — 全量写回该节点参数（回放态缺省 = 控件只读）
  */
 
@@ -65,6 +66,55 @@ export default function mount(container, props) {
     cur.onParamsChange(params)
   }
 
+  // wired 参数控件（{{ ... }} 绑定）：来源标签 + 可编辑文本框。
+  // 来源标签优先取 props.paramSources（Studio 解析 YAML 下发）：
+  //   pipeline → "⚡ 流水线参数 · name = 当前值"（随参数面板实时更新）
+  //   node     → "🔗 节点显示名 · field = 运行时值"（执行中/回放有上游输出时）
+  //   literal  → "✏️ 自定义值"（解除绑定后）；无 paramSources 时回退展示原始绑定串。
+  // 输入普通值 = 解除绑定；输入 {{ Param.xxx }} / {{ 节点.字段 }} = 重新绑定。
+  const WIRED_INPUT_CSS = 'width:100%;background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.25);border-radius:6px;padding:4px 7px;font-size:10px;color:rgba(165,180,252,0.95);outline:none;box-sizing:border-box;font-family:ui-monospace,Menlo,monospace'
+  const sourceCaptionOf = (key, raw) => {
+    const src = (cur.paramSources || {})[key]
+    if (src && src.kind === 'pipeline') {
+      return '⚡ 流水线参数 · ' + (src.paramName || '') + (src.paramValue !== undefined ? ' = ' + src.paramValue : '（未定义）')
+    }
+    if (src && src.kind === 'node') {
+      return '🔗 ' + (src.nodeName || src.nodeId || '') + ' · ' + (src.field || '') + (src.runtimeValue !== undefined ? ' = ' + src.runtimeValue : '')
+    }
+    if (src && src.kind === 'literal') return '✏️ 自定义值'
+    return '⟵ ' + (raw !== undefined ? raw : '')
+  }
+  const sourceCaptionColor = (key) => {
+    const src = (cur.paramSources || {})[key]
+    if (src && src.kind === 'pipeline') return 'rgba(251,191,36,0.85)'
+    if (src && src.kind === 'node') return 'rgba(34,211,238,0.8)'
+    return 'rgba(165,180,252,0.75)'
+  }
+  const wiredControl = (key, raw) => {
+    const wrap = h('div', '')
+    const caption = h('div', 'font-size:9px;margin-bottom:2px;word-break:break-all;line-height:1.4')
+    const inp = h('input', WIRED_INPUT_CSS)
+    inp.type = 'text'
+    inp.value = raw !== undefined ? raw : ''
+    inp.spellcheck = false
+    inp.title = '参数绑定：输入普通值解除绑定；输入 {{ Param.xxx }} 或 {{ 节点.字段 }} 重新绑定'
+    inp.addEventListener('change', () => setParam(key, inp.value.trim()))
+    const sync = () => {
+      caption.textContent = sourceCaptionOf(key, (cur.params || {})[key])
+      caption.style.color = sourceCaptionColor(key)
+      inp.disabled = !editable()
+      inp.style.opacity = editable() ? '1' : '0.7'
+      if (document.activeElement !== inp) {
+        const nv = (cur.params || {})[key]
+        inp.value = nv !== undefined ? nv : ''
+      }
+    }
+    sync()
+    refreshers.push(sync)
+    wrap.append(caption, inp)
+    return wrap
+  }
+
   // 头部：状态点 + 标题 + 城市参数 + 状态
   const dot = h('span', 'width:8px;height:8px;border-radius:50%;flex-shrink:0')
   const title = h('strong', 'font-size:12px', '获取天气')
@@ -74,7 +124,9 @@ export default function mount(container, props) {
   const rawCity = (cur.params || {}).city
   let cityControl
   if (isWired(rawCity)) {
-    cityControl = h('span', 'font-size:10px;color:rgba(165,180,252,0.75);font-family:ui-monospace,Menlo,monospace;background:rgba(99,102,241,0.10);border:1px solid rgba(99,102,241,0.22);border-radius:6px;padding:2px 6px', '⟵ ' + rawCity)
+    cityControl = wiredControl('city', rawCity)
+    cityControl.style.flex = '1'
+    cityControl.style.minWidth = '0'
   } else {
     cityControl = h('input', INPUT_CSS)
     cityControl.type = 'text'

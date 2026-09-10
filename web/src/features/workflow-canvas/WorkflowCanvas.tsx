@@ -6,6 +6,7 @@ import {
   MiniMap,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   ReactFlowProvider,
   type Node,
   type Edge,
@@ -19,8 +20,8 @@ import { useWorkflowStore } from '@/stores/workflowStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import { useNodeStore } from '@/stores/nodeStore'
 import { useIsMobile } from '@/hooks/useMediaQuery'
-import { parseWorkflowGraph, parseNodeRefs, parseNodeParams } from '@/utils/mermaidParser'
-import { updateWorkflow } from '@/services/workflowService'
+import { parseWorkflowGraph, parseNodeRefs, parseNodeParams, parseParamSources } from '@/utils/mermaidParser'
+import { updateWorkflow, getWorkflow } from '@/services/workflowService'
 import { useEventStream } from '@/services/eventService'
 import type { ExecutionLog, ExecutionStatus } from '@/types/execution'
 import { ArrowUpDown, ArrowLeftRight, Eye, PencilLine, History } from 'lucide-react'
@@ -103,6 +104,16 @@ function WorkflowCanvasInner({
   // 构建节点 data 时通过 ref 读当前模式；mode 变化由独立 effect 同步 data.interactive
   const modeRef = useRef(mode)
   modeRef.current = mode
+  // 当前画布节点/边镜像：图解析回调是异步的，diff 增删节点时不能用渲染闭包快照
+  const nodesRef = useRef<Node[]>([])
+  const edgesRef = useRef<Edge[]>([])
+  // 外部更新（workflow.updated SSE）回读最新流水线定义的防抖句柄
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 新增节点逐个入场期间为 true：暂停「实测尺寸重排」，避免部分图重排抖动
+  const staggeringRef = useRef(false)
+  // 实测尺寸重排的去重 key（不含位置，重排只改 position 不会循环）
+  const layoutKeyRef = useRef('')
+  const { fitView } = useReactFlow()
   const [, setSelectedNode] = useState<string | null>(null)
   // 精确选择器订阅：避免 store 中无关字段变化触发整个画布重渲染
   const currentWorkflow = useWorkflowStore((s) => s.currentWorkflow)
@@ -173,9 +184,16 @@ function WorkflowCanvasInner({
   useEffect(() => {
     return () => {
       if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
       pendingParamsFlush = null
     }
   }, [])
+
+  // 镜像当前画布节点/边，供图解析完成回调 diff 出增删节点
+  useEffect(() => {
+    nodesRef.current = nodes
+    edgesRef.current = edges
+  }, [nodes, edges])
 
   // 节点包列表用于按 nodeRef 匹配 ui 配置；每次进入画布都刷新，
   // 保证节点重新导入（ui 尺寸/bundle 更新）后能拿到最新定义
@@ -196,6 +214,8 @@ function WorkflowCanvasInner({
     const nodeRefs = parseNodeRefs(sourceYaml)
     // 节点实例 ID → 当前参数绑定（config.params），下发给节点自定义 UI 组件
     const nodeParams = parseNodeParams(sourceYaml)
+    // 节点实例 ID → 参数绑定来源（流水线参数/上游节点/字面值），供 UI 组件渲染来源标注
+    const paramSources = parseParamSources(sourceYaml)
     const matchNodeDef = (instanceId: string) => {
       const ref = nodeRefs[instanceId]
       if (!ref) return undefined
@@ -216,6 +236,8 @@ function WorkflowCanvasInner({
     // 过期取消：首次进入时 mermaid 动态加载较慢，若 nodeDefs 在此期间加载完成
     // 触发了新一轮解析，旧的慢解析结果不得覆盖新结果（否则子 UI 首次不显示）
     let cancelled = false
+    // 新增节点逐个入场的延迟定时器，effect 清理时一并取消
+    const staggerTimers: ReturnType<typeof setTimeout>[] = []
 
     parseWorkflowGraph(sourceYaml)
       .then(({ nodes: parsedNodes, edges: parsedEdges }) => {        // 状态读取必须取解析完成时刻的最新值（getState），不能用 effect 闭包快照：
@@ -248,6 +270,7 @@ function WorkflowCanvasInner({
               nodeUpdatedAt: nodeDef?.updatedAt ? String(nodeDef.updatedAt) : undefined,
               ui: nodeDef?.ui,
               params: nodeParams[n.id],
+              paramSources: paramSources[n.id],
               // 非编辑（预览）模式：节点不可选中、内嵌 UI 不可交互
               interactive: modeRef.current === 'edit',
               onParamsChange: paramsEditable
@@ -278,8 +301,111 @@ function WorkflowCanvasInner({
 
         const { nodes: layoutedNodes, edges: layoutedEdges } = autoLayout(rawNodes, rawEdges, { direction })
         if (cancelled) return
-        setNodes(layoutedNodes)
-        setEdges(layoutedEdges)
+        // 与当前画布 diff：后台（CLI/API）更新带来的新增节点逐个延迟挂载，
+        // 配合节点组件的入场弹簧动画形成依次出现的丝滑效果；
+        // 被删节点打 leaving 标记播缩小淡出动画后再移除；
+        // 已有节点原地更新数据/位置，不重复播入场动画
+        const prevIds = new Set(nodesRef.current.map((n) => n.id))
+        const layoutedIds = new Set(layoutedNodes.map((n) => n.id))
+        const addedNodes = layoutedNodes.filter((n) => !prevIds.has(n.id))
+        const removedNodes = nodesRef.current.filter((n) => !layoutedIds.has(n.id))
+        // 非起止节点有交集才算「同一幅图的增量更新」；切换流水线/执行时
+        // 整图节点都是新的，逐个入场会拖慢首屏，直接全量设置
+        const isTerminalId = (id: string) => id === '__start__' || id === '__end__'
+        const hasOverlap = layoutedNodes.some((n) => !isTerminalId(n.id) && prevIds.has(n.id))
+
+        if (prevIds.size === 0 || !hasOverlap || (addedNodes.length === 0 && removedNodes.length === 0)) {
+          // 首次加载/整图切换/无增删：全量设置
+          setNodes(layoutedNodes)
+          setEdges(layoutedEdges)
+          return
+        }
+
+        const addedIds = new Set(addedNodes.map((n) => n.id))
+        // 已挂载节点集合：边在两端节点都出现后才随之出现
+        const available = new Set(prevIds)
+        staggeringRef.current = true
+
+        // 逐个删除：按链尾→链头倒序，每个节点间隔 400ms 播缩小淡出，动画结束再移除；
+        // 连向被删节点的旧边改 id（leaving-*）暂时保留，随该节点开始淡出时撤掉
+        const removedIds = new Set(removedNodes.map((n) => n.id))
+        const leavingQueue = [...removedNodes].reverse()
+        const leavingEdges = edgesRef.current
+          .filter((e) => removedIds.has(e.source) || removedIds.has(e.target))
+          .map((e) => ({ ...e, id: `leaving-${e.id}`, data: { ...e.data, animated: false } }))
+
+        setNodes([...layoutedNodes.filter((n) => !addedIds.has(n.id)), ...removedNodes])
+        // layoutedEdges 已不含连向被删节点的边（图解析结果），补上 leavingEdges 过渡
+        setEdges([
+          ...layoutedEdges.filter((e) => !addedIds.has(e.source) && !addedIds.has(e.target)),
+          ...leavingEdges,
+        ])
+
+        leavingQueue.forEach((node, i) => {
+          const start = i * 400
+          // 开始淡出：打 leaving 标记（组件播 0.3s 缩小淡出），同时撤掉连向它的边
+          staggerTimers.push(
+            setTimeout(() => {
+              if (cancelled) return
+              available.delete(node.id)
+              setNodes((nds) =>
+                nds.map((n) =>
+                  n.id === node.id
+                    ? {
+                        ...n,
+                        draggable: false,
+                        selectable: false,
+                        data: { ...n.data, leaving: true, interactive: false },
+                      }
+                    : n,
+                ),
+              )
+              setEdges((eds) =>
+                eds.filter(
+                  (e) =>
+                    !e.id.startsWith('leaving-') || (e.source !== node.id && e.target !== node.id),
+                ),
+              )
+            }, start),
+          )
+          // 淡出动画结束后真正移除节点
+          staggerTimers.push(
+            setTimeout(() => {
+              if (cancelled) return
+              setNodes((nds) => nds.filter((n) => n.id !== node.id))
+            }, start + 320),
+          )
+        })
+
+        addedNodes.forEach((node, i) => {
+          // 超过 10 个新增时后续节点共享最后一个延迟槽位，避免大批量更新拖太久
+          const slot = Math.min(i, 9)
+          staggerTimers.push(
+            setTimeout(() => {
+              if (cancelled) return
+              available.add(node.id)
+              setNodes((nds) => (nds.some((n) => n.id === node.id) ? nds : [...nds, node]))
+              setEdges((eds) => {
+                const existing = new Set(eds.map((e) => e.id))
+                const toAdd = layoutedEdges.filter(
+                  (e) => available.has(e.source) && available.has(e.target) && !existing.has(e.id),
+                )
+                return toAdd.length ? [...eds, ...toAdd] : eds
+              })
+            }, 150 + slot * 400),
+          )
+        })
+        // 全部出现后恢复实测重排并平滑缩放视野，保证新节点进入可视区
+        const lastAddDelay = addedNodes.length > 0 ? 150 + Math.min(addedNodes.length - 1, 9) * 400 : 0
+        const lastRemoveDone = leavingQueue.length > 0 ? (leavingQueue.length - 1) * 400 + 320 : 0
+        staggerTimers.push(
+          setTimeout(() => {
+            if (cancelled) return
+            staggeringRef.current = false
+            layoutKeyRef.current = ''
+            fitView({ padding: 0.2, duration: 500 })
+          }, Math.max(lastAddDelay + 500, lastRemoveDone > 0 ? lastRemoveDone + 400 : 0)),
+        )
       })
       .catch((err) => {
         if (cancelled) return
@@ -290,6 +416,8 @@ function WorkflowCanvasInner({
 
     return () => {
       cancelled = true
+      staggeringRef.current = false
+      staggerTimers.forEach(clearTimeout)
     }
   }, [sourceYaml, direction, nodeDefs, paramsEditable, handleNodeParamsChange, setNodes, setEdges])
 
@@ -308,8 +436,9 @@ function WorkflowCanvasInner({
   // 按实测尺寸重排：首帧布局只能按估算尺寸占位，组件挂载/详情展开后节点实际
   // 尺寸会变化（React Flow 自动测量到 node.measured），此处检测到变化后重跑 dagre，
   // 避免节点重叠。key 不含位置，重排只改 position 不改变 measured，因此不会循环。
-  const layoutKeyRef = useRef('')
+  // 新增节点逐个入场期间跳过：此时画布是部分图，重排会让已有节点位置抖动
   useEffect(() => {
+    if (staggeringRef.current) return
     if (nodes.length === 0) return
     if (!nodes.every((n) => n.measured?.width && n.measured?.height)) return
     const key =
@@ -402,6 +531,39 @@ function WorkflowCanvasInner({
 
   // 订阅 SSE 事件
   useEventStream('/api/v1/events', (type, data) => {
+    if (type === 'workflow.updated') {
+      // 后台（CLI/API）更新了当前流水线：防抖回读最新定义，驱动画布增量刷新。
+      // 先冲刷本地节点参数的防抖写回，避免回读到未含本地编辑的旧 YAML 覆盖内存状态。
+      // 注意 currentWorkflow.id 运行时可能是 number（列表页点击直接存入原始 API 项），
+      // 比较前统一转字符串
+      const payload = data as { id?: number | string }
+      const wf = useWorkflowStore.getState().currentWorkflow
+      if (!wf || payload.id === undefined || String(payload.id) !== String(wf.id)) return
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
+      refreshTimerRef.current = setTimeout(async () => {
+        refreshTimerRef.current = null
+        try {
+          await flushNodeParamsPersist()
+          const resp = await getWorkflow(String(payload.id))
+          const latest = useWorkflowStore.getState().currentWorkflow
+          if (!resp.data || !latest || String(resp.data.id) !== String(latest.id)) return
+          // 前端自己写回触发的回声事件：内容一致时跳过，避免无意义重解析
+          if (resp.data.yamlConfig === latest.yamlConfig) return
+          useWorkflowStore.getState().setCurrentWorkflow({ ...resp.data, id: String(resp.data.id) })
+        } catch (err) {
+          console.error('Failed to refresh workflow after external update:', err)
+        }
+      }, 250)
+      return
+    }
+
+    if (type === 'node.created' || type === 'node.updated' || type === 'node.deleted') {
+      // 节点包后台变更（import/update/delete）：刷新节点定义列表，
+      // 画布按 nodeRef 重新匹配 ui 配置与版本
+      loadNodes()
+      return
+    }
+
     if (type === 'execution.started') {
       setNodeStatuses({})
       resetNodeRuntimeData()

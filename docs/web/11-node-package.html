@@ -102,7 +102,9 @@
 ├── main.py
 ├── utils.py
 ├── requirements.txt
-└── mock.py</code></pre>
+├── mock.py
+└── ui/                  # 可选：自定义 UI 组件（见 11.13 节）
+    └── node-widget.js</code></pre>
 
 <ul>
 <li><code>flowx.json</code>：节点包清单（必需）</li>
@@ -110,6 +112,7 @@
 <li><code>utils.py</code>：其他依赖文件（由 <code>files</code> 列出）</li>
 <li><code>requirements.txt</code>：依赖文件（可选，可被 <code>requirements</code> 字段覆盖）</li>
 <li><code>mock.py</code>：Mock 测试入口（由 <code>mock.entry</code> 指定）</li>
+<li><code>ui/node-widget.js</code>：自定义 UI 组件 bundle（可选，由 <code>ui.entry</code> 指定）</li>
 </ul>
 <h2 id="114-flowxjson-schema">11.4 flowx.json Schema</h2>
 
@@ -128,7 +131,8 @@
   "files": ["utils.py"],
   "image": "python:3.11-slim",
   "executor": {
-    "type": "docker",
+    "supportedTypes": ["local", "docker"],
+    "preferredType": "docker",
     "config": {
       "workdir": "/app",
       "volumes": ["/tmp:/tmp"]
@@ -171,6 +175,13 @@
     "enabled": true,
     "entry": "mock.py"
   },
+  "ui": {
+    "entry": "ui/node-widget.js",
+    "width": 280,
+    "height": 140,
+    "collapsed": false,
+    "apiVersion": 1
+  },
   "timeout": 60
 }</code></pre>
 
@@ -208,7 +219,7 @@
 <td><code>version</code></td>
 <td>string</td>
 <td>否</td>
-<td>版本号，如 <code>1.0.0</code></td>
+<td>版本号，如 <code>1.0.0</code>；同名不同版本多版本并存（见 11.5.1 节），空版本归一为 <code>0</code></td>
 </tr>
 <tr>
 <td><code>author</code></td>
@@ -250,70 +261,56 @@
 <td><code>image</code></td>
 <td>string</td>
 <td>否</td>
-<td>Docker 镜像；若指定，默认使用 <code>docker</code> 执行器</td>
+<td>Docker 镜像能力声明；若指定且未声明 <code>executor</code>，按旧版兼容规则归为 docker 执行</td>
+</tr>
+<tr>
+<td><code>executor.supportedTypes</code></td>
+<td>string[]</td>
+<td>否</td>
+<td>节点支持的执行器类型：<code>local</code> / <code>docker</code>；节点包可跨环境复用，因此只声明类型能力，不绑定用户环境中的实例名</td>
+</tr>
+<tr>
+<td><code>executor.preferredType</code></td>
+<td>string</td>
+<td>否</td>
+<td>默认偏好类型，必须包含在 <code>supportedTypes</code> 中；缺省时使用 <code>supportedTypes[0]</code>。偏好类型不可用（如系统无 docker 实例）时按 <code>supportedTypes</code> 顺序降级</td>
+</tr>
+<tr>
+<td><code>executor.ref</code></td>
+<td>string</td>
+<td>否</td>
+<td><strong>旧版兼容字段</strong>：引用 Studio 注册的执行器实例名；不可与 <code>supportedTypes</code>/<code>preferredType</code> 混用。新节点包不应使用，因为实例名属于用户环境</td>
 </tr>
 <tr>
 <td><code>executor.type</code></td>
 <td>string</td>
 <td>否</td>
-<td>执行器类型：<code>local</code> / <code>docker</code> / <code>k8s</code>；默认根据 <code>image</code> 推断</td>
+<td><strong>旧版兼容字段</strong>：固定内联匿名执行器类型 <code>local</code> / <code>docker</code>；不可与 <code>supportedTypes</code>/<code>preferredType</code> 混用</td>
 </tr>
 <tr>
 <td><code>executor.config</code></td>
 <td>object</td>
 <td>否</td>
-<td>执行器配置，透传给 FlowX 执行器（<code>flowx/executor/local/adapter.go:23-32</code>、<code>flowx/executor/docker/adapter.go:23-32</code>）</td>
-</tr>
-<tr>
-<td><code>requirements</code></td>
-<td>string[]</td>
-<td>否</td>
-<td>依赖列表；若不填，可尝试读取 <code>requirements.txt</code></td>
-</tr>
-<tr>
-<td><code>parameters</code></td>
-<td>Parameter[]</td>
-<td>是</td>
-<td>参数定义（<code>description</code> 应详细描述所需数据；可用 <code>source</code> 标注推荐来源节点包 + 输出字段）</td>
-</tr>
-<tr>
-<td><code>env</code></td>
-<td>map&lt;string, string&gt;</td>
-<td>否</td>
-<td>参数 → 环境变量映射，值支持模板表达式</td>
-</tr>
-<tr>
-<td><code>run</code></td>
-<td>string</td>
-<td>否</td>
-<td>执行命令模板；不填则按 <code>language + entry</code> 生成默认命令</td>
-</tr>
-<tr>
-<td><code>outputs</code></td>
-<td>Output[]</td>
-<td>否</td>
-<td>输出字段声明</td>
-</tr>
-<tr>
-<td><code>extract</code></td>
-<td>ExtractConfig</td>
-<td>否</td>
-<td>输出提取方式：<code>codec-block</code> 或 <code>regex</code></td>
-</tr>
-<tr>
-<td><code>mock</code></td>
-<td>MockConfig</td>
-<td>否</td>
-<td>Mock 测试配置</td>
-</tr>
-<tr>
-<td><code>timeout</code></td>
-<td>int</td>
-<td>否</td>
-<td>默认超时秒数</td>
+<td>匿名执行器配置，透传给 FlowX 执行器；选择注册实例时以实例配置为准，节点 <code>image</code> 仍会按镜像注入规则覆盖条目 <code>config.image</code></td>
 </tr>
 </tbody>
 </table>
+
+<p><strong>执行器解析优先级</strong>（运行时展开，见 <a href="07-node-system.md#741-运行时适配器与节点展开" target="_blank">7.4.1 节</a>）：pipeline 节点 <code>config.executor</code> 显式选择 → 旧版 <code>executor.ref</code>（注册实例）→ 旧版 <code>executor.type + config</code>（内联匿名）→ <code>supportedTypes/preferredType</code>（偏好类型无可用实例时按支持列表降级）→ 有 <code>image</code> 归为 docker（默认执行器为 docker 实例时复用其配置，否则合成匿名 docker）→ 无 <code>image</code> 使用全局默认执行器。</p>
+
+<p><strong>docker 执行器实例支持的 config 键</strong>：<code>host</code>（远程 daemon 地址，如 <code>tcp://192.168.1.10:2375</code> / <code>ssh://user@host</code>，留空读 <code>DOCKER_HOST</code> 环境变量）、<code>tlsVerify</code>、<code>certPath</code>、<code>image</code>（容器镜像，默认 <code>alpine:latest</code>）、<code>registry</code>、<code>network</code>、<code>workdir</code>、<code>volumes</code>（远程 daemon 时为<strong>远端机器</strong>路径）、<code>env</code>、<code>tty</code>、<code>ttyWidth</code>、<code>ttyHeight</code>。</p>
+
+<p><strong>镜像注入规则</strong>（展开时）：节点包的 <code>image</code> 会写入其 docker/k8s 执行器条目的 <code>config.image</code>，优先级为<strong>节点 <code>image</code> &gt; 条目 <code>config.image</code></strong>。flowx 执行器按名单例（同名=同容器），因此引用共享条目（<code>executor.ref</code> 实例或默认 docker 实例）且镜像与条目不一致时，展开器会复制条目配置合成节点专属的 <code>&lt;节点名&gt;-executor</code> 条目并注入镜像；镜像一致时直接复用共享条目。<code>executor.type: local</code> 时 <code>image</code> 只是 docker 能力声明，不注入。</p>
+<p><strong>local 执行器实例支持的 config 键</strong>：<code>shell</code>、<code>workdir</code>、<code>timeout</code>、<code>env</code>、<code>pty</code>、<code>ptyWidth</code>、<code>ptyHeight</code>。</p>
+<p>| <code>requirements</code> | string[] | 否 | 依赖列表；若不填，可尝试读取 <code>requirements.txt</code> |</p>
+<p>| <code>parameters</code> | Parameter[] | 是 | 参数定义（<code>description</code> 应详细描述所需数据；可用 <code>source</code> 标注推荐来源节点包 + 输出字段） |</p>
+<p>| <code>env</code> | map&lt;string, string&gt; | 否 | 参数 → 环境变量映射，值支持模板表达式 |</p>
+<p>| <code>run</code> | string | 否 | 执行命令模板；不填则按 <code>language + entry</code> 生成默认命令 |</p>
+<p>| <code>outputs</code> | Output[] | 否 | 输出字段声明 |</p>
+<p>| <code>extract</code> | ExtractConfig | 否 | 输出提取方式：<code>codec-block</code> 或 <code>regex</code> |</p>
+<p>| <code>mock</code> | MockConfig | 否 | Mock 测试配置 |</p>
+<p>| <code>ui</code> | UIConfig | 否 | 节点自定义 UI 组件（module 模式），见 <a href="#1113-节点自定义-ui-组件module-模式" target="_blank">11.13 节</a> |</p>
+<p>| <code>timeout</code> | int | 否 | 默认超时秒数 |</p>
 
 <h4 id="parameter">Parameter</h4>
 
@@ -405,6 +402,53 @@
   "entry": "mock.py"
 }</code></pre>
 
+<h4 id="uiconfig">UIConfig</h4>
+
+<pre><code class="language-json">{
+  "entry": "ui/node-widget.js",
+  "width": 280,
+  "height": 140,
+  "collapsed": false,
+  "apiVersion": 1
+}</code></pre>
+
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>类型</th>
+<th>必填</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ui.entry</code></td>
+<td>string</td>
+<td>是</td>
+<td>组件 bundle 文件（包内相对路径的单文件 <code>.js</code>），导入时随节点入库</td>
+</tr>
+<tr>
+<td><code>ui.width</code> / <code>ui.height</code></td>
+<td>int</td>
+<td>否</td>
+<td>内嵌区域尺寸（px），供画布布局占位，默认 260×120</td>
+</tr>
+<tr>
+<td><code>ui.collapsed</code></td>
+<td>bool</td>
+<td>否</td>
+<td>移动端是否默认收起，缺省视为 true</td>
+</tr>
+<tr>
+<td><code>ui.apiVersion</code></td>
+<td>int</td>
+<td>否</td>
+<td>组件契约版本，当前固定为 1</td>
+</tr>
+</tbody>
+</table>
+
 <h2 id="115-导入流程">11.5 导入流程</h2>
 
 <div class="mermaid-container">
@@ -440,6 +484,7 @@
 <li>读取 <code>files</code> 列表 → <code>Node.Files</code>（新增 JSON 字段）</li>
 <li>若 <code>requirements</code> 为空且存在 <code>requirements.txt</code>，读取其内容</li>
 <li>若 <code>mock.enabled</code> 为真，读取 <code>mock.entry</code> 内容 → <code>MockConfig</code></li>
+<li>若声明了 <code>ui.entry</code>，校验并读取组件 bundle 内容存入 <code>Files</code>（见 <a href="#1113-节点自定义-ui-组件module-模式" target="_blank">11.13 节</a>）</li>
 <li>生成 <code>model.Node</code> 并调用 <code>NodeService.Create</code></li>
 <li>清理临时目录</li>
 </ol>
@@ -453,6 +498,23 @@ Content-Type: application/json
   "source_url": "https://github.com/xxx/image-downloader.git"
 }</code></pre>
 
+<p>节点 UI 组件 bundle 静态服务（见 <a href="#1113-节点自定义-ui-组件module-模式" target="_blank">11.13 节</a>）：</p>
+
+<pre><code class="language-http">GET /api/v1/nodes/:id/ui/*filepath</code></pre>
+
+<h3 id="1151-版本与引用noderef-版本锁定">11.5.1 版本与引用（nodeRef 版本锁定）</h3>
+
+<p>节点按 <code>(name, version)</code> 组合唯一存储，<strong>同名不同版本多行并存</strong>（空版本归一为 <code>0</code>）：</p>
+
+<ul>
+<li><strong>导入</strong>：同名不同版本直接新增为独立节点（新 ID）；同名同版本报「已存在」，需 <code>--overwrite</code> 原地覆盖（保持 ID，引用该版本的流水线与物化快照无感知）</li>
+<li><strong>引用语法</strong>：pipeline YAML 的 <code>config.nodeRef</code> 支持两种形式——</li>
+<li><code>get-weather@1.0.0</code>：<strong>精确锁定版本</strong>，节点升级不影响该流水线</li>
+<li><code>get-weather</code>（裸名称）：解析到该名称的<strong>最新版本</strong>，向后兼容旧 YAML，但 import 新版本后行为会漂移——<strong>生产流水线建议显式锁版本</strong></li>
+<li><strong>「最新」排序</strong>：版本号按 semver 风格比较（首段 <code>-</code> 后为预发布段；基版本按 <code>.</code> 分段，数字段按数值比较 <code>1.10.0 &gt; 1.9.0</code>；带预发布段者更小），完全相等取 ID 大者；空版本 <code>0</code> 最小</li>
+<li><strong>物化快照</strong>：展开后的节点 <code>config.nodeRef</code> 一律改写为完整引用 <code>name@version</code>，执行快照/回放可精确还原运行版本</li>
+<li><strong>删除保护</strong>：<code>name@version</code> 精确引用只挡删该版本；裸名称引用挡删它当前解析到的版本（最新版），删除旧版本放行</li>
+</ul>
 <h2 id="116-字段映射">11.6 字段映射</h2>
 
 <h3 id="1161-映射到-modelnode">11.6.1 映射到 model.Node</h3>
@@ -536,6 +598,14 @@ Content-Type: application/json
 <tr>
 <td><code>mock</code></td>
 <td><code>MockConfig</code></td>
+</tr>
+<tr>
+<td><code>ui</code></td>
+<td><code>PackageConfig.UI</code>（原样保存；<code>Node.UI</code> 透出给 API）</td>
+</tr>
+<tr>
+<td><code>ui.entry</code> 文件内容</td>
+<td><code>Files</code>（以 ui.entry 路径为 key）</td>
 </tr>
 <tr>
 <td><code>source_type</code></td>
@@ -672,7 +742,7 @@ export FLOWX_PARAM_TIMEOUT="&lt;值&gt;"</code></pre>
   GetWeather:                 # 节点实例 ID，pipeline 作者自定义
     name: 获取天气
     config:
-      nodeRef: get-weather    # 引用节点包
+      nodeRef: get-weather    # 引用节点包（可锁版本：get-weather@1.0.0）
       params:
         city: 深圳             # 常量绑定
   SendFeishu:
@@ -780,6 +850,10 @@ export FLOWX_PARAM_TIMEOUT="&lt;值&gt;"</code></pre>
 <li>~~如果 <code>image</code> 为空且 <code>executor.type</code> 为 <code>docker</code>，导入失败~~（<strong>未在代码中实现</strong>：<code>node_import.go</code> 仅校验 <code>executor.type</code> 类型名合法性，不检查 <code>image</code> 是否配置）</li>
 <li><code>mock.entry</code> 若存在，文件必须存在</li>
 <li>节点名称唯一（数据库唯一约束）</li>
+<li><code>executor.supportedTypes</code> 仅接受不重复的 <code>local</code> / <code>docker</code>；<code>executor.preferredType</code> 必须包含在 <code>supportedTypes</code> 中（未列 supportedTypes 时 preferredType 即唯一支持类型）</li>
+<li>旧版 <code>executor.ref</code> 与 <code>executor.type</code> 互斥；二者也不可混用 <code>supportedTypes</code>/<code>preferredType</code>。<code>ref</code> 须为合法实例名（正则 <code>^[a-zA-Z][a-zA-Z0-9_-]*$</code>），引用不存在的实例<strong>不在导入时报错</strong>（允许先导节点后配执行器），运行时展开时报错</li>
+<li>旧版 <code>executor.type</code> 仅接受 <code>local</code> / <code>docker</code>；<code>k8s</code> / <code>kubernetes</code> 导入时拒绝（暂不支持）</li>
+<li><code>ui</code> 若存在：<code>ui.entry</code> 必填且为包内相对路径的单文件 <code>.js</code>（禁止绝对路径与 <code>..</code> 穿越），文件必须存在且大小 ≤ 10MB，<code>ui.apiVersion</code> 缺省或为 1</li>
 </ol>
 <h2 id="1112-实现任务已全部完成">11.12 实现任务（已全部完成 ✅）</h2>
 
@@ -791,8 +865,190 @@ export FLOWX_PARAM_TIMEOUT="&lt;值&gt;"</code></pre>
 <li>[x] 实现节点包 → <code>flowx/core.NodeConfig</code> 展开逻辑（<code>internal/runtime/node_expander.go</code>）</li>
 <li>[x] 更新前端 <code>NodeImportModal</code> 和 <code>NodeManagerPage</code></li>
 <li>[x] 为导入流程编写单元测试和端到端测试（<code>node_import_test.go</code>、<code>internal/cli/import_node_test.go</code>）</li>
+<li>[x] 节点自定义 UI 组件（module 模式）：<code>ui</code> 字段解析与校验、bundle 静态服务、画布内嵌渲染（见 11.13 节）</li>
 </ul>
-<h2 id="1113-参考资料">11.13 参考资料</h2>
+<h2 id="1113-节点自定义-ui-组件module-模式">11.13 节点自定义 UI 组件（module 模式）</h2>
+
+<p>节点包可携带一个<strong>预编译的单文件 JS bundle</strong>作为自定义 UI 组件，在 FlowX Studio 画布节点卡片中内嵌渲染，替代默认的“入参/返回”摘要展示。</p>
+
+<h3 id="11131-工作原理">11.13.1 工作原理</h3>
+
+<ol>
+<li>节点包在 <code>flowx.json</code> 中声明 <code>ui.entry</code>（包内相对路径的单文件 <code>.js</code>）</li>
+<li>导入时校验（见 11.11 规则 10）并将 bundle 内容存入 <code>Node.Files</code></li>
+<li>前端画布解析 pipeline YAML 的 <code>config.nodeRef</code>，匹配节点包后发现 <code>ui</code> 配置，</li>
+</ol>
+<p>   通过 <code>GET /api/v1/nodes/:id/ui/&lt;entry&gt;?v=&lt;updatedAt&gt;</code> 动态加载 bundle</p>
+<ol>
+<li>在节点卡片内嵌容器上调用 bundle 的 <code>mount(el, props)</code>；节点数据变化时调 <code>update(props)</code>；卸载时调 <code>unmount()</code></li>
+</ol>
+<p>bundle 格式不限制：ESM 默认导出 <code>mount</code> 函数，或 IIFE/UMD 加载后调用</p>
+<p><code>window.FlowXNodeWidget.define(mount)</code> 注册。同一 bundle URL 全局只加载一次</p>
+<p>（模块级缓存 + 串行加载队列）；<code>?v=</code> 参数做缓存破坏，重新导入后自动生效。</p>
+
+<h3 id="11132-组件契约apiversion-1">11.13.2 组件契约（apiVersion 1）</h3>
+
+<pre><code class="language-ts">type NodeWidgetMount = (el: HTMLElement, props: NodeWidgetProps) =&gt; NodeWidgetHandle | void
+
+interface NodeWidgetHandle {
+  update?: (props: NodeWidgetProps) =&gt; void   // 数据变化时调用（整体推送，不做 diff）
+  unmount?: () =&gt; void                        // 节点卸载时调用
+}
+
+interface NodeWidgetProps {
+  nodeId: string                // pipeline 中的节点实例 ID
+  nodeRef: string               // 节点包名
+  status: 'idle' | 'running' | 'success' | 'failed' | 'skipped'
+  inputs: string[]              // 节点入参参数名
+  outputs: Record&lt;string, string&gt;  // 节点运行时输出
+  params: Record&lt;string, string&gt;   // 节点实例当前参数绑定（config.params）：
+                                   // 常量或 {{ 上游.输出 }} 模板，原样下发
+  paramSources?: Record&lt;string, NodeWidgetParamSource&gt;
+                                  // 各参数绑定的来源标注（键与 params 对应），Studio 解析
+                                  // pipeline YAML 后下发；可选字段，旧版 Studio 不下发，
+                                  // 组件需判空并回退展示 params 原始绑定串
+  onParamsChange?: (params: Record&lt;string, string&gt;) =&gt; void
+                                  // 参数写回：全量替换该节点的 config.params（传 {} 清空），
+                                  // Studio 写回 pipeline YAML 并防抖持久化；回放态（执行快照）
+                                  // 下为 undefined，组件调用前需判空进入只读模式
+  execution: {                  // 流水线执行实例实时 metadata（SSE 驱动）；无运行实例时为 null
+    id: string
+    status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
+    trigger?: string
+    startedAt?: string
+    completedAt?: string
+    durationMs?: number
+    errorMessage?: string
+    errorNodeId?: string
+    metadata?: Record&lt;string, unknown&gt;
+  } | null
+  theme: 'dark'                 // 预留
+  locale: string                // 预留
+}
+
+// 参数绑定来源（paramSources 的值类型）
+interface NodeWidgetParamSource {
+  kind: 'pipeline' | 'node' | 'literal'
+  paramName?: string    // kind=pipeline：流水线参数名（YAML Param 区键名）
+  paramValue?: string   // kind=pipeline：流水线参数当前值（随参数面板编辑实时更新；未定义时缺省）
+  nodeId?: string       // kind=node：被引用的上游节点实例 ID
+  nodeName?: string     // kind=node：被引用节点显示名（Nodes.&lt;id&gt;.name，缺省时回退 nodeId）
+  field?: string        // kind=node：引用的输出字段名
+  runtimeValue?: string // kind=node：上游节点运行时输出值（执行中/回放有数据时下发）
+}</code></pre>
+
+<p>组件的交互能力仅限于 <code>onParamsChange</code>：可渲染任意参数调整控件（滑杆、下拉等），</p>
+<p>调整后把完整参数表回传 Studio。组件不暴露认证 token 与 Studio 其他内部能力。</p>
+
+<p>类型定义与 React 开发模板见 <code>templates/node-widget/</code>（Vite 单文件构建）；免构建</p>
+<p>原生 DOM 示例见 <code>tests/e2e/testdata/ui-demo-node/ui/node-widget.js</code>。</p>
+
+<h3 id="11133-安全说明">11.13.3 安全说明</h3>
+
+<p>module 模式本质是在 Studio 前端上下文执行节点包携带的任意 JS（可访问</p>
+<p>localStorage、auth token、Studio 内部状态），<strong>只应导入可信来源的节点包</strong>。</p>
+<p>节点详情弹窗对含自定义 UI 的节点有明确标记。前端对加载/mount/update/unmount</p>
+<p>各阶段做 try/catch 兜底：失败时内嵌区域显示警示条，不影响节点卡片其余部分。</p>
+
+<h3 id="11134-前端渲染细节">11.13.4 前端渲染细节</h3>
+
+<ul>
+<li><code>ModuleNodeWidget</code>（<code>web/src/components/ModuleNodeWidget.tsx</code>）：加载缓存、</li>
+</ul>
+<p>  挂载句柄管理、错误兜底；容器带 <code>nodrag nowheel</code> class 防止画布拖拽/滚轮误触</p>
+<ul>
+<li><code>GlowNode</code>：有 <code>ui</code> 的节点按 <code>ui.width/height</code> 撑开卡片；桌面端原生“入参/返回”</li>
+</ul>
+<p>  摘要折叠为「查看数据」开关；移动端组件按 <code>ui.collapsed</code> 默认收起</p>
+<ul>
+<li><code>AutoLayout</code>（dagre）：带 ui 节点按组件尺寸动态计算占位</li>
+<li><code>NodeTestPanel</code>：提供「UI 预览」，用 Mock 测试的真实输出渲染组件</li>
+</ul>
+<h2 id="1114-节点文件资产存储assets-store2026-08-30-起">11.14 节点文件资产存储（assets store，2026-08-30 起）</h2>
+
+<p>节点文件内容<strong>不存数据库</strong>（迁移 009 已删除 <code>nodes.files</code> 列），统一落盘到资产库：</p>
+
+<pre><code>&lt;data.dir&gt;/assets/nodes/&lt;name&gt;@&lt;version&gt;/&lt;包内相对路径&gt;</code></pre>
+
+<ul>
+<li>导入时（<code>node_import.go</code>）原子写入资产目录（临时目录 + rename），DB 只存索引</li>
+</ul>
+<p>  <code>nodes.file_assets</code>（迁移 008）：<code>path -&gt; { sha256, size, contentType, kind }</code>；</p>
+<p>  入口文件也以 <code>runtime</code> 类入资产库</p>
+<ul>
+<li><code>kind</code> 为 <code>runtime</code>（<code>pkg.files</code> 中的运行时依赖与入口）或 <code>ui</code>（<code>ui/</code> 前缀或 <code>ui.entry</code>）</li>
+<li>UI serving（<code>/api/v1/nodes/:id/ui/*</code>）从资产目录字节流返回，<strong>二进制安全</strong></li>
+</ul>
+<p>  （此前 JSON/TEXT 通道会把非法 UTF-8 替换为 U+FFFD）</p>
+<ul>
+<li>Mock 测试通过 <code>NodeService.LoadRuntimeFiles</code> 从资产库读取 runtime 文件物化到沙箱</li>
+<li>删除节点时清理对应资产目录；启动时 GC 清理无引用目录（见 11.15 末）</li>
+<li><code>backup create</code> 会配套生成 <code>&lt;name&gt;.assets.tar.gz</code>（整个 assets 目录），</li>
+</ul>
+<p>  <code>backup restore --file x.db</code> 时若旁边存在 <code>x.assets.tar.gz</code> 会自动一并恢复</p>
+<p>  （现有 assets 目录先改名为 <code>assets.pre-restore-&lt;时间戳&gt;</code> 保留回滚副本）</p>
+
+<h2 id="1115-展开器资产引导与独立工作目录p2p32026-08-30-起">11.15 展开器资产引导与独立工作目录（P2/P3，2026-08-30 起）</h2>
+
+<p>运行时展开（<code>node_expander.go</code>）生成的脚本结构：</p>
+
+<ol>
+<li><strong>独立工作目录</strong>：<code>mktemp -d</code> 创建临时目录 + <code>trap rm -rf EXIT</code> 清理 + <code>cd</code> 进入，</li>
+</ol>
+<p>   不再往执行器（server 进程）cwd 散落文件</p>
+<ol>
+<li><strong>env 注入</strong>（不变，含 <code>config.params</code> 接线替换）</li>
+<li><strong>文件物化</strong>三条路径：</li>
+<li><em>cp 引导</em>（local 执行器 + 节点已入资产库）：导出 <code>FLOWX_ASSETS_DIR</code>，</li>
+</ol>
+<p>     用 <code>cp "$FLOWX_ASSETS_DIR/&lt;rel&gt;" &lt;rel&gt;</code> 物化入口与 runtime 资产（子目录自动 mkdir）。</p>
+<p>     脚本体积恒定 ~1KB，不受 argv 上限约束；二进制安全；入口代码中的 <code>{{ }}</code></p>
+<p>     不再经模板渲染，根除误伤</p>
+<ul>
+<li><em>HTTP 引导</em>（docker/k8s 执行器 + 已配置资产 HTTP 服务）：导出签名 URL</li>
+</ul>
+<p>     <code>FLOWX_ASSETS_URL</code>，用 <code>curl -fsSL</code>（wget 兜底）拉取。签名方案见下</p>
+<ul>
+<li><em>heredoc 内联</em>（仅纯内联节点的入口代码；带 runtime 依赖的 docker/k8s 节点</li>
+</ul>
+<p>     未配置签名服务时展开直接报错，不再静默缺文件）</p>
+<ol>
+<li><strong>执行命令</strong>（不变）</li>
+</ol>
+<h3 id="签名资产-urlp3">签名资产 URL（P3）</h3>
+
+<ul>
+<li>端点：<code>GET /api/v1/assets/nodes/&lt;name&gt;@&lt;version&gt;/&lt;path&gt;?expires=&lt;unix&gt;&amp;sig=&lt;hex&gt;</code>，</li>
+</ul>
+<p>  <strong>免认证</strong>（签名自校验），供执行器 <code>curl</code> 引导使用</p>
+<ul>
+<li>签名：HMAC-SHA256，消息为 <code>&lt;name&gt;@&lt;version&gt;\n&lt;expires&gt;</code>，密钥存于</li>
+</ul>
+<p>  <code>&lt;data.dir&gt;/asset_signing.key</code>（0600，首次启动自动生成）。节点脚本不再携带</p>
+<p>  Studio 长期 auth token</p>
+<ul>
+<li>默认有效期 30 分钟；URL 覆盖节点目录级前缀，其下任意包内文件可拉取</li>
+<li>Studio 的 HTTP base 通过 <code>assets.http_base</code> 配置（env <code>FLOWX_STUDIO_ASSETS_HTTP_BASE</code>）；</li>
+</ul>
+<p>  缺省按 <code>server.host:port</code> 推导（<code>0.0.0.0</code> 视为 <code>127.0.0.1</code>）。**跨主机/容器场景</p>
+<p>  必须显式配置为执行器网络可达的地址**，如 <code>http://192.168.1.10:8080</code></p>
+<ul>
+<li>校验失败/过期/路径穿越一律 403/404；响应带正确 Content-Type</li>
+</ul>
+<h3 id="资产-gcp4">资产 GC（P4）</h3>
+
+<p><code>NodeService.GCAssets()</code> 在 server 启动时（legacy 迁移之后）自动执行：</p>
+
+<ul>
+<li>扫描 <code>&lt;data.dir&gt;/assets/nodes/</code> 下的 <code>&lt;name&gt;@&lt;version&gt;</code> 目录，无对应节点</li>
+</ul>
+<p>  （按 name + version 匹配，空版本归一为 <code>0</code>）→ 删除</p>
+<ul>
+<li><code>Put</code> 崩溃遗留的 <code>.tmp-&lt;pid&gt;</code> 临时目录 → 删除</li>
+<li>不符合命名规则的目录（如人工放置的）→ 保留不动</li>
+<li>每次清理写入审计日志（<code>gc_assets</code>）</li>
+</ul>
+<h2 id="1116-参考资料">11.16 参考资料</h2>
 
 <ul>
 <li><code>flowx/core/config.go:113-124</code> — <code>NodeConfig</code> 结构定义</li>

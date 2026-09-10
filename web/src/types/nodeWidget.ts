@@ -13,6 +13,29 @@
 
 export type NodeWidgetStatus = 'idle' | 'running' | 'success' | 'failed' | 'skipped'
 
+/**
+ * 参数绑定来源信息。Studio 解析 pipeline YAML 后为每个 config.params 键计算，
+ * 随 props.paramSources 下发，组件可用于渲染「该值从哪来」的标注：
+ * - pipeline：{{ Param.xxx }} 引用流水线参数，附 paramName 与当前值 paramValue
+ * - node：{{ 节点ID.字段 }} 引用上游节点输出，附节点显示名与运行时值（如有）
+ * - literal：用户直接填写的字面值
+ */
+export interface NodeWidgetParamSource {
+  kind: 'pipeline' | 'node' | 'literal'
+  /** kind=pipeline：流水线参数名（YAML Param 区键名） */
+  paramName?: string
+  /** kind=pipeline：流水线参数当前值（随参数面板编辑实时更新；参数未定义时缺省） */
+  paramValue?: string
+  /** kind=node：被引用的上游节点实例 ID */
+  nodeId?: string
+  /** kind=node：被引用节点的显示名（YAML Nodes.<id>.name，未设置时缺省，组件回退 nodeId） */
+  nodeName?: string
+  /** kind=node：引用的输出字段名 */
+  field?: string
+  /** kind=node：上游节点运行时输出值（执行中/回放有数据时下发，否则缺省） */
+  runtimeValue?: string
+}
+
 /** 流水线执行实例的实时 metadata（来自 SSE 推送，无运行实例时为 null） */
 export interface NodeWidgetExecution {
   id: string
@@ -42,6 +65,11 @@ export interface NodeWidgetProps {
    * 值为常量字符串或上游引用模板（如 "{{ GetWeather.city }}"），原样下发。
    */
   params: Record<string, string>
+  /**
+   * 各参数绑定的来源信息（键与 params 对应），Studio 解析 YAML 后下发。
+   * 可选字段：旧版 Studio 不下发，组件需判空并回退到 params 原值展示。
+   */
+  paramSources?: Record<string, NodeWidgetParamSource>
   /**
    * 参数写回回调：传入完整的参数表（全量替换该节点的 config.params，
    * 传 {} 清空绑定），Studio 写回 pipeline YAML 并持久化。

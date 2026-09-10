@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Search, Plus, Tag, Code, Container, Filter, X, ChevronDown, ChevronUp } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useNodeStore } from '@/stores/nodeStore'
-import { importNode } from '@/services/nodeService'
+import { importNode, getNode } from '@/services/nodeService'
 import { useConfirm } from '@/hooks/useConfirm'
 import { toast } from '@/stores/toastStore'
 import NodeCard from '@/features/node-manager/NodeCard'
@@ -46,6 +46,9 @@ export default function NodeManagerPage() {
   const [showImportModal, setShowImportModal] = useState(false)
   const [selectedNode, setSelectedNode] = useState<NodeDefinition | null>(null)
   const [showDetailModal, setShowDetailModal] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(false)
+  // 防止快速切换节点时旧请求覆盖新节点的详情数据
+  const detailRequestId = useRef(0)
   const [showTestPanel, setShowTestPanel] = useState(false)
   const [tagsExpanded, setTagsExpanded] = useState(false)
 
@@ -79,8 +82,24 @@ export default function NodeManagerPage() {
   }
 
   const handleViewNode = (node: NodeDefinition) => {
+    // 先用列表数据打开弹窗（package 字段列表接口不回传），再拉详情补全
     setSelectedNode(node)
     setShowDetailModal(true)
+    setDetailLoading(true)
+    const requestId = ++detailRequestId.current
+    getNode(node.id)
+      .then((response) => {
+        if (requestId !== detailRequestId.current) return
+        if (response.code === 200 && response.data) {
+          setSelectedNode({ ...response.data, id: String(response.data.id) })
+        }
+      })
+      .catch(() => {
+        // 详情拉取失败时静默降级：展示列表数据，raw tab 会提示无包配置
+      })
+      .finally(() => {
+        if (requestId === detailRequestId.current) setDetailLoading(false)
+      })
   }
 
   const handleTestNode = (node: NodeDefinition) => {
@@ -316,6 +335,7 @@ export default function NodeManagerPage() {
       <NodeDetailModal
         node={selectedNode}
         isOpen={showDetailModal}
+        loading={detailLoading}
         onClose={() => {
           setShowDetailModal(false)
           setSelectedNode(null)

@@ -5,6 +5,23 @@
 
 export type NodeWidgetStatus = 'idle' | 'running' | 'success' | 'failed' | 'skipped'
 
+/** 参数绑定来源（Studio 解析 pipeline YAML 后随 props.paramSources 下发） */
+export interface NodeWidgetParamSource {
+  kind: 'pipeline' | 'node' | 'literal'
+  /** kind=pipeline：流水线参数名 */
+  paramName?: string
+  /** kind=pipeline：流水线参数当前值（随参数面板编辑实时更新） */
+  paramValue?: string
+  /** kind=node：被引用的上游节点实例 ID */
+  nodeId?: string
+  /** kind=node：被引用节点显示名（缺省回退 nodeId） */
+  nodeName?: string
+  /** kind=node：引用的输出字段名 */
+  field?: string
+  /** kind=node：上游节点运行时输出值（执行中/回放有数据时下发） */
+  runtimeValue?: string
+}
+
 export interface NodeWidgetExecution {
   id: string
   status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
@@ -25,6 +42,8 @@ export interface NodeWidgetProps {
   outputs: Record<string, string>
   /** 节点实例当前参数绑定（config.params）：常量或 {{ 上游.输出 }} 模板 */
   params: Record<string, string>
+  /** 各参数绑定来源标注（可选，旧版 Studio 不下发；键与 params 对应） */
+  paramSources?: Record<string, NodeWidgetParamSource>
   /** 全量替换该节点 config.params 并持久化；回放态为 undefined（只读），调用前判空 */
   onParamsChange?: (params: Record<string, string>) => void
   execution: NodeWidgetExecution | null

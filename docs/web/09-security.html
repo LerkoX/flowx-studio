@@ -516,27 +516,38 @@ apiClient.interceptors.response.use(
 </tbody>
 </table>
 
-<h3 id="933-健康检查规划中未实现">9.3.3 健康检查（规划中，未实现）</h3>
+<h3 id="933-健康检查已实现">9.3.3 健康检查（已实现）</h3>
 
-<blockquote>⚠️ 未实现，<code>GET /api/v1/health</code> 端点不存在。以下为<strong>目标设计</strong>：</blockquote>
-
-<p>提供健康检查端点：</p>
+<p>已实现（2026-08-21，<code>internal/handler/health_handler.go</code>）：</p>
 
 <pre><code class="language-http">GET /api/v1/health</code></pre>
 
-<p><strong>响应</strong>：</p>
+<p><strong>免认证</strong>：不挂在 <code>/api/v1</code> 认证路由组下（供监控探针与 <code>server start/status</code> 守护探测使用），且不包含敏感数据。响应<strong>不套</strong>统一 <code>{code, data, message}</code> 封装：</p>
 
 <pre><code class="language-json">{
-  "status": "healthy",
-  "timestamp": "2025-01-20T10:00:00Z",
-  "version": "1.0.0",
-  "checks": {
-    "database": "ok",
-    "ai_service": "ok",
-    "disk_space": "ok"
+  "status": "ok",
+  "version": "dev",
+  "uptime_sec": 3600,
+  "db": {
+    "ok": true,
+    "size_bytes": 122880,
+    "nodes": 5,
+    "workflows": 2,
+    "executions": 12,
+    "audit_logs": 30
+  },
+  "runtime": {
+    "goroutines": 18,
+    "heap_alloc_mb": 6.4
   }
 }</code></pre>
 
+<p><strong>说明</strong>：</p>
+<ul>
+<li><code>status</code> 正常为 <code>ok</code>；任一数据库计数查询失败时降级为 <code>degraded</code>（此时 <code>db.ok=false</code>）。</li>
+<li><code>version</code> 由构建时 <code>-ldflags</code> 注入；<code>uptime_sec</code> 为进程启动以来的秒数。</li>
+<li>daemon 管理（<code>server start</code> / <code>server status</code>）的就绪探测使用此端点（<code>internal/cli/daemon.go</code>）。</li>
+</ul>
 <h2 id="94-备份与恢复">9.4 备份与恢复</h2>
 
 <h3 id="941-备份-api">9.4.1 备份 API</h3>

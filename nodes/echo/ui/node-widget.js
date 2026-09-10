@@ -3,6 +3,7 @@
  * 参数控件：message 文本输入 + sleep 滑杆；下方回显节点输出 text。
  * 契约：mount(el, props) => { update(props), unmount() }
  *   props.params — 当前 config.params 绑定（模板值只读展示）
+ *   props.paramSources — 参数绑定来源标注（可选）：pipeline=流水线参数(含当前值) / node=上游节点(含显示名与运行时值) / literal=字面值
  *   props.onParamsChange(params) — 全量写回该节点参数（回放态缺省 = 控件只读）
  */
 
@@ -25,10 +26,6 @@ function h(tag, style, text) {
 }
 
 const isWired = (v) => typeof v === 'string' && v.indexOf('{{') >= 0
-
-function wiredChip(v) {
-  return h('div', 'font-size:10px;color:rgba(165,180,252,0.75);font-family:ui-monospace,Menlo,monospace;background:rgba(99,102,241,0.10);border:1px solid rgba(99,102,241,0.22);border-radius:6px;padding:3px 7px;word-break:break-all', '⟵ ' + v)
-}
 
 export default function mount(container, props) {
   container.style.cssText = [
@@ -55,6 +52,55 @@ export default function mount(container, props) {
     cur.onParamsChange(params)
   }
 
+  // wired 参数控件（{{ ... }} 绑定）：来源标签 + 可编辑文本框。
+  // 来源标签优先取 props.paramSources（Studio 解析 YAML 下发）：
+  //   pipeline → "⚡ 流水线参数 · name = 当前值"（随参数面板实时更新）
+  //   node     → "🔗 节点显示名 · field = 运行时值"（执行中/回放有上游输出时）
+  //   literal  → "✏️ 自定义值"（解除绑定后）；无 paramSources 时回退展示原始绑定串。
+  // 输入普通值 = 解除绑定；输入 {{ Param.xxx }} / {{ 节点.字段 }} = 重新绑定。
+  const WIRED_INPUT_CSS = 'width:100%;background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.25);border-radius:6px;padding:4px 7px;font-size:10px;color:rgba(165,180,252,0.95);outline:none;box-sizing:border-box;font-family:ui-monospace,Menlo,monospace'
+  const sourceCaptionOf = (key, raw) => {
+    const src = (cur.paramSources || {})[key]
+    if (src && src.kind === 'pipeline') {
+      return '⚡ 流水线参数 · ' + (src.paramName || '') + (src.paramValue !== undefined ? ' = ' + src.paramValue : '（未定义）')
+    }
+    if (src && src.kind === 'node') {
+      return '🔗 ' + (src.nodeName || src.nodeId || '') + ' · ' + (src.field || '') + (src.runtimeValue !== undefined ? ' = ' + src.runtimeValue : '')
+    }
+    if (src && src.kind === 'literal') return '✏️ 自定义值'
+    return '⟵ ' + (raw !== undefined ? raw : '')
+  }
+  const sourceCaptionColor = (key) => {
+    const src = (cur.paramSources || {})[key]
+    if (src && src.kind === 'pipeline') return 'rgba(251,191,36,0.85)'
+    if (src && src.kind === 'node') return 'rgba(34,211,238,0.8)'
+    return 'rgba(165,180,252,0.75)'
+  }
+  const wiredControl = (key, raw) => {
+    const wrap = h('div', '')
+    const caption = h('div', 'font-size:9px;margin-bottom:2px;word-break:break-all;line-height:1.4')
+    const inp = h('input', WIRED_INPUT_CSS)
+    inp.type = 'text'
+    inp.value = raw !== undefined ? raw : ''
+    inp.spellcheck = false
+    inp.title = '参数绑定：输入普通值解除绑定；输入 {{ Param.xxx }} 或 {{ 节点.字段 }} 重新绑定'
+    inp.addEventListener('change', () => setParam(key, inp.value.trim()))
+    const sync = () => {
+      caption.textContent = sourceCaptionOf(key, (cur.params || {})[key])
+      caption.style.color = sourceCaptionColor(key)
+      inp.disabled = !editable()
+      inp.style.opacity = editable() ? '1' : '0.7'
+      if (document.activeElement !== inp) {
+        const nv = (cur.params || {})[key]
+        inp.value = nv !== undefined ? nv : ''
+      }
+    }
+    sync()
+    refreshers.push(sync)
+    wrap.append(caption, inp)
+    return wrap
+  }
+
   const field = (label, control) => {
     const wrap = h('div', 'margin-bottom:6px')
     wrap.append(h('label', LABEL_CSS, label), control)
@@ -63,7 +109,7 @@ export default function mount(container, props) {
 
   const textControl = (key, placeholder) => {
     const raw = (cur.params || {})[key]
-    if (isWired(raw)) return wiredChip(raw)
+    if (isWired(raw)) return wiredControl(key, raw)
     const inp = h('input', INPUT_CSS)
     inp.type = 'text'
     inp.value = raw !== undefined ? raw : ''
@@ -81,7 +127,7 @@ export default function mount(container, props) {
 
   const sliderControl = (key, min, max, step, def, fmt) => {
     const raw = (cur.params || {})[key]
-    if (isWired(raw)) return wiredChip(raw)
+    if (isWired(raw)) return wiredControl(key, raw)
     const num = (x) => { const n = parseFloat(x); return isNaN(n) ? def : n }
     const wrap = h('div', 'display:flex;align-items:center;gap:6px')
     const sl = h('input', 'flex:1;accent-color:#818cf8;margin:0;min-width:0')

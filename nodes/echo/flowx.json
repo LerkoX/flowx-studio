@@ -12,9 +12,13 @@
   "icon": "📣",
   "language": "bash",
   "entry": "main.sh",
+  "image": "bash:5",
   "executor": {
-    "supportedTypes": ["local"],
-    "preferredType": "local"
+    "supportedTypes": [
+      "local",
+      "docker"
+    ],
+    "preferredType": "docker"
   },
   "parameters": [
     {
