@@ -100,6 +100,7 @@ func main() {
 	rootCmd.AddCommand(cli.NewBackupCmd())   // backup create/list/download/restore
 	rootCmd.AddCommand(cli.NewExecutorCmd()) // executor list/create/update/delete/set-default
 	rootCmd.AddCommand(cli.NewExecutionCmd()) // execution list/get/nodes/logs/continue
+	rootCmd.AddCommand(cli.NewYAMLCmd())      // yaml graph/nodes/get/add-node/add-edge/remove-edge（本地结构化编辑）
 
 	if err := rootCmd.Execute(); err != nil {
 		var uerr *usageError

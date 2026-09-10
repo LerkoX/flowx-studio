@@ -45,7 +45,8 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 | 导出执行的快照 YAML（独立图定义） | `flowx-studio execution yaml --id <E> > snap.yaml` |
 | 查询节点状态与返回数据 | `flowx-studio execution nodes --id <E> --json` |
 | 查询节点日志 | `flowx-studio execution logs --id <E> [--node <节点ID>] [--level error] --json` |
-| 续跑已结束的执行（可追加节点） | `flowx-studio execution continue --id <E> [--file wf.yaml] [--follow]` |
+| 续跑已结束的执行（可追加节点） | `flowx-studio execution continue --id <E> [--file wf.yaml] [--follow] [--no-run]` |
+| 结构化读/改 YAML（局部操作，避免全文进出上下文） | `flowx-studio yaml graph/nodes/get <file>`；`yaml add-node/add-edge/remove-edge <file>` |
 | 暂停运行中的执行（层边界生效） | `flowx-studio execution pause --id <E>` |
 | 恢复已暂停的执行 | `flowx-studio execution resume --id <E> [--follow]` |
 
@@ -61,7 +62,8 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 - `pipeline update` 省略的字段会保留原值（CLI 自动合并）。
 - `execution pause` / `execution resume`：暂停/恢复运行中的执行。层边界暂停——状态立即置为 `paused`，当前并发层节点执行完后挂起（不中断运行中的节点）。暂停时自动导出运行时快照，**server 重启后 resume 会从快照重建并增量续跑**（已终结节点跳过，崩溃时 RUNNING 的节点重跑）。`paused` 状态不可 `continue`
 - `execution continue` 用于已结束（success/failed/cancelled）的执行实例：不带 `--file` 时增量重跑（已终结节点跳过）；带 `--file` 时更新该执行的**运行时快照**（可追加节点）再继续运行。续跑沿用同一执行 ID，日志与节点记录追加，可通过 `execution logs/nodes/get` 查询。
-- **执行实例是独立于模板的个体**：续跑修改的是该执行的快照（DB `runtime_yaml`），不是流水线定义；前端回放态画布也按快照渲染。标准改法：`execution yaml --id <E> > snap.yaml` 导出快照 → 编辑（Graph 加边、Nodes 加节点）→ `execution continue --id <E> --file snap.yaml`。
+- **执行实例是独立于模板的个体**：续跑修改的是该执行的快照（DB `runtime_yaml`），不是流水线定义；前端回放态画布也按快照渲染。标准改法：`execution yaml --id <E> > snap.yaml` 导出快照 → 编辑（Graph 加边、Nodes 加节点）→ `execution continue --id <E> --file snap.yaml`。`--no-run` 仅更新快照不执行（后端校验并展开新节点后持久化），之后 `execution continue --id <E>`（不带 --file）按需执行新增节点。
+- **长 YAML 用 `yaml` 子命令做局部读写**（纯本地文件操作）：快照物化节点的 steps 很占篇幅，不要整份读入上下文。`yaml nodes <f>`（节点概要：id/名称/nodeRef，无 steps）、`yaml graph <f>`（仅 mermaid 接线）、`yaml get <f> <节点ID>`（单节点子树）、`yaml add-node <f> --id N --ref echo@1.1.0 [--name 名称] [--param k=v]... [--after A]`（追加编写态节点；--after 自动把 A 的出边改经新节点，含 `[*]`）、`yaml add-edge/remove-edge <f> --from A --to B`（幂等加边/按对删边）。写操作整体重编码（键按字母序、丢注释），语义无影响。
 - **快照编辑规则**：快照中已有的节点保持原样（物化形式，带 steps，展开器会跳过）；**新增节点直接写编写态**（`config.nodeRef` + `config.params`，可选 `config.executor`，无需节点级 `executor`/`steps`，展开器自动物化并复用快照中同类型的执行器条目）；`Version`/`Name` 不可变、已执行节点不可删改、`Executors` 已有条目不可改删但**允许新增**（追加 docker 等异构节点时）。
 
 ## Pipeline YAML 最小契约（无代码库时按此编写）
