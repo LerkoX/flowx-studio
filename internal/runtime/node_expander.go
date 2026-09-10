@@ -484,6 +484,12 @@ func ensureExecutorTypeAllowed(nodeName string, pkg *model.NodePackage, execType
 // addRegisteredExecutor 把注册实例写入 Executors；容器执行器在镜像不一致时复制配置
 // 并合成节点专属条目，避免修改共享实例。
 func addRegisteredExecutor(node *model.Node, image string, inst *model.Executor, executors map[string]core.ExecutorConfig) string {
+	// 同名条目已存在（如续跑快照中的 local）时原样复用：快照的 Executors
+	// 只允许新增、不可改删（validateExecutorsAdditive），覆盖实例配置会导致
+	// UpdateConfig 校验报 executor cannot be modified
+	if _, exists := executors[inst.Name]; exists {
+		return inst.Name
+	}
 	if isContainerExecutor(inst.Type) && image != "" && configImage(inst.Config) != image {
 		cfg := copyExecutorConfig(inst.Config)
 		cfg["image"] = image

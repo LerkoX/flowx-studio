@@ -515,3 +515,52 @@ Nodes:
 	}
 	return &cfg
 }
+
+// 续跑快照场景：YAML 顶层 Executors 已有与注册实例同名的条目（如快照中的 local）
+// 时，展开必须原样复用该条目而不是用注册表实例配置覆盖——快照 Executors 只增
+// 不改不删（validateExecutorsAdditive），覆盖会导致 UpdateConfig 校验失败
+func TestExpandWorkflow_ExistingExecutorEntryReused(t *testing.T) {
+	node := newTestNode(&model.NodePackage{
+		Name:     "echo",
+		Language: "bash",
+		Entry:    "main.sh",
+		Executor: model.NodeExecutorConfig{Ref: "local"},
+	})
+	inst := &model.Executor{Name: "local", Type: "local",
+		Description: "注册表实例", Config: map[string]interface{}{"pty": true}}
+	wfYAML := `Name: test-wf
+Executors:
+  local:
+    type: local
+    config:
+      shell: bash
+Graph: |
+  stateDiagram-v2
+    [*] --> A
+    A --> [*]
+Nodes:
+  A:
+    config:
+      nodeRef: echo
+`
+	out, err := ExpandWorkflowConfig(wfYAML, func(name string) (*model.Node, error) {
+		return node, nil
+	}, staticResolver(map[string]*model.Executor{"local": inst}, nil))
+	if err != nil {
+		t.Fatalf("ExpandWorkflowConfig() error = %v", err)
+	}
+	var cfg core.PipelineConfig
+	if err := yaml.Unmarshal([]byte(out), &cfg); err != nil {
+		t.Fatalf("unmarshal expanded yaml: %v", err)
+	}
+	if cfg.Nodes["A"].Executor != "local" {
+		t.Errorf("node executor = %q, want local", cfg.Nodes["A"].Executor)
+	}
+	ec := cfg.Executors["local"]
+	if ec.Config["shell"] != "bash" {
+		t.Errorf("existing executors entry overwritten: %+v", ec.Config)
+	}
+	if _, leaked := ec.Config["pty"]; leaked {
+		t.Errorf("registry instance config leaked into existing entry: %+v", ec.Config)
+	}
+}
