@@ -6,6 +6,7 @@ node_modules
 /flowx-studio
 *.exe
 internal/server/web/dist
+web/dist
 
 # Go
 vendor/
