@@ -2,10 +2,8 @@ module github.com/LerkoX/flowx-studio
 
 go 1.25.0
 
-replace github.com/LerkoX/flowx => ../flowx
-
 require (
-	github.com/LerkoX/flowx v0.0.0-20260527104758-c693505dcf32
+	github.com/LerkoX/flowx v0.1.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/spf13/cobra v1.10.2
