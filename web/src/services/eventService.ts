@@ -7,6 +7,7 @@ export type EventHandler = (type: string, data: unknown) => void
 const KNOWN_EVENTS = [
   'execution.started',
   'execution.completed',
+  'execution.updated',
   'execution.log',
   'execution_start',
   'execution_complete',

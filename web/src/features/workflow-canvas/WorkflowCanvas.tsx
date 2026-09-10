@@ -18,6 +18,7 @@ import GradientEdge from '@/components/GradientEdge'
 import { autoLayout } from './AutoLayout'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { useExecutionStore } from '@/stores/executionStore'
+import { syncCanvasStatusesFromExecutionNodes } from './executionSelection'
 import { useNodeStore } from '@/stores/nodeStore'
 import { useIsMobile } from '@/hooks/useMediaQuery'
 import { parseWorkflowGraph, parseNodeRefs, parseNodeParams, parseParamSources } from '@/utils/mermaidParser'
@@ -576,16 +577,46 @@ function WorkflowCanvasInner({
       return
     }
 
+    if (type === 'execution.updated') {
+      // 快照被外部更新（CLI continue --no-run）：仅改图不执行。
+      // 若当前正选中该执行，刷新快照与节点记录——新增节点以 idle 入场动画出现，
+      // 状态不变（没有运行）
+      const payload = data as { execution_id?: number }
+      if (payload.execution_id) {
+        const id = String(payload.execution_id)
+        const execStore = useExecutionStore.getState()
+        if (execStore.selectedExecutionId === id) {
+          void execStore
+            .refreshExecutionContext(id)
+            .then(() => syncCanvasStatusesFromExecutionNodes())
+        }
+      }
+      return
+    }
+
     if (type === 'execution_start') {
       const payload = data as {
         execution_id?: number
         params?: Record<string, unknown>
       }
       if (payload.execution_id) {
-        useExecutionStore.getState().updateExecutionMetadata(String(payload.execution_id), {
+        const id = String(payload.execution_id)
+        useExecutionStore.getState().updateExecutionMetadata(id, {
           status: 'running',
           params: payload.params || {},
         })
+        // 续跑（CLI/API 的 continue）不产生 execution.started 事件：若当前正选中
+        // 该执行（回放态），主动刷新上下文——续跑可能已向快照追加节点，不刷新
+        // 画布仍按旧快照渲染，新增节点不显示也无动画（此前需手动刷新页面）。
+        // isExecuting 为 true 说明是本端发起的运行/续跑（execution.started 或
+        // beginContinue 已处理），跳过避免重复拉取
+        const execStore = useExecutionStore.getState()
+        if (execStore.selectedExecutionId === id && !execStore.isExecuting) {
+          execStore.beginContinue(id)
+          void execStore
+            .refreshExecutionContext(id)
+            .then(() => syncCanvasStatusesFromExecutionNodes())
+        }
       }
       return
     }
@@ -671,11 +702,20 @@ function WorkflowCanvasInner({
         metadata?: Record<string, unknown>
       }
       if (payload.execution_id) {
-        useExecutionStore.getState().updateExecutionMetadata(String(payload.execution_id), {
+        const id = String(payload.execution_id)
+        useExecutionStore.getState().updateExecutionMetadata(id, {
           status: (payload.status || 'success').toLowerCase(),
           params: payload.params || {},
           metadata: payload.metadata || {},
         })
+        // 同步顶层执行状态：续跑不走 execution.completed（点事件），仅靠本事件收尾，
+        // 不更新的话 selectedExecution.status 会一直停在 running，顶部暂停按钮残留
+        useExecutionStore
+          .getState()
+          .updateExecutionStatus(
+            id,
+            (payload.status || 'success').toLowerCase() as ExecutionStatus['status'],
+          )
         // 续跑（continue）不产生 execution.completed 事件，此处兜底结束运行态；
         // 普通运行该调用幂等（随后的 execution.completed 会重复设置，无副作用）
         useExecutionStore.getState().stopExecution()

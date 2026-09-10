@@ -39,6 +39,10 @@ interface ExecutionState {
   stopExecution: () => void
   // 续跑选中执行：仅标记运行中（保留已执行节点状态与历史日志，增量追加）
   beginContinue: (id: string) => void
+  // 续跑（CLI/API 触发，不发 execution.started）时刷新选中执行的上下文：
+  // 快照 YAML（可能已追加节点）、节点记录与执行详情。不清空现有状态，
+  // 避免回放态画布闪烁；返回时若已不再选中该执行则丢弃结果
+  refreshExecutionContext: (id: string) => Promise<void>
   updateExecutionStatus: (executionId: string, status: ExecutionStatus['status']) => void
   updateExecutionMetadata: (executionId: string, metadata: Record<string, unknown>) => void
   setExecutionNodes: (nodes: ExecutionNode[]) => void
@@ -231,6 +235,26 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
   stopExecution: () => set({ isExecuting: false, runningExecutionId: null }),
 
   beginContinue: (id) => set({ isExecuting: true, runningExecutionId: id }),
+
+  refreshExecutionContext: async (id) => {
+    try {
+      const [execResp, yamlResp] = await Promise.all([
+        getExecution(id),
+        // 快照获取失败（旧执行无快照/网络问题）不阻塞其余刷新
+        getExecutionYaml(id).catch(() => null),
+        get().loadExecutionNodes(id),
+      ])
+      if (get().selectedExecutionId !== id) return
+      if (execResp.code === 200 && execResp.data) {
+        set({ selectedExecution: normalizeExecution(execResp.data) })
+      }
+      if (yamlResp?.code === 200 && yamlResp.data?.hasSnapshot) {
+        set({ selectedExecutionYaml: yamlResp.data.yaml })
+      }
+    } catch (error) {
+      console.error('Failed to refresh execution context', error)
+    }
+  },
 
   updateExecutionStatus: (executionId, status) => {
     set((state) => {
