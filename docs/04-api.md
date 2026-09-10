@@ -554,7 +554,8 @@ POST /api/v1/executions/:id/continue
 Content-Type: application/json
 
 {
-  "yaml": "Name: my-workflow\n..."  // 可选：新的 FlowX YAML
+  "yaml": "Name: my-workflow\n...",  // 可选：新的 FlowX YAML
+  "run": true                         // 可选：false 时仅更新快照不执行（必须同时提供 yaml）
 }
 ```
 
@@ -562,6 +563,7 @@ Content-Type: application/json
 
 - 不提供 `yaml`：直接重新运行，已终结状态（SUCCESS/FAILED/CANCELLED）的节点自动跳过
 - 提供 `yaml`：先由 FlowX `UpdateConfig` 比对差异更新执行实例的图（可追加节点、修改未运行节点；`Version`/`Name` 等不可变字段必须与原配置一致，已执行节点不可删除/替换），再继续运行
+- `run: false`：仅更新快照（追加/修改未运行节点）并持久化，不触发执行；广播 `execution.updated` 事件（前端回放态画布增量刷新，新增节点以 idle 入场）。之后可再调本接口（不带 `yaml`）按需续跑
 - 续跑沿用同一执行 ID：状态回到 running，节点记录与日志追加到原实例
 - 仅影响该执行实例，不修改流水线定义（需要时用 `PUT /workflows/:id`）
 
@@ -651,7 +653,7 @@ PUT /api/v1/config/system
 | `execution get --id E` | 执行详情（含 metadata/参数） | `GET /executions/:id` |
 | `execution nodes --id E` | 节点状态与返回数据 | `GET /executions/:id/nodes` |
 | `execution logs --id E [--node X] [--level L]` | 查询执行日志 | `GET /executions/:id/logs` |
-| `execution continue --id E [--file wf.yaml] [--follow]` | 续跑已结束的执行，可追加节点 | `POST /executions/:id/continue` |
+| `execution continue --id E [--file wf.yaml] [--follow] [--no-run]` | 续跑已结束的执行，可追加节点；`--no-run` 仅更新快照不执行 | `POST /executions/:id/continue` |
 | `execution pause --id E` | 暂停运行中的执行（层边界生效） | `POST /executions/:id/pause` |
 | `execution resume --id E [--follow]` | 恢复已暂停的执行 | `POST /executions/:id/resume` |
 | `node list` | 列出节点 | `GET /nodes` |

@@ -288,6 +288,53 @@ func (s *WorkflowService) ContinueExecution(execID int64, yamlContent string) er
 	if err != nil {
 		return err
 	}
+	if err := s.updateExecutionGraph(execID, yamlContent); err != nil {
+		return err
+	}
+
+	if err := s.runtime.ContinueExecution(context.Background(), execID); err != nil {
+		return err
+	}
+
+	s.auditRecord("continue_execution", fmt.Sprintf("%d", execID),
+		fmt.Sprintf("workflow=%d yaml_updated=%v", exec.WorkflowID, yamlContent != ""))
+	return nil
+}
+
+// UpdateExecutionSnapshot 仅更新已结束执行实例的快照图（追加/修改未运行节点），不运行。
+// 更新即持久化到 executions.runtime_yaml 并广播 execution.updated（前端回放态画布
+// 增量刷新，新增节点以 idle 入场）；之后可通过 continue（不带 yaml）按需触发执行。
+func (s *WorkflowService) UpdateExecutionSnapshot(execID int64, yamlContent string) error {
+	if yamlContent == "" {
+		return fmt.Errorf("yaml is required: 仅更新快照必须提供新 YAML（execution continue --file <f> --no-run）")
+	}
+	exec, err := s.GetExecution(execID)
+	if err != nil {
+		return err
+	}
+	if err := s.updateExecutionGraph(execID, yamlContent); err != nil {
+		return err
+	}
+
+	s.eventBus.Publish(event.Event{
+		Type: "execution.updated",
+		Data: map[string]interface{}{
+			"execution_id": execID,
+			"workflow_id":  exec.WorkflowID,
+		},
+	})
+	s.auditRecord("update_execution_snapshot", fmt.Sprintf("%d", execID),
+		fmt.Sprintf("workflow=%d", exec.WorkflowID))
+	return nil
+}
+
+// updateExecutionGraph 续跑/快照更新的公共部分：状态检查 → 读快照与历史 metadata →
+// LoadExecution 重建实例 → 有 yaml 时展开+校验+UpdateConfig 比对更新图 → 持久化新快照。
+func (s *WorkflowService) updateExecutionGraph(execID int64, yamlContent string) error {
+	exec, err := s.GetExecution(execID)
+	if err != nil {
+		return err
+	}
 	switch exec.Status {
 	case "running", "pending", "paused":
 		return fmt.Errorf("execution %d is %s, cannot continue (paused executions use resume)", execID, exec.Status)
@@ -331,13 +378,6 @@ func (s *WorkflowService) ContinueExecution(execID int64, yamlContent string) er
 			s.saveRuntimeSnapshot(execID, snapshot)
 		}
 	}
-
-	if err := s.runtime.ContinueExecution(context.Background(), execID); err != nil {
-		return err
-	}
-
-	s.auditRecord("continue_execution", fmt.Sprintf("%d", execID),
-		fmt.Sprintf("workflow=%d yaml_updated=%v", exec.WorkflowID, yamlContent != ""))
 	return nil
 }
 

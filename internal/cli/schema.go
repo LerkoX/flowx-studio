@@ -57,7 +57,8 @@ var schemas = map[string]string{
   "properties": {
     "id":     {"type": "integer", "description": "执行实例 ID（必填）；仅 success/failed/cancelled 状态的实例可续跑"},
     "file":   {"type": "string", "description": "新的 FlowX YAML 文件路径，'-' 表示 stdin（可选）。提供时先比对差异更新执行实例的图（追加节点/修改未运行节点；Version/Name 等不可变字段必须与原配置一致），再增量续跑：已终结节点跳过，仅执行新增/未运行节点"},
-    "follow": {"type": "boolean", "default": false, "description": "跟随 SSE 日志流直到续跑结束"}
+    "follow": {"type": "boolean", "default": false, "description": "跟随 SSE 日志流直到续跑结束（不能与 no-run 同用）"},
+    "noRun":  {"type": "boolean", "default": false, "description": "仅更新执行实例的快照图、不立即执行（必须与 file 同用）；之后可再调用本命令（不带 file）按需续跑新增节点"}
   },
   "required": ["id"]
 }`,

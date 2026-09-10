@@ -282,6 +282,7 @@ func newExecutionContinueCmd() *cobra.Command {
 	var id int64
 	var file string
 	var follow bool
+	var noRun bool
 	cmd := &cobra.Command{
 		Use:   "continue",
 		Short: "Continue a finished execution, optionally adding/modifying nodes via a new pipeline YAML",
@@ -292,6 +293,12 @@ func newExecutionContinueCmd() *cobra.Command {
 			if id <= 0 {
 				return fmt.Errorf("--id is required. Run `flowx-studio execution continue --schema` for the parameter contract")
 			}
+			if noRun && file == "" {
+				return fmt.Errorf("--no-run requires --file: 仅更新快照必须提供新 YAML")
+			}
+			if noRun && follow {
+				return fmt.Errorf("--follow cannot be combined with --no-run: 不执行时没有日志可跟随")
+			}
 
 			body := map[string]interface{}{}
 			if file != "" {
@@ -301,6 +308,9 @@ func newExecutionContinueCmd() *cobra.Command {
 				}
 				body["yaml"] = string(raw)
 			}
+			if noRun {
+				body["run"] = false
+			}
 
 			data, err := do(cmd.Context(), http.MethodPost,
 				"/executions/"+strconv.FormatInt(id, 10)+"/continue", nil, body)
@@ -308,7 +318,12 @@ func newExecutionContinueCmd() *cobra.Command {
 				return fail("continue execution", err, false)
 			}
 			printData(data, func() {
-				fmt.Printf("Continued execution id=%d\n", id)
+				if noRun {
+					fmt.Printf("Updated execution snapshot id=%d (not running; continue later without --file to run)", id)
+					fmt.Println()
+				} else {
+					fmt.Printf("Continued execution id=%d\n", id)
+				}
 			})
 
 			if follow {
@@ -320,6 +335,7 @@ func newExecutionContinueCmd() *cobra.Command {
 	cmd.Flags().Int64Var(&id, "id", 0, "execution ID (required)")
 	cmd.Flags().StringVar(&file, "file", "", "new pipeline YAML ('-' for stdin) to update the graph before continuing; finished nodes are skipped, only new/unrun nodes execute")
 	cmd.Flags().BoolVar(&follow, "follow", false, "follow the SSE log stream until the execution finishes")
+	cmd.Flags().BoolVar(&noRun, "no-run", false, "only update the execution snapshot (requires --file), do not run; continue later without --file to execute the new nodes")
 	return cmd
 }
 
