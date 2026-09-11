@@ -4,9 +4,7 @@ import (
 	"fmt"
 	"path"
 	"reflect"
-	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/LerkoX/flowx-studio/internal/model"
@@ -16,8 +14,9 @@ import (
 
 // ExpandNodeToConfig 将 model.Node 展开为 flowx 核心的 NodeConfig
 // paramBindings 为 workflow YAML 中 config.params 提供的参数绑定（接线）：
-// 值可以是常量，也可以是引用本流水线中上游节点实例的模板（如 {{ GetWeather.city }}），
-// 绑定值会替换节点包 env/run 模板中的 {{ Param.<name> }} 引用。
+// 值可以是常量，也可以是引用 workflow 级 Param / 上游节点输出的模板
+//（如 {{ Param.project_dir }}/backend、{{ GetWeather.city }}）。
+// 绑定与节点包 env 模板原样写入物化节点的 params/env，由 dag 运行时统一渲染。
 func ExpandNodeToConfig(node *model.Node, paramBindings ...map[string]string) (*core.NodeConfig, error) {
 	return expandNodeWithExecutorType(node, "", paramBindings...)
 }
@@ -67,12 +66,10 @@ func expandNodeWithExecutorType(node *model.Node, executorTypeOverride string, p
 	runScript.WriteString("trap 'rm -rf \"$FLOWX_WORK_DIR\"' EXIT\n")
 	runScript.WriteString("cd \"$FLOWX_WORK_DIR\" || exit 1\n")
 
-	// 环境变量注入
+	// 环境变量不再拼接 export 行进脚本：模板原样写入物化节点的 env，
+	// 由 dag 在节点作用域（params 绑定优先）渲染后，经执行器以真实进程
+	// 环境变量注入——不经 shell 解析，值中的引号/换行/特殊字符天然安全
 	envMap := buildEnvMap(node, pkg)
-	for _, key := range sortedKeys(envMap) {
-		template := applyParamBindings(envMap[key], bindings)
-		fmt.Fprintf(&runScript, "export %s=\"%s\"\n", key, template)
-	}
 
 	// 资产引导三条路径：
 	//  1. local 执行器 + 资产库：cp 物化（脚本体积恒定，二进制安全）
@@ -125,7 +122,7 @@ func expandNodeWithExecutorType(node *model.Node, executorTypeOverride string, p
 	if cmd == "" {
 		return nil, fmt.Errorf("cannot determine run command for node %s", node.Name)
 	}
-	cmd = applyParamBindings(cmd, bindings)
+	// run 命令模板原样保留 {{ Param.x }} 引用，dag 运行时统一渲染
 	runScript.WriteString(cmd)
 	if !strings.HasSuffix(cmd, "\n") {
 		runScript.WriteString("\n")
@@ -138,9 +135,13 @@ func expandNodeWithExecutorType(node *model.Node, executorTypeOverride string, p
 	}
 	if len(bindings) > 0 {
 		// 保留原始参数绑定（常量或 {{ 上游.输出 }} 模板原样）：快照导出后
-		// 供前端回放态展示节点参数。物化节点带 steps，续跑时跳过重展开，
-		// 不参与 validateBindings 校验，无副作用
+		// 供前端回放态展示节点参数；dag 渲染本节点模板时以此作为节点级
+		// 参数作用域（优先于 workflow 级 Param），运行时统一求值
 		nodeConfig["params"] = bindings
+	}
+	if len(envMap) > 0 {
+		// 节点包 env 模板原样下发，dag 渲染后经执行器真实注入（见上）
+		nodeConfig["env"] = envMap
 	}
 
 	nodeCfg := &core.NodeConfig{
@@ -712,27 +713,4 @@ func validateBindings(pkg *model.NodePackage, bindings map[string]string) error 
 	return nil
 }
 
-// applyParamBindings 将模板中的 {{ Param.<name> ... }} 引用替换为 workflow 层提供的绑定值。
-// 绑定值若是完整模板（{{ GetWeather.city }}），取其内部表达式并保留后续过滤器；
-// 若是常量，则转为字符串字面量。未绑定的参数保留 {{ Param.<name> }} 引用，
-// 运行时由 workflow 级 Param / 运行时参数解析。
-func applyParamBindings(tmpl string, bindings map[string]string) string {
-	if tmpl == "" || len(bindings) == 0 {
-		return tmpl
-	}
-	for name, bound := range bindings {
-		inner := bindingInnerExpr(bound)
-		re := regexp.MustCompile(`Param\.` + regexp.QuoteMeta(name) + `($|[^a-zA-Z0-9_-])`)
-		tmpl = re.ReplaceAllString(tmpl, inner+`$1`)
-	}
-	return tmpl
-}
 
-// bindingInnerExpr 提取绑定值的模板内部表达式；常量转为字符串字面量
-func bindingInnerExpr(v string) string {
-	t := strings.TrimSpace(v)
-	if strings.HasPrefix(t, "{{") && strings.HasSuffix(t, "}}") {
-		return strings.TrimSpace(t[2 : len(t)-2])
-	}
-	return strconv.Quote(v)
-}

@@ -51,22 +51,28 @@ func TestExpandNodeToConfig_ParamBindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expand failed: %v", err)
 	}
-	run := cfg.Steps[0].Run
 
-	// 上游节点绑定被内联，且保留过滤器
-	if !strings.Contains(run, `export WEATHER_CITY="{{ GetWeather.city }}"`) {
-		t.Errorf("expected inlined GetWeather.city binding, run:\n%s", run)
+	// 新模型：env 模板与 params 绑定原样下发（含过滤器），不再拼接到脚本，
+	// 由 dag 运行时在节点作用域统一渲染后经执行器真实注入
+	env, _ := cfg.Config["env"].(map[string]string)
+	if env["WEATHER_CITY"] != "{{ Param.weatherCity }}" {
+		t.Errorf("env template should be verbatim, got %v", env["WEATHER_CITY"])
 	}
-	if !strings.Contains(run, `export WEATHER_FORECASTS="{{ GetWeather.forecasts | toYaml }}"`) {
-		t.Errorf("expected filter preserved after binding, run:\n%s", run)
+	if env["WEATHER_FORECASTS"] != "{{ Param.weatherForecasts | toYaml }}" {
+		t.Errorf("env template filter should be preserved verbatim, got %v", env["WEATHER_FORECASTS"])
 	}
-	// 常量绑定转为字符串字面量
-	if !strings.Contains(run, `--title '{{ "每日播报" }}'`) {
-		t.Errorf("expected constant binding as string literal, run:\n%s", run)
+	params, _ := cfg.Config["params"].(map[string]string)
+	if params["weatherCity"] != "{{ GetWeather.city }}" || params["title"] != "每日播报" {
+		t.Errorf("bindings should be verbatim, got %v", params)
 	}
-	// 未绑定的参数保留 Param 引用，运行时由 workflow 级 Param 解析
-	if !strings.Contains(run, `export FEISHU_APP_ID="{{ Param.feishuAppId }}"`) {
-		t.Errorf("expected unbound param kept as Param reference, run:\n%s", run)
+	run := cfg.Steps[0].Run
+	// run 命令模板原样保留 Param 引用
+	if !strings.Contains(run, `--title '{{ Param.title }}'`) {
+		t.Errorf("run command template should keep Param reference, run:\n%s", run)
+	}
+	// 脚本中不再出现 export 拼接
+	if strings.Contains(run, "export WEATHER_CITY") {
+		t.Errorf("env should not be spliced into script as export lines, run:\n%s", run)
 	}
 }
 
@@ -104,8 +110,10 @@ func TestExpandNodeToConfig_NoBindingsKeepsParamRef(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expand failed: %v", err)
 	}
-	if !strings.Contains(cfg.Steps[0].Run, `export WEATHER_CITY="{{ Param.city }}"`) {
-		t.Errorf("expected Param reference kept, run:\n%s", cfg.Steps[0].Run)
+	// env 模板原样下发，未绑定的 Param 引用由运行时回退到 workflow 级 Param 解析
+	env, _ := cfg.Config["env"].(map[string]string)
+	if env["WEATHER_CITY"] != "{{ Param.city }}" {
+		t.Errorf("expected Param reference kept verbatim, got %v", env["WEATHER_CITY"])
 	}
 }
 
@@ -329,3 +337,4 @@ func TestExpandNodeToConfig_MaterializedConfigPreservesBindings(t *testing.T) {
 		t.Errorf("config.params should be absent without bindings, got %v", cfg2.Config["params"])
 	}
 }
+

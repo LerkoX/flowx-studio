@@ -378,8 +378,8 @@ DownloadImage:
 
 展开规则：
 
-1. 生成 `export` 环境变量注入行（见 [11.7 节](#117-参数注入规则)）；若 workflow YAML 的节点 `config.params` 提供了绑定，先将 env/run 中的 `Param.<name>` 引用替换为绑定值（保留过滤器）
-2. 追加 `run` 命令；若未指定 `run`，则按 `language + entry` 生成默认命令
+1. 节点包 `env` 与 workflow 层 `config.params` 绑定**原样**写入物化节点的 `config.env` / `config.params`（模板不求值，见 [11.7 节](#117-参数注入规则)）；dag 运行时在节点作用域统一渲染后，由执行器以真实进程环境变量注入（不经 shell 解析）
+2. 追加 `run` 命令（模板原样保留）；若未指定 `run`，则按 `language + entry` 生成默认命令
 3. 将 `entry` 和 `files` 写入执行器工作目录
 4. 透传 `image` 和 `executor.config`
 5. 透传 `extract` 配置
@@ -389,6 +389,8 @@ DownloadImage:
 ## 11.7 参数注入规则
 
 参数注入优先使用 `env`，其次使用 `run` 模板，最后回退到默认 `FLOWX_PARAM_*` 环境变量。
+
+**渲染模型（2026-09 重构）**：模板渲染只发生在 flowx 引擎一处（dag 运行时），studio 展开器不再做任何模板拼接。展开时 env 模板与 params 绑定原样写入物化节点；执行节点时 dag 构建「节点级参数作用域」——`{{ Param.<name>` 优先解析到该节点的 `config.params` 绑定（绑定值本身是模板则先在 workflow 上下文求值），未绑定的回退到 workflow 级 `Param`。渲染后的 env 终值由执行器以真实进程环境变量注入（local/docker 原生支持；kubernetes exec 不支持命令级 env，在命令前拼接单引号转义的 export 行兜底），**不经 shell 解析，值中的引号/换行/特殊字符天然安全**。
 
 **核心约束：flowx.json 中的 `env`/`run` 模板只允许引用 `{{ Param.* }}` 或常量字面量，禁止引用上游节点实例 ID**（如 `{{ GetWeather.city }}`）。原因：
 
@@ -408,13 +410,6 @@ DownloadImage:
 }
 ```
 
-展开后：
-
-```bash
-export URL="<求值后的 Param.url>"
-export TIMEOUT="<求值后的 Param.timeout>"
-```
-
 `env` 的值支持的模板表达式：
 
 - `{{ Param.name }}`：节点参数（**唯一允许的变量来源**），可接过滤器，如 `{{ Param.forecasts | toYaml }}`
@@ -432,13 +427,15 @@ export TIMEOUT="<求值后的 Param.timeout>"
 "run": "python3 main.py --url '{{ Param.url }}'"
 ```
 
+注意：`run` 命令本身仍是 shell 文本，模板渲染值会原样拼入——若参数值可能包含引号/空格/特殊字符，应改用 `env` 传递（真实进程环境变量，无 shell 解析问题），不要在 `run` 里拼接不可信值。
+
 ### 规则 3：默认 env 回退
 
 如果 `env` 未定义，则为每个 `parameter` 自动生成默认环境变量：
 
-```bash
-export FLOWX_PARAM_URL="<值>"
-export FLOWX_PARAM_TIMEOUT="<值>"
+```
+FLOWX_PARAM_URL={{ Param.url }}
+FLOWX_PARAM_TIMEOUT={{ Param.timeout }}
 ```
 
 注意：`NodeService.MockTest`（`internal/service/node.go`）同样以 `FLOWX_PARAM_` 前缀注入环境变量，并额外保留裸大写参数名（如 `URL`）作为兼容别名——Mock 与运行时展开的变量名已统一（2026-08-17 修复）。
@@ -475,11 +472,11 @@ Nodes:
         weatherForecasts: "{{ GetWeather.forecasts }}"
 ```
 
-展开规则（`internal/runtime/node_expander.go` 的 `applyParamBindings`）：
+展开规则（`internal/runtime/node_expander.go`）：
 
-1. 绑定值是模板（`{{ GetWeather.city }}`）时，取其内部表达式替换 env/run 中的 `Param.<name>` 引用，**保留后续过滤器**：`{{ Param.weatherForecasts | toYaml }}` → `{{ GetWeather.forecasts | toYaml }}`；替换后的模板在节点执行时以完整上下文渲染，上游输出正常解析
-2. 绑定值是常量时，替换为字符串字面量：`{{ Param.title }}` → `{{ "每日播报" }}`
-3. 未在 `config.params` 中绑定的参数保留 `{{ Param.<name> }}` 引用，运行时由 workflow 级 `Param` / `workflow run --params` 解析
+1. 绑定值**原样**写入物化节点的 `config.params`，装配期不做任何模板替换；执行该节点时 dag 构建节点级参数作用域：`{{ Param.<name>` 优先解析到绑定，未绑定的回退 workflow 级 `Param` / `workflow run --params`
+2. 绑定值本身可以是任意模板——完整引用（`{{ GetWeather.city }}`）或**嵌入片段**（`{{ Param.project_dir }}/backend`），先在 workflow 上下文求值再代入；env 模板侧的过滤器（如 `{{ Param.weatherForecasts | toYaml }}`）在渲染时正常生效
+3. 绑定值模板中的 `Param.x` 引用一律指向 workflow 级 `Param`（绑定之间不互相引用，无循环问题）
 4. 绑定未声明的参数名会在展开时报错（`config.params references undeclared parameter ...`）
 
 编排者（人或 AI）可依据参数上的 `source` 提示（`nodeRef` 节点包名 + `output` 输出字段）找到 workflow 中对应节点包的实例，生成上述 `params` 绑定。
