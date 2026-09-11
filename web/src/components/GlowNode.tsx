@@ -12,12 +12,14 @@ import ModuleNodeWidget, { buildWidgetUrl } from '@/components/ModuleNodeWidget'
 import type { NodeWidgetExecution, NodeWidgetParamSource, NodeWidgetProps } from '@/types/nodeWidget'
 import type { NodeUIConfig } from '@/types/node'
 import type { ExecutionStatus } from '@/types/execution'
+import type { NodeWidgetStatus } from '@/types/nodeWidget'
 
 interface GlowNodeData {
   id: string
   name: string
   description?: string
-  status: 'idle' | 'running' | 'success' | 'failed' | 'skipped'
+  /** 节点状态；回放态直接播种后端执行节点记录，可能出现 paused/cancelled/pending 等非画布态取值 */
+  status: string
   language?: string
   icon?: string
   accentColor?: string
@@ -71,7 +73,11 @@ const statusConfig = {
 const GlowNode = memo(({ data, selected }: NodeProps) => {
   const { t } = useTranslation()
   const nodeData = data as unknown as GlowNodeData
-  const { name, description, status, language, accentColor = '#6366f1' } = nodeData
+  const { name, description, language, accentColor = '#6366f1' } = nodeData
+  // 未知状态（如后端执行节点记录的 paused/cancelled/pending）回退为 idle，避免渲染崩溃
+  const status = (
+    nodeData.status && nodeData.status in statusConfig ? nodeData.status : 'idle'
+  ) as NodeWidgetStatus
   const config = statusConfig[status]
   const isMobile = useIsMobile()
 
