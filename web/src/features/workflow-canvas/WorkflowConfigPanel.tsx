@@ -11,7 +11,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { toast } from '@/stores/toastStore'
 import { updateWorkflow } from '@/services/workflowService'
 import i18n from '@/i18n'
-import type { PipelineParam, Workflow } from '@/types/workflow'
+import type { WorkflowParam, Workflow } from '@/types/workflow'
 import type { ExecutionStatus } from '@/types/execution'
 
 interface WorkflowConfigPanelProps {
@@ -138,7 +138,7 @@ export default function WorkflowConfigPanel({ view }: WorkflowConfigPanelProps) 
       className="space-y-4"
     >
       <div className="flex items-center justify-between">
-        <h3 className="text-white/90 font-semibold text-sm">{t('canvas.pipelineParams')}</h3>
+        <h3 className="text-white/90 font-semibold text-sm">{t('canvas.workflowParams')}</h3>
         <div className="flex gap-2">
           <button
             onClick={handleReset}
@@ -193,7 +193,7 @@ function ParamField({
   editingValue,
   onChange,
 }: {
-  param: PipelineParam
+  param: WorkflowParam
   editingValue: string
   onChange: (value: string) => void
 }) {

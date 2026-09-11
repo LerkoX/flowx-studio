@@ -25,8 +25,8 @@
 
 | # | 目的 | 命令 | 预期 |
 |---|------|------|------|
-| 1.1 | 命令树可用 | `flowx-studio --help` | 退出 0，输出含 `server`、`pipeline`、`node`、`version` |
-| 1.2 | 参数契约可解析 | `flowx-studio pipeline create --schema` | 退出 0，stdout 是合法 JSON 且含 `"required"` |
+| 1.1 | 命令树可用 | `flowx-studio --help` | 退出 0，输出含 `server`、`workflow`、`node`、`version` |
+| 1.2 | 参数契约可解析 | `flowx-studio workflow create --schema` | 退出 0，stdout 是合法 JSON 且含 `"required"` |
 | 1.3 | 版本输出 | `flowx-studio version` | 退出 0，输出含 `flowx-studio` |
 
 ### 12.3.2 server 生命周期
@@ -59,21 +59,21 @@
 
 | # | 目的 | 命令 | 预期 |
 |---|------|------|------|
-| 4.1 | 创建流水线 | `pipeline create --name e2e-wf --file wf.yaml`（单节点 echo 工作流） | 退出 0，输出含 `Created pipeline id=` |
-| 4.2 | 非法 YAML 重试指引 | `pipeline create --name bad --file bad.yaml`（缺 `Nodes`） | 退出 1，stderr 含 `Please regenerate the YAML and retry.` |
-| 4.3 | 更新合并语义 | `pipeline update --id <N> --status active`（不传 `--file`） | 退出 0；随后 `GET /workflows/<N>` 的 `yamlConfig` 保持不变 |
-| 4.4 | 列表 | `pipeline list --json` | 退出 0，含 `e2e-wf` |
-| 4.5 | 执行并跟随日志 | `pipeline run --id <N> --follow` | 退出 0，输出含节点名与 `Execution finished: SUCCESS` |
-| 4.6 | 失败执行退出码 | 创建必失败工作流（`run: exit 1`）后 `pipeline run --id <M> --follow` | 退出 1，输出含 `FAILED` |
-| 4.7 | 删除流水线 | `pipeline delete --id <N>` | 退出 0，输出含 `Deleted pipeline id=` |
+| 4.1 | 创建流水线 | `workflow create --name e2e-wf --file wf.yaml`（单节点 echo 工作流） | 退出 0，输出含 `Created workflow id=` |
+| 4.2 | 非法 YAML 重试指引 | `workflow create --name bad --file bad.yaml`（缺 `Nodes`） | 退出 1，stderr 含 `Please regenerate the YAML and retry.` |
+| 4.3 | 更新合并语义 | `workflow update --id <N> --status active`（不传 `--file`） | 退出 0；随后 `GET /workflows/<N>` 的 `yamlConfig` 保持不变 |
+| 4.4 | 列表 | `workflow list --json` | 退出 0，含 `e2e-wf` |
+| 4.5 | 执行并跟随日志 | `workflow run --id <N> --follow` | 退出 0，输出含节点名与 `Execution finished: SUCCESS` |
+| 4.6 | 失败执行退出码 | 创建必失败工作流（`run: exit 1`）后 `workflow run --id <M> --follow` | 退出 1，输出含 `FAILED` |
+| 4.7 | 删除流水线 | `workflow delete --id <N>` | 退出 0，输出含 `Deleted workflow id=` |
 
 ### 12.3.5 错误路径
 
 | # | 目的 | 命令 | 预期 |
 |---|------|------|------|
-| 6.1 | server 未启动 | 停掉 server 后 `pipeline list` | 退出 1，stderr 含 `cannot connect to server` 和 `` `flowx-studio server` `` 提示 |
-| 6.2 | 未知 flag | `pipeline list --nope` | 退出 2，stderr 含 `unknown flag` |
-| 6.3 | 缺必填参数 | `pipeline create`（无 flag） | 退出 1，stderr 提示 `--schema` |
+| 6.1 | server 未启动 | 停掉 server 后 `workflow list` | 退出 1，stderr 含 `cannot connect to server` 和 `` `flowx-studio server` `` 提示 |
+| 6.2 | 未知 flag | `workflow list --nope` | 退出 2，stderr 含 `unknown flag` |
+| 6.3 | 缺必填参数 | `workflow create`（无 flag） | 退出 1，stderr 提示 `--schema` |
 
 ### 12.3.7 审计日志
 
@@ -138,4 +138,4 @@ E2E_PORT=19099 E2E_BINARY=/path/to/flowx-studio bash tests/e2e/run.sh
 ## 12.5 维护约定
 
 - 新增 CLI 命令或改变输出格式时，必须同步更新本文档表格与 `tests/e2e/run.sh`。
-- 用例的预期文本尽量断言**稳定片段**（如 `Created pipeline id=`），不断言易变部分（时间戳、绝对路径）。
+- 用例的预期文本尽量断言**稳定片段**（如 `Created workflow id=`），不断言易变部分（时间戳、绝对路径）。

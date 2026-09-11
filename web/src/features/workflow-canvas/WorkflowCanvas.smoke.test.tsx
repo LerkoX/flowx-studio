@@ -77,7 +77,7 @@ vi.mock('@/services/workflowService', () => ({
     code: 200,
     data: {
       id: Number(id),
-      name: 'demo-pipeline',
+      name: 'demo-workflow',
       yamlConfig: serverYaml,
       status: 'active',
       createdAt: new Date(),
@@ -152,7 +152,7 @@ describe('WorkflowCanvas 外部更新', () => {
     // 复现列表页点击进入的场景：id 是 number 而非 string
     useWorkflowStore.getState().setCurrentWorkflow({
       id: 20,
-      name: 'demo-pipeline',
+      name: 'demo-workflow',
       yamlConfig: serverYaml,
       status: 'draft',
       createdAt: new Date(),
@@ -170,7 +170,7 @@ describe('WorkflowCanvas 外部更新', () => {
     // 顶部工具栏渲染正常
     const toolbar = container.querySelector('.absolute.top-0.inset-x-0')
     expect(toolbar, '顶部工具栏应该渲染').toBeTruthy()
-    expect(container.textContent).toContain('demo-pipeline')
+    expect(container.textContent).toContain('demo-workflow')
     // 初始只有节点 A
     expect(container.textContent).toContain('A')
     expect(container.textContent).not.toContain('B')

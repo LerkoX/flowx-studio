@@ -49,7 +49,7 @@ type executionLogJSON struct {
 func NewExecutionCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "execution",
-		Short: "Query pipeline executions (logs, node outputs, metadata) and continue finished executions",
+		Short: "Query workflow executions (logs, node outputs, metadata) and continue finished executions",
 	}
 	cmd.AddCommand(
 		newExecutionListCmd(),
@@ -101,16 +101,16 @@ func newExecutionYAMLCmd() *cobra.Command {
 }
 
 func newExecutionListCmd() *cobra.Command {
-	var pipelineID int64
+	var workflowID int64
 	var status string
 	var page, pageSize int
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List executions, optionally filtered by pipeline ID",
+		Short: "List executions, optionally filtered by workflow ID",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			q := url.Values{}
-			if pipelineID > 0 {
-				q.Set("workflow_id", strconv.FormatInt(pipelineID, 10))
+			if workflowID > 0 {
+				q.Set("workflow_id", strconv.FormatInt(workflowID, 10))
 			}
 			if status != "" {
 				q.Set("status", status)
@@ -129,7 +129,7 @@ func newExecutionListCmd() *cobra.Command {
 				}
 				_ = json.Unmarshal(data, &resp)
 				for _, e := range resp.Items {
-					fmt.Printf("id=%d pipeline=%d status=%s started=%s duration=%dms\n",
+					fmt.Printf("id=%d workflow=%d status=%s started=%s duration=%dms\n",
 						e.ID, e.WorkflowID, e.Status, e.StartedAt, e.DurationMs)
 				}
 				fmt.Printf("total=%d\n", resp.Total)
@@ -137,7 +137,7 @@ func newExecutionListCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().Int64Var(&pipelineID, "pipeline", 0, "filter by pipeline (workflow) ID")
+	cmd.Flags().Int64Var(&workflowID, "workflow", 0, "filter by workflow ID")
 	cmd.Flags().StringVar(&status, "status", "", "filter by status (running|paused|success|failed|cancelled)")
 	cmd.Flags().IntVar(&page, "page", 1, "page number")
 	cmd.Flags().IntVar(&pageSize, "page-size", 20, "page size")
@@ -161,7 +161,7 @@ func newExecutionGetCmd() *cobra.Command {
 			printData(data, func() {
 				var e executionJSON
 				_ = json.Unmarshal(data, &e)
-				fmt.Printf("id=%d pipeline=%d status=%s trigger=%s\n", e.ID, e.WorkflowID, e.Status, e.Trigger)
+				fmt.Printf("id=%d workflow=%d status=%s trigger=%s\n", e.ID, e.WorkflowID, e.Status, e.Trigger)
 				fmt.Printf("started=%s completed=%s duration=%dms\n", e.StartedAt, e.CompletedAt, e.DurationMs)
 				if e.ErrorMessage != "" {
 					fmt.Printf("error=%s (node=%s)\n", e.ErrorMessage, e.ErrorNodeID)
@@ -285,7 +285,7 @@ func newExecutionContinueCmd() *cobra.Command {
 	var noRun bool
 	cmd := &cobra.Command{
 		Use:   "continue",
-		Short: "Continue a finished execution, optionally adding/modifying nodes via a new pipeline YAML",
+		Short: "Continue a finished execution, optionally adding/modifying nodes via a new workflow YAML",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if maybePrintSchema("execution continue") {
 				return nil
@@ -304,7 +304,7 @@ func newExecutionContinueCmd() *cobra.Command {
 			if file != "" {
 				raw, err := readFileOrStdin(file)
 				if err != nil {
-					return fmt.Errorf("failed to read pipeline YAML: %w", err)
+					return fmt.Errorf("failed to read workflow YAML: %w", err)
 				}
 				body["yaml"] = string(raw)
 			}
@@ -333,7 +333,7 @@ func newExecutionContinueCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().Int64Var(&id, "id", 0, "execution ID (required)")
-	cmd.Flags().StringVar(&file, "file", "", "new pipeline YAML ('-' for stdin) to update the graph before continuing; finished nodes are skipped, only new/unrun nodes execute")
+	cmd.Flags().StringVar(&file, "file", "", "new workflow YAML ('-' for stdin) to update the graph before continuing; finished nodes are skipped, only new/unrun nodes execute")
 	cmd.Flags().BoolVar(&follow, "follow", false, "follow the SSE log stream until the execution finishes")
 	cmd.Flags().BoolVar(&noRun, "no-run", false, "only update the execution snapshot (requires --file), do not run; continue later without --file to execute the new nodes")
 	return cmd

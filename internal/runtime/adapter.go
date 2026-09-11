@@ -61,7 +61,7 @@ func (a *Adapter) OnLog(handler func(entry logger.Entry)) {
 }
 
 // ExecuteWorkflow 执行工作流。
-// 实例在完成时即从 flowx Runtime 删除；PipelineFinish 事件回调内同步导出
+// 实例在完成时即从 flowx Runtime 删除；WorkflowFinish 事件回调内同步导出
 // 运行时快照（ExportConfig）并回调 exportHandler，供上层持久化以支持无状态续跑。
 func (a *Adapter) ExecuteWorkflow(ctx context.Context, executionID int64, configYAML string) error {
 	id := fmt.Sprintf("exec-%d", executionID)
@@ -73,20 +73,20 @@ func (a *Adapter) ExecuteWorkflow(ctx context.Context, executionID int64, config
 	}
 
 	// 异步执行
-	pipeline, err := a.runtime.RunAsync(ctx, id, configYAML, listener)
+	workflow, err := a.runtime.RunAsync(ctx, id, configYAML, listener)
 	if err != nil {
 		return fmt.Errorf("failed to start workflow: %w", err)
 	}
 
-	// 将 pipeline 内部 ID 映射到 execution ID，便于日志推送器定位
-	if pipeline != nil {
-		a.logPusher.RegisterPipeline(pipeline.Id(), executionID)
+	// 将 workflow 内部 ID 映射到 execution ID，便于日志推送器定位
+	if workflow != nil {
+		a.logPusher.RegisterWorkflow(workflow.Id(), executionID)
 	}
 
 	return nil
 }
 
-// SetExportHandler 注册运行时快照导出回调（在执行完成的 PipelineFinish 事件内同步调用）
+// SetExportHandler 注册运行时快照导出回调（在执行完成的 WorkflowFinish 事件内同步调用）
 func (a *Adapter) SetExportHandler(h func(executionID int64, snapshotYAML string)) {
 	exportHandler.Store(h)
 }
@@ -104,7 +104,7 @@ func (a *Adapter) LoadExecution(ctx context.Context, executionID int64, snapshot
 		adapter:     a,
 		executionID: executionID,
 	}
-	pipeline, err := a.runtime.LoadPipeline(ctx, id, snapshotYAML, listener)
+	workflow, err := a.runtime.LoadWorkflow(ctx, id, snapshotYAML, listener)
 	if err != nil {
 		return fmt.Errorf("failed to load execution snapshot: %w", err)
 	}
@@ -119,10 +119,10 @@ func (a *Adapter) LoadExecution(ctx context.Context, executionID int64, snapshot
 		if err != nil {
 			return fmt.Errorf("failed to build metadata store: %w", err)
 		}
-		pipeline.SetMetadata(store)
+		workflow.SetMetadata(store)
 	}
 
-	a.logPusher.RegisterPipeline(pipeline.Id(), executionID)
+	a.logPusher.RegisterWorkflow(workflow.Id(), executionID)
 	return nil
 }
 
@@ -157,7 +157,7 @@ func (a *Adapter) PauseExecution(ctx context.Context, executionID int64) error {
 }
 
 // ResumeExecution 恢复已暂停的执行实例。实例在内存时直接 Resume；
-// 暂停时会导出运行时快照（见 PauseExecution 与 listener 的 PipelinePaused 分支），
+// 暂停时会导出运行时快照（见 PauseExecution 与 listener 的 WorkflowPaused 分支），
 // server 重启后可由上层从快照重建实例再 Rerun 恢复。
 func (a *Adapter) ResumeExecution(ctx context.Context, executionID int64) error {
 	id := fmt.Sprintf("exec-%d", executionID)
@@ -185,8 +185,8 @@ func (a *Adapter) CancelExecution(ctx context.Context, executionID int64) error 
 	return a.runtime.Cancel(ctx, id)
 }
 
-// GetPipelineStatus 获取流水线状态
-func (a *Adapter) GetPipelineStatus(executionID int64) (string, error) {
+// GetWorkflowStatus 获取流水线状态
+func (a *Adapter) GetWorkflowStatus(executionID int64) (string, error) {
 	id := fmt.Sprintf("exec-%d", executionID)
 	p, err := a.runtime.Get(id)
 	if err != nil {
@@ -247,10 +247,10 @@ func nodeOutputs(m dag.Metadata, nodeID string) map[string]interface{} {
 }
 
 // Handle 处理事件
-func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
+func (l *studioListener) Handle(p dag.Workflow, event dag.Event) {
 	fmt.Printf("[debug] listener exec-%d event=%s\n", l.executionID, event)
 	switch event {
-	case dag.PipelineStart:
+	case dag.WorkflowStart:
 		l.adapter.PushEvent(ExecutionEvent{
 			Type:        "execution_start",
 			ExecutionID: l.executionID,
@@ -260,7 +260,7 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 				"params": metadataToMap(p.GetParam()),
 			},
 		})
-	case dag.PipelineFinish:
+	case dag.WorkflowFinish:
 		fmt.Printf("[debug] finish-case exec-%d entered\n", l.executionID)
 		// 实例在 Run 返回后即被 RunAsync 删除，快照导出必须在事件回调内同步完成
 		if h, ok := exportHandler.Load().(func(int64, string)); ok && h != nil {
@@ -284,7 +284,7 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 				"metadata": metadataToMap(p.Metadata()),
 			},
 		})
-	case dag.PipelinePaused:
+	case dag.WorkflowPaused:
 		// 层边界暂停生效时同步导出快照（此刻当前层节点已全部终结，状态干净），
 		// 供 server 重启后从暂停点重建实例恢复运行
 		if h, ok := exportHandler.Load().(func(int64, string)); ok && h != nil {
@@ -299,14 +299,14 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 			Status:      "paused",
 			Timestamp:   time.Now(),
 		})
-	case dag.PipelineResumed:
+	case dag.WorkflowResumed:
 		l.adapter.PushEvent(ExecutionEvent{
 			Type:        "execution_resumed",
 			ExecutionID: l.executionID,
 			Status:      "running",
 			Timestamp:   time.Now(),
 		})
-	case dag.PipelineNodeStart:
+	case dag.WorkflowNodeStart:
 		node := p.CurrentNode()
 		nodeID := ""
 		if node != nil {
@@ -318,7 +318,7 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 			NodeID:      nodeID,
 			Timestamp:   time.Now(),
 		})
-	case dag.PipelineNodeFinish:
+	case dag.WorkflowNodeFinish:
 		node := p.CurrentNode()
 		nodeID := ""
 		if node != nil {
@@ -334,7 +334,7 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 				"outputs": nodeOutputs(p.Metadata(), nodeID),
 			},
 		})
-	case dag.PipelineNodeFailed:
+	case dag.WorkflowNodeFailed:
 		node := p.CurrentNode()
 		nodeID := ""
 		if node != nil {
@@ -356,11 +356,11 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 // Events 返回订阅的事件列表
 func (l *studioListener) Events() []dag.Event {
 	return []dag.Event{
-		dag.PipelineStart,
-		dag.PipelineFinish,
-		dag.PipelineNodeStart,
-		dag.PipelineNodeFinish,
-		dag.PipelineNodeFailed,
+		dag.WorkflowStart,
+		dag.WorkflowFinish,
+		dag.WorkflowNodeStart,
+		dag.WorkflowNodeFinish,
+		dag.WorkflowNodeFailed,
 	}
 }
 
@@ -368,37 +368,37 @@ func (l *studioListener) Events() []dag.Event {
 type LogPusher struct {
 	mu          sync.RWMutex
 	handlers    []func(entry logger.Entry)
-	pipelineMap map[string]int64
+	workflowMap map[string]int64
 }
 
 // NewLogPusher 创建日志推送器
 func NewLogPusher() *LogPusher {
 	return &LogPusher{
 		handlers:    make([]func(logger.Entry), 0),
-		pipelineMap: make(map[string]int64),
+		workflowMap: make(map[string]int64),
 	}
 }
 
-// RegisterPipeline 注册 pipeline ID 到 execution ID 的映射
-func (p *LogPusher) RegisterPipeline(pipelineID string, execID int64) {
+// RegisterWorkflow 注册 workflow ID 到 execution ID 的映射
+func (p *LogPusher) RegisterWorkflow(workflowID string, execID int64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.pipelineMap[pipelineID] = execID
+	p.workflowMap[workflowID] = execID
 }
 
 // Push 推送单条日志
 func (p *LogPusher) Push(ctx context.Context, entry logger.Entry) error {
 	p.mu.RLock()
-	pipelineMap := make(map[string]int64, len(p.pipelineMap))
-	for k, v := range p.pipelineMap {
-		pipelineMap[k] = v
+	workflowMap := make(map[string]int64, len(p.workflowMap))
+	for k, v := range p.workflowMap {
+		workflowMap[k] = v
 	}
 	handlers := make([]func(logger.Entry), len(p.handlers))
 	copy(handlers, p.handlers)
 	p.mu.RUnlock()
 
-	if execID, ok := pipelineMap[entry.Pipeline]; ok {
-		entry.Pipeline = fmt.Sprintf("exec-%d", execID)
+	if execID, ok := workflowMap[entry.Workflow]; ok {
+		entry.Workflow = fmt.Sprintf("exec-%d", execID)
 	}
 
 	for _, h := range handlers {
@@ -429,9 +429,9 @@ func (p *LogPusher) OnLog(handler func(entry logger.Entry)) {
 	p.handlers = append(p.handlers, handler)
 }
 
-// UnregisterPipeline 解除 pipeline ID 映射（可选）
-func (p *LogPusher) UnregisterPipeline(pipelineID string) {
+// UnregisterWorkflow 解除 workflow ID 映射（可选）
+func (p *LogPusher) UnregisterWorkflow(workflowID string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	delete(p.pipelineMap, pipelineID)
+	delete(p.workflowMap, workflowID)
 }

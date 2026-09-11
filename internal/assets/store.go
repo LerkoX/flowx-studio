@@ -81,7 +81,7 @@ func (s *Store) NodeDir(name, version string) (string, error) {
 	return filepath.Join(s.Root, name+"@"+version), nil
 }
 
-// Put 原子写入节点资产：先写临时目录再 rename，避免运行中的 pipeline 读到半截文件。
+// Put 原子写入节点资产：先写临时目录再 rename，避免运行中的 workflow 读到半截文件。
 // 返回 path -> 资产索引。files 为空时只确保目录存在。
 func (s *Store) Put(name, version string, files map[string]FileData) (map[string]model.NodeFileAsset, error) {
 	dir, err := s.NodeDir(name, version)
@@ -130,7 +130,7 @@ func (s *Store) Put(name, version string, files map[string]FileData) (map[string
 			os.RemoveAll(tmp)
 			return nil, err
 		}
-		// rename 原子生效，避免运行中的 pipeline 读到半截文件
+		// rename 原子生效，避免运行中的 workflow 读到半截文件
 		if err := os.Rename(tmp, dir); err != nil {
 			os.RemoveAll(tmp)
 			return nil, fmt.Errorf("failed to activate asset dir: %w", err)

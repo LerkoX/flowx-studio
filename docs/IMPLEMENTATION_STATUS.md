@@ -10,7 +10,7 @@
 ### 执行器实例化（Executor Registry，已落地）
 - 新增 `executors` 表（迁移 010）：命名执行器实例（`name/type/description/config/is_default`）；**local 全局限一个**（部分唯一索引）、**docker 可多实例**、全局唯一默认执行器（迁移时自动播种 `local`）。
 - `ExecutorService` + `ExecutorHandler`：`GET/POST /api/v1/executors`、`GET/PUT/DELETE /executors/:id`、`PUT /executors/:id/default`；name/type 不可变更、默认执行器禁删；config 按类型做键白名单与类型校验；写操作接审计与事件总线。
-- **portable 执行器声明**：flowx.json 推荐用 `executor.supportedTypes` + `executor.preferredType` 声明支持类型与偏好，不绑定用户环境中的实例名；pipeline YAML 可用 `config.executor` 按类型或具体实例覆盖。旧版 `executor.ref`/`executor.type` 继续兼容。运行时解析：pipeline 显式选择 → 旧版 `ref` → 旧版 `type+config` → portable 偏好/降级 → 有 `image` 归 docker / 无 `image` 用全局默认执行器。解析结果同时决定资产引导方式（local→cp，docker→签名 URL）。
+- **portable 执行器声明**：flowx.json 推荐用 `executor.supportedTypes` + `executor.preferredType` 声明支持类型与偏好，不绑定用户环境中的实例名；workflow YAML 可用 `config.executor` 按类型或具体实例覆盖。旧版 `executor.ref`/`executor.type` 继续兼容。运行时解析：workflow 显式选择 → 旧版 `ref` → 旧版 `type+config` → portable 偏好/降级 → 有 `image` 归 docker / 无 `image` 用全局默认执行器。解析结果同时决定资产引导方式（local→cp，docker→签名 URL）。
 - **k8s 暂不支持**：`executor.type: k8s/kubernetes` 导入拒绝；前端 `/executors` 移除 K8s 卡片。
 - **远程 Docker**（FlowX 核心同步增强）：docker adapter 新增 `host`/`tlsVerify`/`certPath` 配置（`tcp://…`、`ssh://user@host`），client 惰性创建，未配置 `host` 时回退 `DOCKER_HOST` 环境变量（原行为不变）；每个 docker 实例可连不同 daemon。
 - 前端 `/executors` 重写为实例管理页（真实 API 落地 + SSE 实时刷新 + 设为默认/删除），假监控面板移除；CLI 新增 `executor list/create/update/delete/set-default`（含 `--schema`）。
@@ -45,8 +45,8 @@
 
 ### 架构方向调整：MCP 服务端 → SKILL + CLI 渐进式披露（已落地）
 - 移除 `internal/mcpserver` 与 `flowx-studio mcp` 子命令，不再以 stdio MCP 服务端形式集成 AI。
-- 新增 **`internal/cli` CLI 客户端子命令**：`pipeline list/create/update/delete/run`、`node list/create/delete/import/mock`，作为 `flowx-studio server` 的 HTTP 客户端。
-- 新增 **终端交互命令** `ask` / `info`，承接原 FAP 的 `ask_input` / `show_info` 动作语义；原 FAP 的 `create_node` / `update_workflow` 由 `node create` / `pipeline update` 承接。**FAP 协议整体废弃，不再实现标签解析**。（后续调整：`ask` / `info` 已移除——对话式 Agent 可直接在会话中提问与汇报，无需 CLI 中介。）
+- 新增 **`internal/cli` CLI 客户端子命令**：`workflow list/create/update/delete/run`、`node list/create/delete/import/mock`，作为 `flowx-studio server` 的 HTTP 客户端。
+- 新增 **终端交互命令** `ask` / `info`，承接原 FAP 的 `ask_input` / `show_info` 动作语义；原 FAP 的 `create_node` / `update_workflow` 由 `node create` / `workflow update` 承接。**FAP 协议整体废弃，不再实现标签解析**。（后续调整：`ask` / `info` 已移除——对话式 Agent 可直接在会话中提问与汇报，无需 CLI 中介。）
 - 新增 **`skills/flowx-studio/SKILL.md`**：AI Agent 技能速查表；配合 CLI 的 `--help`（用法层）与 `--schema`（参数 JSON Schema 契约层）实现渐进式披露。
 - 约定：查询类子命令支持 `--json`；校验失败退出码 1、stderr 含重试指引；flag 用法错误退出码 2；`--server` flag / `FLOWX_STUDIO_SERVER_URL` 指定 server 地址。
 - 收益：所有写操作收敛到 HTTP server 单进程，Web UI 经 SSE 可实时感知 Agent 操作（旧 MCP 模式跨进程事件不可达的问题消失）。
@@ -125,7 +125,7 @@
 | 10 | 安全设计 | ✅ 已完成 | CORS + token 认证 + 请求限流 + 参数验证 + 审计日志 + Mock 代码安全校验已实现；Docker 沙箱为 V2 目标 |
 | 11 | 核心库依赖 | ✅ 已完成 | FlowX 引擎接口调研完成，replace 引用已配置 |
 | 12 | 节点包规范 | 🟡 部分实现 | `flowx.json` 导入、Mock 多文件、运行时展开已实现；工作流节点镜像执行待 FlowX 核心增强 |
-| 13 | CLI 客户端与 SKILL | ✅ 已完成 | `internal/cli`（pipeline/node/executor/execution 等）+ `skills/flowx-studio/SKILL.md` 已落地；`mcp` 子命令与 `ask`/`info` 交互命令已移除 |
+| 13 | CLI 客户端与 SKILL | ✅ 已完成 | `internal/cli`（workflow/node/executor/execution 等）+ `skills/flowx-studio/SKILL.md` 已落地；`mcp` 子命令与 `ask`/`info` 交互命令已移除 |
 
 ---
 
@@ -143,7 +143,7 @@
 - [x] 统一 API 响应格式 (`{code, data, message}`)
 - [x] `go:embed` 嵌入前端资源
 - [x] SPA fallback 到 `index.html`
-- [x] Cobra CLI（`server` / `version` 子命令 + 客户端子命令 `pipeline`/`node`/`executor`/`execution` 等；版本信息由 `-ldflags` 注入）
+- [x] Cobra CLI（`server` / `version` 子命令 + 客户端子命令 `workflow`/`node`/`executor`/`execution` 等；版本信息由 `-ldflags` 注入）
 - [x] Makefile (`build`, `run`, `clean`)
 
 #### 2. 数据模型
@@ -247,7 +247,7 @@ AI Provider（OpenAI/Anthropic/Ollama）与 AI Service 层已随架构调整全�
 
 #### 8. CLI 客户端与 SKILL（替代原 MCP 服务端）
 - [x] `internal/cli` HTTP 客户端封装（`--server` flag / `FLOWX_STUDIO_SERVER_URL`，默认 `http://127.0.0.1:8080`）
-- [x] `pipeline list / create / update / delete / run` 子命令（`run --follow` 跟随 SSE 日志）
+- [x] `workflow list / create / update / delete / run` 子命令（`run --follow` 跟随 SSE 日志）
 - [x] `node list / create / delete / import / mock` 子命令
 - [x] 全局 `--json` 机器可读输出、写命令 `--schema` 参数 JSON Schema 输出
 - [x] 校验失败退出码 1 + stderr 重试指引；flag 用法错误退出码 2
@@ -279,7 +279,7 @@ FAP 标签协议不再实现（2026-08-17 架构调整）。其动作语义由 C
 | 原 FAP 标签 | 承接方式 |
 | --- | --- |
 | `[[ACTION:create_node]]` | `flowx-studio node create --file node.yaml` |
-| `[[ACTION:update_workflow]]` | `flowx-studio pipeline update --id N --file wf.yaml` |
+| `[[ACTION:update_workflow]]` | `flowx-studio workflow update --id N --file wf.yaml` |
 | `[[ACTION:ask_input]]` | 已移除（对话式 Agent 直接在会话中提问） |
 | `[[ACTION:show_info]]` | 已移除（对话式 Agent 直接在会话中汇报） |
 
@@ -320,7 +320,7 @@ flowx-studio/
 │   │   └── event_handler.go          # SSE 事件订阅 API
 │   ├── cli/                          # CLI 客户端子命令（HTTP client）
 │   │   ├── client.go                 # HTTP 客户端封装（--server / FLOWX_STUDIO_SERVER_URL）
-│   │   ├── pipeline.go               # pipeline list/create/update/delete/run
+│   │   ├── workflow.go               # workflow list/create/update/delete/run
 │   │   ├── node.go                   # node list/create/delete/import/mock
 │   │   ├── daemon.go                 # server start/stop/status 守护管理
 │   │   ├── audit.go                  # audit list 审计日志查询

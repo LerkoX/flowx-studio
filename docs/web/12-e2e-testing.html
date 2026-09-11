@@ -120,12 +120,12 @@
 <td>1.1</td>
 <td>命令树可用</td>
 <td><code>flowx-studio --help</code></td>
-<td>退出 0，输出含 <code>server</code>、<code>pipeline</code>、<code>node</code>、<code>version</code></td>
+<td>退出 0，输出含 <code>server</code>、<code>workflow</code>、<code>node</code>、<code>version</code></td>
 </tr>
 <tr>
 <td>1.2</td>
 <td>参数契约可解析</td>
-<td><code>flowx-studio pipeline create --schema</code></td>
+<td><code>flowx-studio workflow create --schema</code></td>
 <td>退出 0，stdout 是合法 JSON 且含 <code>"required"</code></td>
 </tr>
 <tr>
@@ -268,44 +268,44 @@
 <tr>
 <td>4.1</td>
 <td>创建流水线</td>
-<td><code>pipeline create --name e2e-wf --file wf.yaml</code>（单节点 echo 工作流）</td>
-<td>退出 0，输出含 <code>Created pipeline id=</code></td>
+<td><code>workflow create --name e2e-wf --file wf.yaml</code>（单节点 echo 工作流）</td>
+<td>退出 0，输出含 <code>Created workflow id=</code></td>
 </tr>
 <tr>
 <td>4.2</td>
 <td>非法 YAML 重试指引</td>
-<td><code>pipeline create --name bad --file bad.yaml</code>（缺 <code>Nodes</code>）</td>
+<td><code>workflow create --name bad --file bad.yaml</code>（缺 <code>Nodes</code>）</td>
 <td>退出 1，stderr 含 <code>Please regenerate the YAML and retry.</code></td>
 </tr>
 <tr>
 <td>4.3</td>
 <td>更新合并语义</td>
-<td><code>pipeline update --id &lt;N&gt; --status active</code>（不传 <code>--file</code>）</td>
+<td><code>workflow update --id &lt;N&gt; --status active</code>（不传 <code>--file</code>）</td>
 <td>退出 0；随后 <code>GET /workflows/&lt;N&gt;</code> 的 <code>yamlConfig</code> 保持不变</td>
 </tr>
 <tr>
 <td>4.4</td>
 <td>列表</td>
-<td><code>pipeline list --json</code></td>
+<td><code>workflow list --json</code></td>
 <td>退出 0，含 <code>e2e-wf</code></td>
 </tr>
 <tr>
 <td>4.5</td>
 <td>执行并跟随日志</td>
-<td><code>pipeline run --id &lt;N&gt; --follow</code></td>
+<td><code>workflow run --id &lt;N&gt; --follow</code></td>
 <td>退出 0，输出含节点名与 <code>Execution finished: SUCCESS</code></td>
 </tr>
 <tr>
 <td>4.6</td>
 <td>失败执行退出码</td>
-<td>创建必失败工作流（<code>run: exit 1</code>）后 <code>pipeline run --id &lt;M&gt; --follow</code></td>
+<td>创建必失败工作流（<code>run: exit 1</code>）后 <code>workflow run --id &lt;M&gt; --follow</code></td>
 <td>退出 1，输出含 <code>FAILED</code></td>
 </tr>
 <tr>
 <td>4.7</td>
 <td>删除流水线</td>
-<td><code>pipeline delete --id &lt;N&gt;</code></td>
-<td>退出 0，输出含 <code>Deleted pipeline id=</code></td>
+<td><code>workflow delete --id &lt;N&gt;</code></td>
+<td>退出 0，输出含 <code>Deleted workflow id=</code></td>
 </tr>
 </tbody>
 </table>
@@ -325,19 +325,19 @@
 <tr>
 <td>6.1</td>
 <td>server 未启动</td>
-<td>停掉 server 后 <code>pipeline list</code></td>
+<td>停掉 server 后 <code>workflow list</code></td>
 <td>退出 1，stderr 含 <code>cannot connect to server</code> 和 `<code> </code>flowx-studio server<code> </code>` 提示</td>
 </tr>
 <tr>
 <td>6.2</td>
 <td>未知 flag</td>
-<td><code>pipeline list --nope</code></td>
+<td><code>workflow list --nope</code></td>
 <td>退出 2，stderr 含 <code>unknown flag</code></td>
 </tr>
 <tr>
 <td>6.3</td>
 <td>缺必填参数</td>
-<td><code>pipeline create</code>（无 flag）</td>
+<td><code>workflow create</code>（无 flag）</td>
 <td>退出 1，stderr 提示 <code>--schema</code></td>
 </tr>
 </tbody>
@@ -550,7 +550,7 @@ E2E_PORT=19099 E2E_BINARY=/path/to/flowx-studio bash tests/e2e/run.sh</code></pr
 
 <ul>
 <li>新增 CLI 命令或改变输出格式时，必须同步更新本文档表格与 <code>tests/e2e/run.sh</code>。</li>
-<li>用例的预期文本尽量断言<strong>稳定片段</strong>（如 <code>Created pipeline id=</code>），不断言易变部分（时间戳、绝对路径）。</li>
+<li>用例的预期文本尽量断言<strong>稳定片段</strong>（如 <code>Created workflow id=</code>），不断言易变部分（时间戳、绝对路径）。</li>
 </ul>
             </article>
         </main>

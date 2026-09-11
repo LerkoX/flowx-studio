@@ -64,7 +64,7 @@ func TestExpandNodeToConfig_ParamBindings(t *testing.T) {
 	if !strings.Contains(run, `--title '{{ "每日播报" }}'`) {
 		t.Errorf("expected constant binding as string literal, run:\n%s", run)
 	}
-	// 未绑定的参数保留 Param 引用，运行时由 pipeline 级 Param 解析
+	// 未绑定的参数保留 Param 引用，运行时由 workflow 级 Param 解析
 	if !strings.Contains(run, `export FEISHU_APP_ID="{{ Param.feishuAppId }}"`) {
 		t.Errorf("expected unbound param kept as Param reference, run:\n%s", run)
 	}

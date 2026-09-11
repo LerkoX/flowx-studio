@@ -233,7 +233,7 @@ export default function WorkflowCanvasPage() {
       : t('canvas.noNewNodes')
     : isExecuting
       ? t('canvas.executing')
-      : t('canvas.runPipeline')
+      : t('canvas.runWorkflow')
   const runButton = currentWorkflow ? (
     isMobile ? (
       <button

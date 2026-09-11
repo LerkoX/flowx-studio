@@ -7,24 +7,24 @@
  * 并在数据变化时调用返回句柄的 update()。
  *
  * 交互能力：组件可通过 props.onParamsChange 把参数调整写回当前节点实例的
- * config.params（pipeline YAML）。回放态（查看历史执行快照）下回调缺省，
+ * config.params（workflow YAML）。回放态（查看历史执行快照）下回调缺省，
  * 组件进入只读展示。除该回调外不暴露 Studio 其他能力与认证信息。
  */
 
 export type NodeWidgetStatus = 'idle' | 'running' | 'success' | 'failed' | 'skipped'
 
 /**
- * 参数绑定来源信息。Studio 解析 pipeline YAML 后为每个 config.params 键计算，
+ * 参数绑定来源信息。Studio 解析 workflow YAML 后为每个 config.params 键计算，
  * 随 props.paramSources 下发，组件可用于渲染「该值从哪来」的标注：
- * - pipeline：{{ Param.xxx }} 引用流水线参数，附 paramName 与当前值 paramValue
+ * - workflow：{{ Param.xxx }} 引用流水线参数，附 paramName 与当前值 paramValue
  * - node：{{ 节点ID.字段 }} 引用上游节点输出，附节点显示名与运行时值（如有）
  * - literal：用户直接填写的字面值
  */
 export interface NodeWidgetParamSource {
-  kind: 'pipeline' | 'node' | 'literal'
-  /** kind=pipeline：流水线参数名（YAML Param 区键名） */
+  kind: 'workflow' | 'node' | 'literal'
+  /** kind=workflow：流水线参数名（YAML Param 区键名） */
   paramName?: string
-  /** kind=pipeline：流水线参数当前值（随参数面板编辑实时更新；参数未定义时缺省） */
+  /** kind=workflow：流水线参数当前值（随参数面板编辑实时更新；参数未定义时缺省） */
   paramValue?: string
   /** kind=node：被引用的上游节点实例 ID */
   nodeId?: string
@@ -50,7 +50,7 @@ export interface NodeWidgetExecution {
 }
 
 export interface NodeWidgetProps {
-  /** pipeline 中的节点实例 ID */
+  /** workflow 中的节点实例 ID */
   nodeId: string
   /** 节点包名 */
   nodeRef: string
@@ -61,7 +61,7 @@ export interface NodeWidgetProps {
   /** 节点运行时输出 */
   outputs: Record<string, string>
   /**
-   * 节点实例当前的参数绑定（pipeline YAML 中该节点的 config.params）。
+   * 节点实例当前的参数绑定（workflow YAML 中该节点的 config.params）。
    * 值为常量字符串或上游引用模板（如 "{{ GetWeather.city }}"），原样下发。
    */
   params: Record<string, string>
@@ -72,7 +72,7 @@ export interface NodeWidgetProps {
   paramSources?: Record<string, NodeWidgetParamSource>
   /**
    * 参数写回回调：传入完整的参数表（全量替换该节点的 config.params，
-   * 传 {} 清空绑定），Studio 写回 pipeline YAML 并持久化。
+   * 传 {} 清空绑定），Studio 写回 workflow YAML 并持久化。
    * 回放态（执行快照）或画布预览（非编辑）模式下为 undefined，
    * 组件调用前需判空进入只读模式。
    */

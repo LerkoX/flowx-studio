@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Workflow, PipelineParam, NodeRuntimeData } from '@/types/workflow'
+import type { Workflow, WorkflowParam, NodeRuntimeData } from '@/types/workflow'
 import yaml from 'js-yaml'
 
 interface WorkflowState {
@@ -11,7 +11,7 @@ interface WorkflowState {
   nodeCompletedAt: Record<string, number>
   // 节点本轮启动前的上次完成时间（node_start 时从 nodeCompletedAt 快照）
   nodePrevCompletedAt: Record<string, number>
-  params: Record<string, PipelineParam>
+  params: Record<string, WorkflowParam>
   nodeRuntimeData: Record<string, NodeRuntimeData>
   setCurrentWorkflow: (workflow: Workflow | null) => void
   addWorkflow: (workflow: Workflow) => void
@@ -101,7 +101,7 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
         return
       }
       const paramMap = doc.Param as Record<string, unknown>
-      const params: Record<string, PipelineParam> = {}
+      const params: Record<string, WorkflowParam> = {}
       for (const [key, val] of Object.entries(paramMap)) {
         const parsed = parseParamValue(val)
         params[key] = {

@@ -323,8 +323,8 @@ func validateParamSource(paramName string, src *model.ParamSource) error {
 
 // validateParamOnlyTemplate 校验模板只引用 {{ Param.* }} 或常量字面量。
 // 节点包（flowx.json）不允许引用流水线中的节点实例 ID（如 {{ GetWeather.city }}），
-// 因为实例 ID 由 pipeline YAML 决定且可能变化/存在多个实例。外部数据一律通过参数传入，
-// 并在 pipeline YAML 的 config.params 中完成实际接线。
+// 因为实例 ID 由 workflow YAML 决定且可能变化/存在多个实例。外部数据一律通过参数传入，
+// 并在 workflow YAML 的 config.params 中完成实际接线。
 func validateParamOnlyTemplate(field, value string) error {
 	for _, m := range templateExprPattern.FindAllStringSubmatch(value, -1) {
 		expr := strings.TrimSpace(m[1])
@@ -341,8 +341,8 @@ func validateParamOnlyTemplate(field, value string) error {
 		if root != "Param" {
 			return fmt.Errorf(
 				"%s references %q: flowx.json templates may only reference {{ Param.<name> }} or literals, "+
-					"pipeline node instance IDs are not allowed; declare a parameter (optionally with a 'source' hint) "+
-					"and wire it in the pipeline YAML via config.params",
+					"workflow node instance IDs are not allowed; declare a parameter (optionally with a 'source' hint) "+
+					"and wire it in the workflow YAML via config.params",
 				field, root)
 		}
 	}

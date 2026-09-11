@@ -122,7 +122,7 @@ go build -o flowx-studio cmd/flowx-studio/main.go
 flowx-studio server
 
 # 流水线管理（HTTP 客户端）
-flowx-studio pipeline list|create|update|delete|run
+flowx-studio workflow list|create|update|delete|run
 
 # 节点管理（HTTP 客户端）
 flowx-studio node list|create|delete|import|mock
@@ -132,8 +132,8 @@ flowx-studio
 
 # 查看帮助与参数契约
 flowx-studio --help
-flowx-studio pipeline create --help
-flowx-studio pipeline create --schema   # 输出参数 JSON Schema
+flowx-studio workflow create --help
+flowx-studio workflow create --schema   # 输出参数 JSON Schema
 
 # 查看版本（由 -ldflags 注入 git 版本/commit/构建时间）
 flowx-studio version
@@ -142,7 +142,7 @@ flowx-studio version
 **注意**：
 - 裸运行 `flowx-studio` 不带子命令时只打印帮助，不会启动 server。
 - 客户端子命令默认连接 `http://127.0.0.1:8080`，可用 `--server` flag 或 `FLOWX_STUDIO_SERVER_URL` 环境变量覆盖；使用前需先运行 `flowx-studio server`。
-- `pipeline` 命令组有别名 `workflow`。
+- `workflow` 命令组有别名 `workflow`。
 - 运行 YAML 工作流的 CLI 功能保留在 FlowX 核心库中（`flowx run workflow.yaml`），不在 flowx-studio 中提供。
 
 ### 8.2.3 启动参数
@@ -188,7 +188,7 @@ func main() {
     rootCmd.AddCommand(serverCmd)
 
     // 客户端子命令（HTTP client，实现见 internal/cli）
-    rootCmd.AddCommand(cli.NewPipelineCmd())
+    rootCmd.AddCommand(cli.NewWorkflowCmd())
     rootCmd.AddCommand(cli.NewNodeCmd())
 
     if err := rootCmd.Execute(); err != nil {
@@ -466,13 +466,13 @@ require (
 | 工作流执行 | `Runtime.RunAsync/RunSync` | 满足 |
 | 执行取消 | `Runtime.Cancel` | 满足 |
 | 暂停/恢复 | `Runtime.Pause/Resume` | 满足 |
-| 状态查询 | `Runtime.Get(id)` + `Pipeline.Status()` | 满足 |
+| 状态查询 | `Runtime.Get(id)` + `Workflow.Status()` | 满足 |
 | 节点状态 | `Node.GetRuntimeStatus()` | 满足 |
-| 事件监听 | `dag.Listener` 接口 | 满足，`Pipeline.CurrentNode()` 已提供节点上下文 |
+| 事件监听 | `dag.Listener` 接口 | 满足，`Workflow.CurrentNode()` 已提供节点上下文 |
 | 日志捕获 | `logger.Pusher` 接口 | 满足，`Entry` 包含 Node 字段 |
 | 执行输出 | 通过 `NodeRuntimeStatus.Steps[].Output` | 满足 |
 
-**说明**：此前评估中提到的"`dag.Listener.Handle(p Pipeline, event Event)` 缺少节点上下文信息"问题已解决——FlowX 已实现 `Pipeline.CurrentNode()` 与 `Pipeline.GetParam()`，并已在 `RuntimeAdapter` 事件桥接中实际使用（`internal/runtime/adapter.go:142,152,157,169,182`）。
+**说明**：此前评估中提到的"`dag.Listener.Handle(p Workflow, event Event)` 缺少节点上下文信息"问题已解决——FlowX 已实现 `Workflow.CurrentNode()` 与 `Workflow.GetParam()`，并已在 `RuntimeAdapter` 事件桥接中实际使用（`internal/runtime/adapter.go:142,152,157,169,182`）。
 
 详见 [10-core-deps.md](./10-core-deps.md) 完整评估报告。
 
@@ -495,17 +495,17 @@ require (
 
 | 事件类型 | 来源 | 处理逻辑 |
 |----------|------|----------|
-| `execution_start` | `PipelineStart` | 记录执行开始，收集并保存渲染后参数 |
-| `node_start` | `PipelineNodeStart` | 插入/更新 `execution_nodes` 为 `running` |
-| `node_complete` | `PipelineNodeFinish/Failed` | 更新节点状态、耗时 |
-| `execution_complete` | `PipelineFinish` | 更新执行状态、耗时，保存运行时元数据 |
+| `execution_start` | `WorkflowStart` | 记录执行开始，收集并保存渲染后参数 |
+| `node_start` | `WorkflowNodeStart` | 插入/更新 `execution_nodes` 为 `running` |
+| `node_complete` | `WorkflowNodeFinish/Failed` | 更新节点状态、耗时 |
+| `execution_complete` | `WorkflowFinish` | 更新执行状态、耗时，保存运行时元数据 |
 
 ### 8.9.2 运行时元数据
 
 为了在前端“元数据”面板展示“执行时的真实信息”，`WorkflowService` 在执行生命周期中收集并持久化：
 
-- **渲染后参数**：通过 `Pipeline.GetParam()` 从 FlowX 引擎获取（FlowX 已提供该方法，`internal/runtime/adapter.go:142,152`）。
-- **运行时 metadata**：通过 `Pipeline.Metadata()` 获取节点输出、中间结果等。
+- **渲染后参数**：通过 `Workflow.GetParam()` 从 FlowX 引擎获取（FlowX 已提供该方法，`internal/runtime/adapter.go:142,152`）。
+- **运行时 metadata**：通过 `Workflow.Metadata()` 获取节点输出、中间结果等。
 - **状态 / 错误 / 耗时**：从事件和 DB 中汇总。
 
 这些数据在执行结束时合并为 JSON，保存到 `executions.metadata_json`。
@@ -532,13 +532,13 @@ require (
 
 `LogPusher` 实现 FlowX 的 `logger.Pusher` 接口，把日志 `Entry` 写入 `execution_logs` 表并推送到 SSE：
 
-- 通过 `pipelineMap` 把 FlowX pipeline 内部 ID 映射到 execution ID。
+- 通过 `workflowMap` 把 FlowX workflow 内部 ID 映射到 execution ID。
 - `Entry` 中的 `Node` 字段用于记录 `node_id` / `node_name`。
 - SSE 客户端收到 `execution.log` 事件后追加到 `executionStore.executionLog`。
 
 ### 8.9.4 单例锁与优雅关闭
 
-- 启动时写入 `~/.flowx-studio/flowx-studio.pid`，若已存在则优雅终止旧进程（仅 `server` 子命令持有锁；`pipeline`/`node` 等客户端子命令为无状态 HTTP 客户端，无需锁）。
+- 启动时写入 `~/.flowx-studio/flowx-studio.pid`，若已存在则优雅终止旧进程（仅 `server` 子命令持有锁；`workflow`/`node` 等客户端子命令为无状态 HTTP 客户端，无需锁）。
 - 收到 `SIGINT`/`SIGTERM` 后：
   1. 调用 `http.Server.Shutdown()` 关闭 HTTP 服务。
   2. 停止 FlowX Runtime 后台循环。

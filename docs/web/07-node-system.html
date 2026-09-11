@@ -428,7 +428,7 @@ type Result struct {
 
 <h3 id="741-运行时适配器与节点展开">7.4.1 运行时适配器与节点展开</h3>
 
-<p>运行时适配器为 <code>runtime.Adapter</code>（<code>internal/runtime/adapter.go</code>），包装 FlowX Runtime，提供 <code>ExecuteWorkflow</code> / <code>GetPipelineStatus</code> / <code>CancelExecution</code> / 事件通道等能力：</p>
+<p>运行时适配器为 <code>runtime.Adapter</code>（<code>internal/runtime/adapter.go</code>），包装 FlowX Runtime，提供 <code>ExecuteWorkflow</code> / <code>GetWorkflowStatus</code> / <code>CancelExecution</code> / 事件通道等能力：</p>
 
 <pre><code class="language-go">// Adapter FlowX 运行时适配器
 type Adapter struct {
@@ -438,10 +438,10 @@ type Adapter struct {
     mu        sync.RWMutex
 }
 
-// ExecuteWorkflow 通过 RunAsync 异步执行，并注册 pipeline-&gt;execution 映射
+// ExecuteWorkflow 通过 RunAsync 异步执行，并注册 workflow-&gt;execution 映射
 func (a *Adapter) ExecuteWorkflow(ctx context.Context, executionID int64, configYAML string) error</code></pre>
 
-<p>节点展开为<strong>包级函数</strong>（<code>internal/runtime/node_expander.go</code>），不是 <code>BuildPipelineConfig</code> 方法：</p>
+<p>节点展开为<strong>包级函数</strong>（<code>internal/runtime/node_expander.go</code>），不是 <code>BuildWorkflowConfig</code> 方法：</p>
 
 <pre><code class="language-go">// ExpandWorkflowConfig 展开工作流 YAML 中的 nodeRef 引用，返回展开后的 YAML
 func ExpandWorkflowConfig(configYAML string, lookup func(name string) (*model.Node, error)) (string, error)
@@ -463,13 +463,13 @@ func ExpandNodeToConfig(node *model.Node) (*core.NodeConfig, error)</code></pre>
 <p><strong>执行器解析（nodeRef 展开）</strong>：节点展开时对每个 nodeRef 节点按下述规则确定执行器（<code>node_expander.go</code> 的 <code>resolveNodeExecutor</code>）：</p>
 
 <ol>
-<li>pipeline YAML 的 <code>config.executor</code> 显式选择：支持类型级（<code>executor: docker</code>）、实例级简写（<code>executor: docker-gpu</code>）或对象形式（<code>executor: {type: docker, ref: docker-gpu}</code>）；选择类型必须被节点包 <code>executor.supportedTypes</code> 允许；</li>
+<li>workflow YAML 的 <code>config.executor</code> 显式选择：支持类型级（<code>executor: docker</code>）、实例级简写（<code>executor: docker-gpu</code>）或对象形式（<code>executor: {type: docker, ref: docker-gpu}</code>）；选择类型必须被节点包 <code>executor.supportedTypes</code> 允许；</li>
 <li>旧版 <code>flowx.json</code> <code>executor.ref</code> → 引用 Studio 注册的执行器实例（<code>executors</code> 表），实例配置（含远程 docker 的 <code>host</code>/<code>tlsVerify</code> 等）写入 <code>cfg.Executors[实例名]</code>，多个节点引用同一实例时共享同一条目；</li>
 <li>旧版 <code>flowx.json</code> <code>executor.type</code>（+<code>config</code>）→ 内联匿名实例，合成 <code>&lt;node名&gt;-executor</code>；</li>
 <li>portable 声明 <code>executor.supportedTypes</code> + <code>executor.preferredType</code> → 先选择偏好类型的注册实例；该类型不可用（如没有 docker 实例）时按 <code>supportedTypes</code> 声明顺序降级；所有候选类型都无实例时按偏好类型合成匿名实例；</li>
 <li>均未声明 → 有 <code>image</code> 归为 docker（全局默认执行器是 docker 实例时<strong>复用其实例配置</strong>，否则合成匿名 docker）；无 <code>image</code> 使用全局默认执行器（<code>is_default=1</code>，初始为播种的 <code>local</code>）。</li>
 </ol>
-<p>多 Docker 实例时，节点包只声明 <code>supportedTypes: ["docker"]</code>，不绑定实例名；具体实例由 pipeline 的 <code>config.executor.ref</code> 选择。未显式选择时按类型解析：优先类型匹配的全局默认实例，否则按名称稳定选择该类型第一个实例。</p>
+<p>多 Docker 实例时，节点包只声明 <code>supportedTypes: ["docker"]</code>，不绑定实例名；具体实例由 workflow 的 <code>config.executor.ref</code> 选择。未显式选择时按类型解析：优先类型匹配的全局默认实例，否则按名称稳定选择该类型第一个实例。</p>
 
 <p>执行器实例由 <code>ExecutorService</code>（<code>internal/service/executor.go</code>）管理：<code>local</code> 全局限一个、docker 可多个、全局唯一默认（迁移 010）；API 见 4.9 节 <code>/executors</code> 路由组，CLI 为 <code>flowx-studio executor</code> 命令组。解析结果同时决定资产引导方式：实例类型为 <code>local</code> 时走 <code>cp</code> 物化，<code>docker</code> 时走签名 URL 拉取。</p>
 
@@ -485,12 +485,12 @@ func ExpandNodeToConfig(node *model.Node) (*core.NodeConfig, error)</code></pre>
 }
 
 // Handle 处理 dag 事件并推入 adapter.eventCh：
-//   PipelineStart      -&gt; "execution_start"   (携带 params)
-//   PipelineFinish     -&gt; "execution_complete" (携带 params/metadata)
-//   PipelineNodeStart  -&gt; "node_start"
-//   PipelineNodeFinish -&gt; "node_complete" (status=success)
-//   PipelineNodeFailed -&gt; "node_complete" (status=failed)
-func (l *studioListener) Handle(p dag.Pipeline, event dag.Event)</code></pre>
+//   WorkflowStart      -&gt; "execution_start"   (携带 params)
+//   WorkflowFinish     -&gt; "execution_complete" (携带 params/metadata)
+//   WorkflowNodeStart  -&gt; "node_start"
+//   WorkflowNodeFinish -&gt; "node_complete" (status=success)
+//   WorkflowNodeFailed -&gt; "node_complete" (status=failed)
+func (l *studioListener) Handle(p dag.Workflow, event dag.Event)</code></pre>
 
 <p><code>WorkflowService.StartEventBridge</code>（<code>workflow.go</code>）启动 goroutine 消费 <code>adapter.GetEvents()</code>，调用 <code>persistRuntimeEvent</code> 将事件持久化到数据库（更新 <code>executions</code> / <code>execution_nodes</code> 表）并转发到 <code>event.Bus</code>，最终经 SSE 推送前端：</p>
 
@@ -516,14 +516,14 @@ func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
     // 2. 发布 execution.started，启动异步执行（listener 事件经 RunAsync 传入）
     err := s.runtime.ExecuteWorkflow(ctx, execID, yamlConfig)
 
-    // 3. 每 500ms 轮询 GetPipelineStatus，直到 SUCCESS / FAILED / CANCELLED
+    // 3. 每 500ms 轮询 GetWorkflowStatus，直到 SUCCESS / FAILED / CANCELLED
     for {
-        status, _ := s.runtime.GetPipelineStatus(execID)
+        status, _ := s.runtime.GetWorkflowStatus(execID)
         if status == "SUCCESS" || status == "FAILED" || status == "CANCELLED" { break }
         time.Sleep(500 * time.Millisecond)
     }
 
-    // 4. 若 pipeline 已被清理导致轮询出错，
+    // 4. 若 workflow 已被清理导致轮询出错，
     //    由 resolveFinalStatusFromNodes 根据 execution_nodes 表兜底判定最终状态
 
     // 5. 更新 executions 最终状态，发布 execution.completed
@@ -559,7 +559,7 @@ func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 <p>日志链路（<strong>实时逐条处理</strong>，无内存环形缓冲区、无批量写库）：</p>
 
 <ol>
-<li><strong>Pusher 层</strong>：<code>LogPusher</code>（<code>adapter.go</code>）实现 FlowX 核心库的 <code>logger.Pusher</code> 接口（<code>Push</code> / <code>PushBatch</code> / <code>Close</code>），并将 pipeline 内部 ID 映射为 <code>exec-{executionID}</code></li>
+<li><strong>Pusher 层</strong>：<code>LogPusher</code>（<code>adapter.go</code>）实现 FlowX 核心库的 <code>logger.Pusher</code> 接口（<code>Push</code> / <code>PushBatch</code> / <code>Close</code>），并将 workflow 内部 ID 映射为 <code>exec-{executionID}</code></li>
 <li><strong>处理层</strong>：<code>WorkflowService.handleLogEntry</code>（<code>workflow.go</code>）通过 <code>Adapter.OnLog</code> 注册为回调，对每条日志：</li>
 <li>立即 <code>INSERT INTO execution_logs</code> 持久化</li>
 <li>立即向 <code>event.Bus</code> 发布 <code>execution.log</code> 事件</li>

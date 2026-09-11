@@ -15,7 +15,7 @@ import (
 )
 
 // ExpandNodeToConfig 将 model.Node 展开为 flowx 核心的 NodeConfig
-// paramBindings 为 pipeline YAML 中 config.params 提供的参数绑定（接线）：
+// paramBindings 为 workflow YAML 中 config.params 提供的参数绑定（接线）：
 // 值可以是常量，也可以是引用本流水线中上游节点实例的模板（如 {{ GetWeather.city }}），
 // 绑定值会替换节点包 env/run 模板中的 {{ Param.<name> }} 引用。
 func ExpandNodeToConfig(node *model.Node, paramBindings ...map[string]string) (*core.NodeConfig, error) {
@@ -189,7 +189,7 @@ func ExpandWorkflowConfig(configYAML string, lookup func(name string) (*model.No
 	return expandWorkflowConfig(configYAML, lookup, resolve, nil)
 }
 
-// ExpandWorkflowConfigWithTypeResolver 展开 nodeRef，并支持 pipeline 对每个节点
+// ExpandWorkflowConfigWithTypeResolver 展开 nodeRef，并支持 workflow 对每个节点
 // 通过 config.executor 选择执行器类型或具体执行器实例。
 func ExpandWorkflowConfigWithTypeResolver(configYAML string, lookup func(name string) (*model.Node, error), resolve ExecutorResolver, resolveType ExecutorTypeResolver) (string, error) {
 	return expandWorkflowConfig(configYAML, lookup, resolve, resolveType)
@@ -198,7 +198,7 @@ func ExpandWorkflowConfigWithTypeResolver(configYAML string, lookup func(name st
 // expandWorkflowConfig 展开工作流 YAML 中的 nodeRef 引用
 //
 // 执行器解析优先级（对每个 nodeRef 节点）：
-//  1. pipeline YAML 的 config.executor 显式选择（type 或 ref，需被节点 supportedTypes 允许）
+//  1. workflow YAML 的 config.executor 显式选择（type 或 ref，需被节点 supportedTypes 允许）
 //  2. flowx.json 旧版 executor.ref → 引用注册的执行器实例（多节点共享同一 Executors 条目）
 //  3. flowx.json 旧版 executor.type (+config) → 内联匿名实例（合成 <node名>-executor）
 //  4. flowx.json supportedTypes/preferredType → 按偏好选择可用类型，不可用时按声明顺序降级
@@ -208,7 +208,7 @@ func ExpandWorkflowConfigWithTypeResolver(configYAML string, lookup func(name st
 // resolvers 缺省时回退到旧行为（匿名实例合成），便于不挂执行器注册表的场景（测试等）。
 func expandWorkflowConfig(configYAML string, lookup func(name string) (*model.Node, error), resolve ExecutorResolver, resolveType ExecutorTypeResolver) (string, error) {
 
-	var cfg core.PipelineConfig
+	var cfg core.WorkflowConfig
 	if err := yaml.Unmarshal([]byte(configYAML), &cfg); err != nil {
 		return "", fmt.Errorf("failed to parse workflow yaml: %w", err)
 	}
@@ -256,7 +256,7 @@ func expandWorkflowConfig(configYAML string, lookup func(name string) (*model.No
 			return "", err
 		}
 
-		// 解析执行器：pipeline 显式选择 → ref → 内联 → 偏好/降级 → 默认/docker
+		// 解析执行器：workflow 显式选择 → ref → 内联 → 偏好/降级 → 默认/docker
 		execName, execType, err := resolveNodeExecutor(node, executors, resolve, resolveType, selection)
 		if err != nil {
 			return "", fmt.Errorf("failed to expand node %s: %w", ref, err)
@@ -295,19 +295,19 @@ func resolveNodeExecutor(node *model.Node, executors map[string]core.ExecutorCon
 	}
 	image := nodeImage(pkg, node)
 
-	// 0. pipeline YAML 显式选择：config.executor 可为 "local"/"docker"、实例名，
+	// 0. workflow YAML 显式选择：config.executor 可为 "local"/"docker"、实例名，
 	// 或 {type: docker, ref: docker-gpu}。选择类型必须被节点 supportedTypes 允许。
 	if selection != nil {
 		if selection.Ref != "" {
 			if resolve == nil {
-				return "", "", fmt.Errorf("pipeline selects executor %q but no executor registry is available", selection.Ref)
+				return "", "", fmt.Errorf("workflow selects executor %q but no executor registry is available", selection.Ref)
 			}
 			inst, err := resolve(selection.Ref, false)
 			if err != nil {
 				return "", "", err
 			}
 			if selection.Type != "" && inst.Type != selection.Type {
-				return "", "", fmt.Errorf("pipeline selects executor %q of type %q, want %q", selection.Ref, inst.Type, selection.Type)
+				return "", "", fmt.Errorf("workflow selects executor %q of type %q, want %q", selection.Ref, inst.Type, selection.Type)
 			}
 			if err := ensureExecutorTypeAllowed(node.Name, pkg, inst.Type); err != nil {
 				return "", "", err
@@ -390,7 +390,7 @@ func resolveNodeExecutor(node *model.Node, executors map[string]core.ExecutorCon
 	return addAnonymousExecutor(node, "local", image, nil, executors), "local", nil
 }
 
-// nodeExecutorSelection pipeline YAML 中单个 nodeRef 节点的执行器选择。
+// nodeExecutorSelection workflow YAML 中单个 nodeRef 节点的执行器选择。
 // Ref 是用户环境中的具体执行器实例名；Type 是 local/docker 类型级选择。
 type nodeExecutorSelection struct {
 	Ref  string
@@ -467,7 +467,7 @@ func portableExecutorCandidates(pkg *model.NodePackage) []string {
 	return out
 }
 
-// ensureExecutorTypeAllowed 校验 pipeline 选择的类型是否被节点包允许。
+// ensureExecutorTypeAllowed 校验 workflow 选择的类型是否被节点包允许。
 // 旧节点未声明 supportedTypes 时不做限制，保持兼容。
 func ensureExecutorTypeAllowed(nodeName string, pkg *model.NodePackage, execType string) error {
 	if len(pkg.Executor.SupportedTypes) == 0 {
@@ -613,7 +613,7 @@ func defaultRunCommand(language, entry string) string {
 	}
 }
 
-// parseParamBindings 从 pipeline YAML 的节点 config.params 中提取参数绑定。
+// parseParamBindings 从 workflow YAML 的节点 config.params 中提取参数绑定。
 // 值为标量或模板字符串（如 {{ GetWeather.city }}），统一转为 string。
 // hasRuntimeAssets 节点是否有 runtime 类资产（不含入口与 ui 资产）
 func hasRuntimeAssets(node *model.Node, pkg *model.NodePackage) bool {
@@ -695,7 +695,7 @@ func parseParamBindings(nodeName string, config map[string]interface{}) (map[str
 	return bindings, nil
 }
 
-// validateBindings 校验 pipeline 层绑定的参数名都已在节点包 parameters 中声明
+// validateBindings 校验 workflow 层绑定的参数名都已在节点包 parameters 中声明
 func validateBindings(pkg *model.NodePackage, bindings map[string]string) error {
 	if len(bindings) == 0 {
 		return nil
@@ -712,10 +712,10 @@ func validateBindings(pkg *model.NodePackage, bindings map[string]string) error 
 	return nil
 }
 
-// applyParamBindings 将模板中的 {{ Param.<name> ... }} 引用替换为 pipeline 层提供的绑定值。
+// applyParamBindings 将模板中的 {{ Param.<name> ... }} 引用替换为 workflow 层提供的绑定值。
 // 绑定值若是完整模板（{{ GetWeather.city }}），取其内部表达式并保留后续过滤器；
 // 若是常量，则转为字符串字面量。未绑定的参数保留 {{ Param.<name> }} 引用，
-// 运行时由 pipeline 级 Param / 运行时参数解析。
+// 运行时由 workflow 级 Param / 运行时参数解析。
 func applyParamBindings(tmpl string, bindings map[string]string) string {
 	if tmpl == "" || len(bindings) == 0 {
 		return tmpl

@@ -13,19 +13,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewPipelineCmd 创建 pipeline 命令组（list/create/update/delete/run）。
-func NewPipelineCmd() *cobra.Command {
+// NewWorkflowCmd 创建 workflow 命令组（list/create/update/delete/run）。
+func NewWorkflowCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "pipeline",
+		Use:     "workflow",
 		Aliases: []string{"workflow"},
-		Short:   "Manage pipelines (workflows) via the flowx-studio server",
+		Short:   "Manage workflows via the flowx-studio server",
 	}
 	cmd.AddCommand(
-		newPipelineListCmd(),
-		newPipelineCreateCmd(),
-		newPipelineUpdateCmd(),
-		newPipelineDeleteCmd(),
-		newPipelineRunCmd(),
+		newWorkflowListCmd(),
+		newWorkflowCreateCmd(),
+		newWorkflowUpdateCmd(),
+		newWorkflowDeleteCmd(),
+		newWorkflowRunCmd(),
 	)
 	return cmd
 }
@@ -48,12 +48,12 @@ type paginatedJSON struct {
 	PageSize int             `json:"pageSize"`
 }
 
-func newPipelineListCmd() *cobra.Command {
+func newWorkflowListCmd() *cobra.Command {
 	var status, search string
 	var page, pageSize int
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List pipelines",
+		Short: "List workflows",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			q := url.Values{}
 			if status != "" {
@@ -67,7 +67,7 @@ func newPipelineListCmd() *cobra.Command {
 
 			data, err := do(cmd.Context(), http.MethodGet, "/workflows", q, nil)
 			if err != nil {
-				return fail("list pipelines", err, false)
+				return fail("list workflows", err, false)
 			}
 
 			var p paginatedJSON
@@ -96,17 +96,17 @@ func newPipelineListCmd() *cobra.Command {
 	return cmd
 }
 
-func newPipelineCreateCmd() *cobra.Command {
+func newWorkflowCreateCmd() *cobra.Command {
 	var name, file, description, intent, status string
 	cmd := &cobra.Command{
 		Use:   "create",
-		Short: "Create a pipeline from a FlowX YAML file",
+		Short: "Create a workflow from a FlowX YAML file",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if maybePrintSchema("pipeline create") {
+			if maybePrintSchema("workflow create") {
 				return nil
 			}
 			if name == "" || file == "" {
-				return fmt.Errorf("--name and --file are required. Run `flowx-studio pipeline create --schema` for the parameter contract")
+				return fmt.Errorf("--name and --file are required. Run `flowx-studio workflow create --schema` for the parameter contract")
 			}
 			yamlBytes, err := readFileOrStdin(file)
 			if err != nil {
@@ -122,18 +122,18 @@ func newPipelineCreateCmd() *cobra.Command {
 			}
 			data, err := do(cmd.Context(), http.MethodPost, "/workflows", nil, body)
 			if err != nil {
-				return fail("create pipeline", err, true)
+				return fail("create workflow", err, true)
 			}
 
 			var wf workflowJSON
 			_ = json.Unmarshal(data, &wf)
 			printData(data, func() {
-				fmt.Printf("Created pipeline id=%d name=%s\n", wf.ID, wf.Name)
+				fmt.Printf("Created workflow id=%d name=%s\n", wf.ID, wf.Name)
 			})
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&name, "name", "", "pipeline name (required)")
+	cmd.Flags().StringVar(&name, "name", "", "workflow name (required)")
 	cmd.Flags().StringVar(&file, "file", "", "FlowX YAML file path, '-' for stdin (required)")
 	cmd.Flags().StringVar(&description, "description", "", "description")
 	cmd.Flags().StringVar(&intent, "intent", "", "intent description")
@@ -141,28 +141,28 @@ func newPipelineCreateCmd() *cobra.Command {
 	return cmd
 }
 
-func newPipelineUpdateCmd() *cobra.Command {
+func newWorkflowUpdateCmd() *cobra.Command {
 	var id int64
 	var name, file, description, intent, status string
 	cmd := &cobra.Command{
 		Use:   "update",
-		Short: "Update a pipeline (server-side YAML validation applies)",
+		Short: "Update a workflow (server-side YAML validation applies)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if maybePrintSchema("pipeline update") {
+			if maybePrintSchema("workflow update") {
 				return nil
 			}
 			if id <= 0 {
-				return fmt.Errorf("--id is required. Run `flowx-studio pipeline update --schema` for the parameter contract")
+				return fmt.Errorf("--id is required. Run `flowx-studio workflow update --schema` for the parameter contract")
 			}
 
 			// 服务端 Update 为全量覆盖且校验 YAML：先读取现有记录合并未指定的字段。
 			existing, err := do(cmd.Context(), http.MethodGet, "/workflows/"+strconv.FormatInt(id, 10), nil, nil)
 			if err != nil {
-				return fail("get pipeline", err, false)
+				return fail("get workflow", err, false)
 			}
 			var wf workflowJSON
 			if err := json.Unmarshal(existing, &wf); err != nil {
-				return fmt.Errorf("failed to parse existing pipeline: %w", err)
+				return fmt.Errorf("failed to parse existing workflow: %w", err)
 			}
 
 			if cmd.Flags().Changed("name") {
@@ -187,16 +187,16 @@ func newPipelineUpdateCmd() *cobra.Command {
 
 			data, err := do(cmd.Context(), http.MethodPut, "/workflows/"+strconv.FormatInt(id, 10), nil, wf)
 			if err != nil {
-				return fail("update pipeline", err, true)
+				return fail("update workflow", err, true)
 			}
 			printData(data, func() {
-				fmt.Printf("Updated pipeline id=%d\n", id)
+				fmt.Printf("Updated workflow id=%d\n", id)
 			})
 			return nil
 		},
 	}
-	cmd.Flags().Int64Var(&id, "id", 0, "pipeline ID (required)")
-	cmd.Flags().StringVar(&name, "name", "", "pipeline name (keep existing if omitted)")
+	cmd.Flags().Int64Var(&id, "id", 0, "workflow ID (required)")
+	cmd.Flags().StringVar(&name, "name", "", "workflow name (keep existing if omitted)")
 	cmd.Flags().StringVar(&file, "file", "", "FlowX YAML file path, '-' for stdin (keep existing if omitted)")
 	cmd.Flags().StringVar(&description, "description", "", "description (keep existing if omitted)")
 	cmd.Flags().StringVar(&intent, "intent", "", "intent description (keep existing if omitted)")
@@ -204,13 +204,13 @@ func newPipelineUpdateCmd() *cobra.Command {
 	return cmd
 }
 
-func newPipelineDeleteCmd() *cobra.Command {
+func newWorkflowDeleteCmd() *cobra.Command {
 	var id int64
 	cmd := &cobra.Command{
 		Use:   "delete",
-		Short: "Delete a pipeline",
+		Short: "Delete a workflow",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if maybePrintSchema("pipeline delete") {
+			if maybePrintSchema("workflow delete") {
 				return nil
 			}
 			if id <= 0 {
@@ -218,26 +218,26 @@ func newPipelineDeleteCmd() *cobra.Command {
 			}
 			data, err := do(cmd.Context(), http.MethodDelete, "/workflows/"+strconv.FormatInt(id, 10), nil, nil)
 			if err != nil {
-				return fail("delete pipeline", err, false)
+				return fail("delete workflow", err, false)
 			}
 			printData(data, func() {
-				fmt.Printf("Deleted pipeline id=%d\n", id)
+				fmt.Printf("Deleted workflow id=%d\n", id)
 			})
 			return nil
 		},
 	}
-	cmd.Flags().Int64Var(&id, "id", 0, "pipeline ID (required)")
+	cmd.Flags().Int64Var(&id, "id", 0, "workflow ID (required)")
 	return cmd
 }
 
-func newPipelineRunCmd() *cobra.Command {
+func newWorkflowRunCmd() *cobra.Command {
 	var id int64
 	var follow bool
 	cmd := &cobra.Command{
 		Use:   "run",
-		Short: "Trigger a pipeline execution",
+		Short: "Trigger a workflow execution",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if maybePrintSchema("pipeline run") {
+			if maybePrintSchema("workflow run") {
 				return nil
 			}
 			if id <= 0 {
@@ -246,7 +246,7 @@ func newPipelineRunCmd() *cobra.Command {
 			data, err := do(cmd.Context(), http.MethodPost,
 				"/workflows/"+strconv.FormatInt(id, 10)+"/run", nil, map[string]interface{}{})
 			if err != nil {
-				return fail("run pipeline", err, false)
+				return fail("run workflow", err, false)
 			}
 
 			var result struct {
@@ -265,7 +265,7 @@ func newPipelineRunCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().Int64Var(&id, "id", 0, "pipeline ID (required)")
+	cmd.Flags().Int64Var(&id, "id", 0, "workflow ID (required)")
 	cmd.Flags().BoolVar(&follow, "follow", false, "follow the SSE log stream until the execution finishes")
 	return cmd
 }

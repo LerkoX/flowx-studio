@@ -4,7 +4,7 @@ import "time"
 
 // ParamSource 参数数据来源建议
 // 指向推荐的上游节点包（nodeRef 为节点包名，非流水线中的节点实例 ID）及其输出字段，
-// 供 pipeline 编排者（人或 AI）在 pipeline YAML 中完成实际接线。
+// 供 workflow 编排者（人或 AI）在 workflow YAML 中完成实际接线。
 type ParamSource struct {
 	NodeRef     string `json:"nodeRef" db:"node_ref"`
 	Output      string `json:"output" db:"output"`
@@ -50,7 +50,7 @@ type NodeExtractConfig struct {
 
 // NodeExecutorConfig 节点包执行器能力声明。
 // supportedTypes/preferredType 是可移植声明：节点包只声明支持的执行器类型与偏好，
-// 不绑定用户环境中的具体执行器实例；pipeline 可在 config.executor 中覆盖类型或实例。
+// 不绑定用户环境中的具体执行器实例；workflow 可在 config.executor 中覆盖类型或实例。
 // ref/type 是旧版固定声明，为兼容已有节点继续支持：ref 引用 Studio 注册实例，
 // type+config 为内联匿名实例；两者都缺省时按 supportedTypes/preferredType、image、
 // 全局默认执行器的顺序解析。
@@ -160,7 +160,7 @@ type Node struct {
 	PackageConfig *NodePackage `json:"-" db:"package_config"`
 
 	// 节点包声明的执行器能力/偏好（来自 PackageConfig.Executor，API 只读透出）。
-	// 编排时据此判断节点支持的执行器类型与默认偏好；pipeline 可通过 config.executor 覆盖。
+	// 编排时据此判断节点支持的执行器类型与默认偏好；workflow 可通过 config.executor 覆盖。
 	Executor *NodeExecutorConfig `json:"executor,omitempty" db:"-"`
 	// Package 是 PackageConfig 的 API 只读副本（节点详情展示 flowx.json 用）。
 	// 用独立字段而非直接序列化 PackageConfig，是为了保持包配置无法通过

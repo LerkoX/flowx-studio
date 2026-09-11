@@ -365,7 +365,7 @@ flowchart TD
 
 ### 7.4.1 运行时适配器与节点展开
 
-运行时适配器为 `runtime.Adapter`（`internal/runtime/adapter.go`），包装 FlowX Runtime，提供 `ExecuteWorkflow` / `GetPipelineStatus` / `CancelExecution` / 事件通道等能力：
+运行时适配器为 `runtime.Adapter`（`internal/runtime/adapter.go`），包装 FlowX Runtime，提供 `ExecuteWorkflow` / `GetWorkflowStatus` / `CancelExecution` / 事件通道等能力：
 
 ```go
 // Adapter FlowX 运行时适配器
@@ -376,11 +376,11 @@ type Adapter struct {
     mu        sync.RWMutex
 }
 
-// ExecuteWorkflow 通过 RunAsync 异步执行，并注册 pipeline->execution 映射
+// ExecuteWorkflow 通过 RunAsync 异步执行，并注册 workflow->execution 映射
 func (a *Adapter) ExecuteWorkflow(ctx context.Context, executionID int64, configYAML string) error
 ```
 
-节点展开为**包级函数**（`internal/runtime/node_expander.go`），不是 `BuildPipelineConfig` 方法：
+节点展开为**包级函数**（`internal/runtime/node_expander.go`），不是 `BuildWorkflowConfig` 方法：
 
 ```go
 // ExpandWorkflowConfig 展开工作流 YAML 中的 nodeRef 引用，返回展开后的 YAML
@@ -402,13 +402,13 @@ func ExpandNodeToConfig(node *model.Node) (*core.NodeConfig, error)
 
 **执行器解析（nodeRef 展开）**：节点展开时对每个 nodeRef 节点按下述规则确定执行器（`node_expander.go` 的 `resolveNodeExecutor`）：
 
-1. pipeline YAML 的 `config.executor` 显式选择：支持类型级（`executor: docker`）、实例级简写（`executor: docker-gpu`）或对象形式（`executor: {type: docker, ref: docker-gpu}`）；选择类型必须被节点包 `executor.supportedTypes` 允许；
+1. workflow YAML 的 `config.executor` 显式选择：支持类型级（`executor: docker`）、实例级简写（`executor: docker-gpu`）或对象形式（`executor: {type: docker, ref: docker-gpu}`）；选择类型必须被节点包 `executor.supportedTypes` 允许；
 2. 旧版 `flowx.json` `executor.ref` → 引用 Studio 注册的执行器实例（`executors` 表），实例配置（含远程 docker 的 `host`/`tlsVerify` 等）写入 `cfg.Executors[实例名]`，多个节点引用同一实例时共享同一条目；
 3. 旧版 `flowx.json` `executor.type`（+`config`）→ 内联匿名实例，合成 `<node名>-executor`；
 4. portable 声明 `executor.supportedTypes` + `executor.preferredType` → 先选择偏好类型的注册实例；该类型不可用（如没有 docker 实例）时按 `supportedTypes` 声明顺序降级；所有候选类型都无实例时按偏好类型合成匿名实例；
 5. 均未声明 → 有 `image` 归为 docker（全局默认执行器是 docker 实例时**复用其实例配置**，否则合成匿名 docker）；无 `image` 使用全局默认执行器（`is_default=1`，初始为播种的 `local`）。
 
-多 Docker 实例时，节点包只声明 `supportedTypes: ["docker"]`，不绑定实例名；具体实例由 pipeline 的 `config.executor.ref` 选择。未显式选择时按类型解析：优先类型匹配的全局默认实例，否则按名称稳定选择该类型第一个实例。
+多 Docker 实例时，节点包只声明 `supportedTypes: ["docker"]`，不绑定实例名；具体实例由 workflow 的 `config.executor.ref` 选择。未显式选择时按类型解析：优先类型匹配的全局默认实例，否则按名称稳定选择该类型第一个实例。
 
 执行器实例由 `ExecutorService`（`internal/service/executor.go`）管理：`local` 全局限一个、docker 可多个、全局唯一默认（迁移 010）；API 见 4.9 节 `/executors` 路由组，CLI 为 `flowx-studio executor` 命令组。解析结果同时决定资产引导方式：实例类型为 `local` 时走 `cp` 物化，`docker` 时走签名 URL 拉取。
 
@@ -425,12 +425,12 @@ type studioListener struct {
 }
 
 // Handle 处理 dag 事件并推入 adapter.eventCh：
-//   PipelineStart      -> "execution_start"   (携带 params)
-//   PipelineFinish     -> "execution_complete" (携带 params/metadata)
-//   PipelineNodeStart  -> "node_start"
-//   PipelineNodeFinish -> "node_complete" (status=success)
-//   PipelineNodeFailed -> "node_complete" (status=failed)
-func (l *studioListener) Handle(p dag.Pipeline, event dag.Event)
+//   WorkflowStart      -> "execution_start"   (携带 params)
+//   WorkflowFinish     -> "execution_complete" (携带 params/metadata)
+//   WorkflowNodeStart  -> "node_start"
+//   WorkflowNodeFinish -> "node_complete" (status=success)
+//   WorkflowNodeFailed -> "node_complete" (status=failed)
+func (l *studioListener) Handle(p dag.Workflow, event dag.Event)
 ```
 
 `WorkflowService.StartEventBridge`（`workflow.go`）启动 goroutine 消费 `adapter.GetEvents()`，调用 `persistRuntimeEvent` 将事件持久化到数据库（更新 `executions` / `execution_nodes` 表）并转发到 `event.Bus`，最终经 SSE 推送前端：
@@ -457,14 +457,14 @@ func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
     // 2. 发布 execution.started，启动异步执行（listener 事件经 RunAsync 传入）
     err := s.runtime.ExecuteWorkflow(ctx, execID, yamlConfig)
 
-    // 3. 每 500ms 轮询 GetPipelineStatus，直到 SUCCESS / FAILED / CANCELLED
+    // 3. 每 500ms 轮询 GetWorkflowStatus，直到 SUCCESS / FAILED / CANCELLED
     for {
-        status, _ := s.runtime.GetPipelineStatus(execID)
+        status, _ := s.runtime.GetWorkflowStatus(execID)
         if status == "SUCCESS" || status == "FAILED" || status == "CANCELLED" { break }
         time.Sleep(500 * time.Millisecond)
     }
 
-    // 4. 若 pipeline 已被清理导致轮询出错，
+    // 4. 若 workflow 已被清理导致轮询出错，
     //    由 resolveFinalStatusFromNodes 根据 execution_nodes 表兜底判定最终状态
 
     // 5. 更新 executions 最终状态，发布 execution.completed
@@ -490,7 +490,7 @@ flowchart LR
 
 日志链路（**实时逐条处理**，无内存环形缓冲区、无批量写库）：
 
-1. **Pusher 层**：`LogPusher`（`adapter.go`）实现 FlowX 核心库的 `logger.Pusher` 接口（`Push` / `PushBatch` / `Close`），并将 pipeline 内部 ID 映射为 `exec-{executionID}`
+1. **Pusher 层**：`LogPusher`（`adapter.go`）实现 FlowX 核心库的 `logger.Pusher` 接口（`Push` / `PushBatch` / `Close`），并将 workflow 内部 ID 映射为 `exec-{executionID}`
 2. **处理层**：`WorkflowService.handleLogEntry`（`workflow.go`）通过 `Adapter.OnLog` 注册为回调，对每条日志：
    - 立即 `INSERT INTO execution_logs` 持久化
    - 立即向 `event.Bus` 发布 `execution.log` 事件

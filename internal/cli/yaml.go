@@ -19,7 +19,7 @@ import (
 func NewYAMLCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "yaml",
-		Short: "Structurally read/edit a pipeline or execution snapshot YAML file (local, no server)",
+		Short: "Structurally read/edit a workflow or execution snapshot YAML file (local, no server)",
 	}
 	cmd.AddCommand(
 		newYAMLGraphCmd(),

@@ -179,7 +179,7 @@ go build -o flowx-studio cmd/flowx-studio/main.go
 flowx-studio server
 
 # 流水线管理（HTTP 客户端）
-flowx-studio pipeline list|create|update|delete|run
+flowx-studio workflow list|create|update|delete|run
 
 # 节点管理（HTTP 客户端）
 flowx-studio node list|create|delete|import|mock
@@ -189,8 +189,8 @@ flowx-studio
 
 # 查看帮助与参数契约
 flowx-studio --help
-flowx-studio pipeline create --help
-flowx-studio pipeline create --schema   # 输出参数 JSON Schema
+flowx-studio workflow create --help
+flowx-studio workflow create --schema   # 输出参数 JSON Schema
 
 # 查看版本（由 -ldflags 注入 git 版本/commit/构建时间）
 flowx-studio version</code></pre>
@@ -199,7 +199,7 @@ flowx-studio version</code></pre>
 <ul>
 <li>裸运行 <code>flowx-studio</code> 不带子命令时只打印帮助，不会启动 server。</li>
 <li>客户端子命令默认连接 <code>http://127.0.0.1:8080</code>，可用 <code>--server</code> flag 或 <code>FLOWX_STUDIO_SERVER_URL</code> 环境变量覆盖；使用前需先运行 <code>flowx-studio server</code>。</li>
-<li><code>pipeline</code> 命令组有别名 <code>workflow</code>。</li>
+<li><code>workflow</code> 命令组有别名 <code>workflow</code>。</li>
 <li>运行 YAML 工作流的 CLI 功能保留在 FlowX 核心库中（<code>flowx run workflow.yaml</code>），不在 flowx-studio 中提供。</li>
 </ul>
 <h3 id="823-启动参数">8.2.3 启动参数</h3>
@@ -243,7 +243,7 @@ func main() {
     rootCmd.AddCommand(serverCmd)
 
     // 客户端子命令（HTTP client，实现见 internal/cli）
-    rootCmd.AddCommand(cli.NewPipelineCmd())
+    rootCmd.AddCommand(cli.NewWorkflowCmd())
     rootCmd.AddCommand(cli.NewNodeCmd())
 
     if err := rootCmd.Execute(); err != nil {
@@ -622,7 +622,7 @@ require (
 </tr>
 <tr>
 <td>状态查询</td>
-<td><code>Runtime.Get(id)</code> + <code>Pipeline.Status()</code></td>
+<td><code>Runtime.Get(id)</code> + <code>Workflow.Status()</code></td>
 <td>满足</td>
 </tr>
 <tr>
@@ -633,7 +633,7 @@ require (
 <tr>
 <td>事件监听</td>
 <td><code>dag.Listener</code> 接口</td>
-<td>满足，<code>Pipeline.CurrentNode()</code> 已提供节点上下文</td>
+<td>满足，<code>Workflow.CurrentNode()</code> 已提供节点上下文</td>
 </tr>
 <tr>
 <td>日志捕获</td>
@@ -648,7 +648,7 @@ require (
 </tbody>
 </table>
 
-<p><strong>说明</strong>：此前评估中提到的"<code>dag.Listener.Handle(p Pipeline, event Event)</code> 缺少节点上下文信息"问题已解决——FlowX 已实现 <code>Pipeline.CurrentNode()</code> 与 <code>Pipeline.GetParam()</code>，并已在 <code>RuntimeAdapter</code> 事件桥接中实际使用（<code>internal/runtime/adapter.go:142,152,157,169,182</code>）。</p>
+<p><strong>说明</strong>：此前评估中提到的"<code>dag.Listener.Handle(p Workflow, event Event)</code> 缺少节点上下文信息"问题已解决——FlowX 已实现 <code>Workflow.CurrentNode()</code> 与 <code>Workflow.GetParam()</code>，并已在 <code>RuntimeAdapter</code> 事件桥接中实际使用（<code>internal/runtime/adapter.go:142,152,157,169,182</code>）。</p>
 
 <p>详见 <a href="./10-core-deps.md" target="_blank">10-core-deps.md</a> 完整评估报告。</p>
 
@@ -681,22 +681,22 @@ require (
 <tbody>
 <tr>
 <td><code>execution_start</code></td>
-<td><code>PipelineStart</code></td>
+<td><code>WorkflowStart</code></td>
 <td>记录执行开始，收集并保存渲染后参数</td>
 </tr>
 <tr>
 <td><code>node_start</code></td>
-<td><code>PipelineNodeStart</code></td>
+<td><code>WorkflowNodeStart</code></td>
 <td>插入/更新 <code>execution_nodes</code> 为 <code>running</code></td>
 </tr>
 <tr>
 <td><code>node_complete</code></td>
-<td><code>PipelineNodeFinish/Failed</code></td>
+<td><code>WorkflowNodeFinish/Failed</code></td>
 <td>更新节点状态、耗时</td>
 </tr>
 <tr>
 <td><code>execution_complete</code></td>
-<td><code>PipelineFinish</code></td>
+<td><code>WorkflowFinish</code></td>
 <td>更新执行状态、耗时，保存运行时元数据</td>
 </tr>
 </tbody>
@@ -707,8 +707,8 @@ require (
 <p>为了在前端“元数据”面板展示“执行时的真实信息”，<code>WorkflowService</code> 在执行生命周期中收集并持久化：</p>
 
 <ul>
-<li><strong>渲染后参数</strong>：通过 <code>Pipeline.GetParam()</code> 从 FlowX 引擎获取（FlowX 已提供该方法，<code>internal/runtime/adapter.go:142,152</code>）。</li>
-<li><strong>运行时 metadata</strong>：通过 <code>Pipeline.Metadata()</code> 获取节点输出、中间结果等。</li>
+<li><strong>渲染后参数</strong>：通过 <code>Workflow.GetParam()</code> 从 FlowX 引擎获取（FlowX 已提供该方法，<code>internal/runtime/adapter.go:142,152</code>）。</li>
+<li><strong>运行时 metadata</strong>：通过 <code>Workflow.Metadata()</code> 获取节点输出、中间结果等。</li>
 <li><strong>状态 / 错误 / 耗时</strong>：从事件和 DB 中汇总。</li>
 </ul>
 <p>这些数据在执行结束时合并为 JSON，保存到 <code>executions.metadata_json</code>。</p>
@@ -734,14 +734,14 @@ require (
 <p><code>LogPusher</code> 实现 FlowX 的 <code>logger.Pusher</code> 接口，把日志 <code>Entry</code> 写入 <code>execution_logs</code> 表并推送到 SSE：</p>
 
 <ul>
-<li>通过 <code>pipelineMap</code> 把 FlowX pipeline 内部 ID 映射到 execution ID。</li>
+<li>通过 <code>workflowMap</code> 把 FlowX workflow 内部 ID 映射到 execution ID。</li>
 <li><code>Entry</code> 中的 <code>Node</code> 字段用于记录 <code>node_id</code> / <code>node_name</code>。</li>
 <li>SSE 客户端收到 <code>execution.log</code> 事件后追加到 <code>executionStore.executionLog</code>。</li>
 </ul>
 <h3 id="894-单例锁与优雅关闭">8.9.4 单例锁与优雅关闭</h3>
 
 <ul>
-<li>启动时写入 <code>~/.flowx-studio/flowx-studio.pid</code>，若已存在则优雅终止旧进程（仅 <code>server</code> 子命令持有锁；<code>pipeline</code>/<code>node</code> 等客户端子命令为无状态 HTTP 客户端，无需锁）。</li>
+<li>启动时写入 <code>~/.flowx-studio/flowx-studio.pid</code>，若已存在则优雅终止旧进程（仅 <code>server</code> 子命令持有锁；<code>workflow</code>/<code>node</code> 等客户端子命令为无状态 HTTP 客户端，无需锁）。</li>
 <li>收到 <code>SIGINT</code>/<code>SIGTERM</code> 后：</li>
 <li>调用 <code>http.Server.Shutdown()</code> 关闭 HTTP 服务。</li>
 <li>停止 FlowX Runtime 后台循环。</li>

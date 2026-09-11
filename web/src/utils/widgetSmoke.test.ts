@@ -37,7 +37,7 @@ describe('节点 widget：wired 参数可编辑 + 来源标注（paramSources �
     const props = makeProps({
       params: { message: '{{ Param.msg }}', sleep: '1' },
       paramSources: {
-        message: { kind: 'pipeline', paramName: 'msg', paramValue: 'hello' },
+        message: { kind: 'workflow', paramName: 'msg', paramValue: 'hello' },
         sleep: { kind: 'literal' },
       },
     })
@@ -102,7 +102,7 @@ describe('节点 widget：wired 参数可编辑 + 来源标注（paramSources �
     const el = document.createElement('div')
     const props = makeProps({
       params: { message: '{{ Param.msg }}', sleep: '1' },
-      paramSources: { message: { kind: 'pipeline', paramName: 'msg', paramValue: 'hi' } },
+      paramSources: { message: { kind: 'workflow', paramName: 'msg', paramValue: 'hi' } },
     })
     delete props.onParamsChange
     mount(el, props)

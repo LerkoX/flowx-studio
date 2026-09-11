@@ -133,7 +133,7 @@
     end
     
     subgraph CLILayer["CLI 客户端层"]
-        CLICmd["CLI 子命令 (internal/cli)<br/>pipeline / node / executor / execution"]
+        CLICmd["CLI 子命令 (internal/cli)<br/>workflow / node / executor / execution"]
     end
     
     subgraph StorageLayer["存储服务层"]
@@ -142,7 +142,7 @@
     
     subgraph FlowXEngine["FlowX 核心引擎层"]
         DAG["DAG Graph Engine"]
-        Pipeline["Pipeline Execution"]
+        Workflow["Workflow Execution"]
         ExecutorMgr["Executor Manager"]
         Template["Template Engine"]
         Metadata["Metadata Store"]
@@ -203,7 +203,7 @@
 <p><strong>核心组件</strong>：</p>
 <ul>
 <li><code>cli.NewHTTPClient</code>：基于全局 <code>--server</code> flag / <code>FLOWX_STUDIO_SERVER_URL</code> 环境变量构造 REST 客户端</li>
-<li>流水线命令组：<code>pipeline list / create / update / delete / run</code></li>
+<li>流水线命令组：<code>workflow list / create / update / delete / run</code></li>
 <li>节点命令组：<code>node list / create / delete / import / mock</code></li>
 </ul>
 <p><strong>设计要点</strong>：</p>
@@ -235,7 +235,7 @@
 <p><strong>集成点</strong>：</p>
 <ul>
 <li><code>Adapter</code>（构造 <code>NewAdapter</code>）：将 Web 层的执行请求转换为 FlowX <code>Runtime</code> 调用</li>
-<li><code>WorkflowService.StartEventBridge</code> + <code>event.Bus</code>：将 FlowX 执行事件桥接到 Web 层的 SSE 推送。FlowX 事件系统共 11 种事件，<code>studioListener</code> 实际订阅其中 5 种（PipelineStart / PipelineFinish / PipelineNodeStart / PipelineNodeFinish / PipelineNodeFailed）</li>
+<li><code>WorkflowService.StartEventBridge</code> + <code>event.Bus</code>：将 FlowX 执行事件桥接到 Web 层的 SSE 推送。FlowX 事件系统共 11 种事件，<code>studioListener</code> 实际订阅其中 5 种（WorkflowStart / WorkflowFinish / WorkflowNodeStart / WorkflowNodeFinish / WorkflowNodeFailed）</li>
 <li><code>ExpandNodeToConfig</code>（internal/runtime/node_expander.go）：将数据库存储的 <code>model.Node</code> 展开为 FlowX <code>core.NodeConfig</code></li>
 </ul>
 <h2 id="23-模块依赖关系">2.3 模块依赖关系</h2>
@@ -403,7 +403,7 @@
 <tr>
 <td>CLI 框架</td>
 <td>Cobra (<code>github.com/spf13/cobra</code>)</td>
-<td>子命令管理（server / pipeline / node / executor / execution）</td>
+<td>子命令管理（server / workflow / node / executor / execution）</td>
 </tr>
 <tr>
 <td>进程管理</td>
@@ -441,7 +441,7 @@ require (
 <p><strong>依赖原则</strong>：</p>
 <ul>
 <li>FlowX 核心库保持完全独立，不引入任何 Web/AI 相关代码</li>
-<li>flowx-studio 只使用 FlowX 公开的 API（<code>Runtime</code>、<code>Pipeline</code>、<code>Listener</code> 等接口）</li>
+<li>flowx-studio 只使用 FlowX 公开的 API（<code>Runtime</code>、<code>Workflow</code>、<code>Listener</code> 等接口）</li>
 <li>通过 Go Module 版本管理，锁定依赖的 FlowX 版本</li>
 </ul>
 <h3 id="262-适配层设计">2.6.2 适配层设计</h3>
@@ -504,14 +504,14 @@ func (a *Adapter) ExecuteWorkflow(ctx context.Context, executionID int64, config
     }
 
     // 异步执行
-    pipeline, err := a.runtime.RunAsync(ctx, id, configYAML, listener)
+    workflow, err := a.runtime.RunAsync(ctx, id, configYAML, listener)
     if err != nil {
         return fmt.Errorf("failed to start workflow: %w", err)
     }
 
-    // 将 pipeline 内部 ID 映射到 execution ID，便于日志推送器定位
-    if pipeline != nil {
-        a.logPusher.RegisterPipeline(pipeline.Id(), executionID)
+    // 将 workflow 内部 ID 映射到 execution ID，便于日志推送器定位
+    if workflow != nil {
+        a.logPusher.RegisterWorkflow(workflow.Id(), executionID)
     }
 
     return nil
@@ -523,21 +523,21 @@ type studioListener struct {
     executionID int64
 }
 
-func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
+func (l *studioListener) Handle(p dag.Workflow, event dag.Event) {
     // 将 FlowX 事件转换为 ExecutionEvent 推入事件通道
-    // PipelineStart → execution_start，PipelineFinish → execution_complete，
-    // PipelineNodeStart → node_start，PipelineNodeFinish/Failed → node_complete
+    // WorkflowStart → execution_start，WorkflowFinish → execution_complete，
+    // WorkflowNodeStart → node_start，WorkflowNodeFinish/Failed → node_complete
     l.adapter.PushEvent(ExecutionEvent{ /* ... */ })
 }
 
 // Events 返回订阅的事件列表（共 5 种）
 func (l *studioListener) Events() []dag.Event {
     return []dag.Event{
-        dag.PipelineStart,
-        dag.PipelineFinish,
-        dag.PipelineNodeStart,
-        dag.PipelineNodeFinish,
-        dag.PipelineNodeFailed,
+        dag.WorkflowStart,
+        dag.WorkflowFinish,
+        dag.WorkflowNodeStart,
+        dag.WorkflowNodeFinish,
+        dag.WorkflowNodeFailed,
     }
 }</code></pre>
 
@@ -563,7 +563,7 @@ func main() {
     rootCmd.AddCommand(serverCmd)
 
     // 客户端子命令（HTTP client，见 internal/cli）
-    rootCmd.AddCommand(cli.NewPipelineCmd()) // pipeline list/create/update/delete/run
+    rootCmd.AddCommand(cli.NewWorkflowCmd()) // workflow list/create/update/delete/run
     rootCmd.AddCommand(cli.NewNodeCmd())     // node list/create/delete/import/mock
 
     if err := rootCmd.Execute(); err != nil {
@@ -573,7 +573,7 @@ func main() {
 
 <ul>
 <li><code>flowx-studio server [--port 8080] [--host 0.0.0.0]</code>：启动 HTTP server（Web UI + RESTful API）</li>
-<li><code>flowx-studio pipeline ...</code> / <code>flowx-studio node ...</code>：HTTP 客户端子命令，供 AI Agent（经 SKILL）与终端用户调用</li>
+<li><code>flowx-studio workflow ...</code> / <code>flowx-studio node ...</code>：HTTP 客户端子命令，供 AI Agent（经 SKILL）与终端用户调用</li>
 <li>裸运行 <code>flowx-studio</code>（不带子命令）仅打印帮助信息；<code>version</code> 子命令输出版本信息（由 <code>-ldflags</code> 注入）</li>
 </ul>
 <p><strong>注意</strong>：FlowX 核心库（<code>github.com/LerkoX/flowx</code>）为纯库，不包含 <code>cmd/</code> 目录与 CLI 入口。</p>

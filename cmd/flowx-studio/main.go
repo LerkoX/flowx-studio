@@ -94,7 +94,7 @@ func main() {
 	rootCmd.AddCommand(versionCmd)
 
 	// 客户端子命令（HTTP client，实现见 internal/cli）
-	rootCmd.AddCommand(cli.NewPipelineCmd()) // pipeline list/create/update/delete/run
+	rootCmd.AddCommand(cli.NewWorkflowCmd()) // workflow list/create/update/delete/run
 	rootCmd.AddCommand(cli.NewNodeCmd())     // node list/create/delete/import/mock
 	rootCmd.AddCommand(cli.NewAuditCmd())    // audit list（审计日志查询）
 	rootCmd.AddCommand(cli.NewBackupCmd())   // backup create/list/download/restore

@@ -163,7 +163,7 @@ func TestNodeImportService_RejectsUpstreamNodeRef(t *testing.T) {
 	importSvc := NewNodeImportService(NewNodeService(database, event.NewBus()))
 	_, err = importSvc.ImportFromFolder(tmpDir, false)
 	if err == nil {
-		t.Fatal("expected import to fail when env references a pipeline node instance ID")
+		t.Fatal("expected import to fail when env references a workflow node instance ID")
 	}
 	if !strings.Contains(err.Error(), "GetWeather") || !strings.Contains(err.Error(), "Param") {
 		t.Errorf("error should explain the Param-only rule, got: %v", err)
@@ -189,7 +189,7 @@ func TestNodeImportService_RejectsUpstreamNodeRef(t *testing.T) {
 
 	importSvc2 := NewNodeImportService(NewNodeService(database2, event.NewBus()))
 	if _, err := importSvc2.ImportFromFolder(tmpDir2, false); err == nil {
-		t.Fatal("expected import to fail when run references a pipeline node instance ID")
+		t.Fatal("expected import to fail when run references a workflow node instance ID")
 	}
 }
 

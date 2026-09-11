@@ -397,7 +397,7 @@ func (s *NodeService) findReferencingWorkflows(node *model.Node) ([]model.Workfl
 
 	var refs []model.Workflow
 	for _, wf := range workflows {
-		var cfg core.PipelineConfig
+		var cfg core.WorkflowConfig
 		if err := yaml.Unmarshal([]byte(wf.YAMLConfig), &cfg); err != nil {
 			continue
 		}

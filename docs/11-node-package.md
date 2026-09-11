@@ -26,7 +26,7 @@
 3. **可映射到现有模型**：导入后可直接生成 `model.Node`（`internal/model/model.go:71-111`）
 4. **可展开到 FlowX 核心**：运行时能把节点包展开为 `flowx/core.NodeConfig`（`flowx/core/config.go:113-124`）
 5. **参数注入统一**：优先使用环境变量，兼容命令行模板
-6. **不感知 pipeline 实例**：节点包模板只引用 `{{ Param.* }}`，不引用 pipeline 中的节点实例 ID；上游数据通过参数声明（可附 `source` 推荐来源）+ pipeline 层 `config.params` 接线传入（见 [11.7 节](#117-参数注入规则)）
+6. **不感知 workflow 实例**：节点包模板只引用 `{{ Param.* }}`，不引用 workflow 中的节点实例 ID；上游数据通过参数声明（可附 `source` 推荐来源）+ workflow 层 `config.params` 接线传入（见 [11.7 节](#117-参数注入规则)）
 
 ## 11.3 文件布局
 
@@ -144,7 +144,7 @@ image-downloader/
 | `executor.type` | string | 否 | **旧版兼容字段**：固定内联匿名执行器类型 `local` / `docker`；不可与 `supportedTypes`/`preferredType` 混用 |
 | `executor.config` | object | 否 | 匿名执行器配置，透传给 FlowX 执行器；选择注册实例时以实例配置为准，节点 `image` 仍会按镜像注入规则覆盖条目 `config.image` |
 
-**执行器解析优先级**（运行时展开，见 [7.4.1 节](07-node-system.md#741-运行时适配器与节点展开)）：pipeline 节点 `config.executor` 显式选择 → 旧版 `executor.ref`（注册实例）→ 旧版 `executor.type + config`（内联匿名）→ `supportedTypes/preferredType`（偏好类型无可用实例时按支持列表降级）→ 有 `image` 归为 docker（默认执行器为 docker 实例时复用其配置，否则合成匿名 docker）→ 无 `image` 使用全局默认执行器。
+**执行器解析优先级**（运行时展开，见 [7.4.1 节](07-node-system.md#741-运行时适配器与节点展开)）：workflow 节点 `config.executor` 显式选择 → 旧版 `executor.ref`（注册实例）→ 旧版 `executor.type + config`（内联匿名）→ `supportedTypes/preferredType`（偏好类型无可用实例时按支持列表降级）→ 有 `image` 归为 docker（默认执行器为 docker 实例时复用其配置，否则合成匿名 docker）→ 无 `image` 使用全局默认执行器。
 
 **docker 执行器实例支持的 config 键**：`host`（远程 daemon 地址，如 `tcp://192.168.1.10:2375` / `ssh://user@host`，留空读 `DOCKER_HOST` 环境变量）、`tlsVerify`、`certPath`、`image`（容器镜像，默认 `alpine:latest`）、`registry`、`network`、`workdir`、`volumes`（远程 daemon 时为**远端机器**路径）、`env`、`tty`、`ttyWidth`、`ttyHeight`。
 
@@ -179,7 +179,7 @@ image-downloader/
 
 - `name`：参数名，唯一
 - `type`：`string` / `integer` / `float` / `boolean` / `array` / `object`
-- `description`：**应详细描述参数需要的数据**（格式、取值范围、单位等），这是 pipeline 编排时接线的依据
+- `description`：**应详细描述参数需要的数据**（格式、取值范围、单位等），这是 workflow 编排时接线的依据
 - `required`：是否必填
 - `default`：默认值
 - `source`（可选）：推荐数据来源，见下
@@ -190,11 +190,11 @@ image-downloader/
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `source.nodeRef` | string | 是 | 推荐来源**节点包名**（如 `get-weather`），不是 pipeline 中的节点实例 ID |
+| `source.nodeRef` | string | 是 | 推荐来源**节点包名**（如 `get-weather`），不是 workflow 中的节点实例 ID |
 | `source.output` | string | 是 | 推荐来源节点的输出字段名（如 `city`） |
 | `source.description` | string | 否 | 补充说明 |
 
-`source` 只是接线建议，不产生任何运行时行为；真正的接线发生在 pipeline YAML 的 `config.params` 中（见 [11.7 规则 5](#规则-5pipeline-层接线configparams)）。
+`source` 只是接线建议，不产生任何运行时行为；真正的接线发生在 workflow YAML 的 `config.params` 中（见 [11.7 规则 5](#规则-5workflow-层接线configparams)）。
 
 #### Output
 
@@ -304,7 +304,7 @@ GET /api/v1/nodes/:id/ui/*filepath
 节点按 `(name, version)` 组合唯一存储，**同名不同版本多行并存**（空版本归一为 `0`）：
 
 - **导入**：同名不同版本直接新增为独立节点（新 ID）；同名同版本报「已存在」，需 `--overwrite` 原地覆盖（保持 ID，引用该版本的流水线与物化快照无感知）
-- **引用语法**：pipeline YAML 的 `config.nodeRef` 支持两种形式——
+- **引用语法**：workflow YAML 的 `config.nodeRef` 支持两种形式——
   - `get-weather@1.0.0`：**精确锁定版本**，节点升级不影响该流水线
   - `get-weather`（裸名称）：解析到该名称的**最新版本**，向后兼容旧 YAML，但 import 新版本后行为会漂移——**生产流水线建议显式锁版本**
 - **「最新」排序**：版本号按 semver 风格比较（首段 `-` 后为预发布段；基版本按 `.` 分段，数字段按数值比较 `1.10.0 > 1.9.0`；带预发布段者更小），完全相等取 ID 大者；空版本 `0` 最小
@@ -366,7 +366,7 @@ DownloadImage:
 
 展开规则：
 
-1. 生成 `export` 环境变量注入行（见 [11.7 节](#117-参数注入规则)）；若 pipeline YAML 的节点 `config.params` 提供了绑定，先将 env/run 中的 `Param.<name>` 引用替换为绑定值（保留过滤器）
+1. 生成 `export` 环境变量注入行（见 [11.7 节](#117-参数注入规则)）；若 workflow YAML 的节点 `config.params` 提供了绑定，先将 env/run 中的 `Param.<name>` 引用替换为绑定值（保留过滤器）
 2. 追加 `run` 命令；若未指定 `run`，则按 `language + entry` 生成默认命令
 3. 将 `entry` 和 `files` 写入执行器工作目录
 4. 透传 `image` 和 `executor.config`
@@ -380,10 +380,10 @@ DownloadImage:
 
 **核心约束：flowx.json 中的 `env`/`run` 模板只允许引用 `{{ Param.* }}` 或常量字面量，禁止引用上游节点实例 ID**（如 `{{ GetWeather.city }}`）。原因：
 
-- 同一节点包（如 `get-weather`）在一条 pipeline 中可能存在多个实例，实例 ID 由 pipeline YAML 的 `Nodes` map 键决定，节点包无法预知
-- 实例 ID 可能随 pipeline 编辑而变化，节点包对其硬编码会造成脆性耦合
+- 同一节点包（如 `get-weather`）在一条 workflow 中可能存在多个实例，实例 ID 由 workflow YAML 的 `Nodes` map 键决定，节点包无法预知
+- 实例 ID 可能随 workflow 编辑而变化，节点包对其硬编码会造成脆性耦合
 
-外部数据一律通过参数传入：节点包在 `parameters` 中声明所需数据（`description` 详细描述数据要求，可选 `source` 标注推荐来源节点），由 pipeline YAML 完成实际接线（规则 5）。
+外部数据一律通过参数传入：节点包在 `parameters` 中声明所需数据（`description` 详细描述数据要求，可选 `source` 标注推荐来源节点），由 workflow YAML 完成实际接线（规则 5）。
 
 ### 规则 1：env 优先
 
@@ -442,13 +442,13 @@ export FLOWX_PARAM_TIMEOUT="<值>"
 | `bash` | `bash <entry>` |
 | `node` | `node <entry>` |
 
-### 规则 5：pipeline 层接线（config.params）
+### 规则 5：workflow 层接线（config.params）
 
-节点包只面向 `Param` 编程，上游节点数据在 pipeline YAML 中通过节点 `config.params` 绑定：
+节点包只面向 `Param` 编程，上游节点数据在 workflow YAML 中通过节点 `config.params` 绑定：
 
 ```yaml
 Nodes:
-  GetWeather:                 # 节点实例 ID，pipeline 作者自定义
+  GetWeather:                 # 节点实例 ID，workflow 作者自定义
     name: 获取天气
     config:
       nodeRef: get-weather    # 引用节点包（可锁版本：get-weather@1.0.0）
@@ -459,7 +459,7 @@ Nodes:
     config:
       nodeRef: send-feishu
       params:
-        weatherCity: "{{ GetWeather.city }}"          # 引用本 pipeline 中的实例 ID
+        weatherCity: "{{ GetWeather.city }}"          # 引用本 workflow 中的实例 ID
         weatherForecasts: "{{ GetWeather.forecasts }}"
 ```
 
@@ -467,10 +467,10 @@ Nodes:
 
 1. 绑定值是模板（`{{ GetWeather.city }}`）时，取其内部表达式替换 env/run 中的 `Param.<name>` 引用，**保留后续过滤器**：`{{ Param.weatherForecasts | toYaml }}` → `{{ GetWeather.forecasts | toYaml }}`；替换后的模板在节点执行时以完整上下文渲染，上游输出正常解析
 2. 绑定值是常量时，替换为字符串字面量：`{{ Param.title }}` → `{{ "每日播报" }}`
-3. 未在 `config.params` 中绑定的参数保留 `{{ Param.<name> }}` 引用，运行时由 pipeline 级 `Param` / `pipeline run --params` 解析
+3. 未在 `config.params` 中绑定的参数保留 `{{ Param.<name> }}` 引用，运行时由 workflow 级 `Param` / `workflow run --params` 解析
 4. 绑定未声明的参数名会在展开时报错（`config.params references undeclared parameter ...`）
 
-编排者（人或 AI）可依据参数上的 `source` 提示（`nodeRef` 节点包名 + `output` 输出字段）找到 pipeline 中对应节点包的实例，生成上述 `params` 绑定。
+编排者（人或 AI）可依据参数上的 `source` 提示（`nodeRef` 节点包名 + `output` 输出字段）找到 workflow 中对应节点包的实例，生成上述 `params` 绑定。
 
 ## 11.8 Mock 测试
 
@@ -509,7 +509,7 @@ Mock 测试入口 API 仍使用 `POST /api/v1/nodes/:id/mock`。
 | 版本控制 | 差异清晰，格式歧义少 | 多行字符串和注释差异较乱 |
 | 代码分离 | 适合作为清单，代码放在独立文件 | 容易诱使内联代码 |
 | 概念混淆 | 生态中 `flowx-yaml` 已表示“输出提取块” | `flowx.yaml` 容易与输出格式混淆 |
-| 工具链对齐 | 与 `flowx-studio` JSON API 和 TS 类型天然对齐 | FlowX 核心流水线配置是 YAML，但那是 pipeline，不是 node package |
+| 工具链对齐 | 与 `flowx-studio` JSON API 和 TS 类型天然对齐 | FlowX 核心流水线配置是 YAML，但那是 workflow，不是 node package |
 
 节点包是“清单 + 同级代码文件”的结构，JSON 是最自然的 manifest 格式。
 
@@ -550,7 +550,7 @@ Mock 测试入口 API 仍使用 `POST /api/v1/nodes/:id/mock`。
 
 1. 节点包在 `flowx.json` 中声明 `ui.entry`（包内相对路径的单文件 `.js`）
 2. 导入时校验（见 11.11 规则 10）并将 bundle 内容存入 `Node.Files`
-3. 前端画布解析 pipeline YAML 的 `config.nodeRef`，匹配节点包后发现 `ui` 配置，
+3. 前端画布解析 workflow YAML 的 `config.nodeRef`，匹配节点包后发现 `ui` 配置，
    通过 `GET /api/v1/nodes/:id/ui/<entry>?v=<updatedAt>` 动态加载 bundle
 4. 在节点卡片内嵌容器上调用 bundle 的 `mount(el, props)`；节点数据变化时调 `update(props)`；卸载时调 `unmount()`
 
@@ -569,7 +569,7 @@ interface NodeWidgetHandle {
 }
 
 interface NodeWidgetProps {
-  nodeId: string                // pipeline 中的节点实例 ID
+  nodeId: string                // workflow 中的节点实例 ID
   nodeRef: string               // 节点包名
   status: 'idle' | 'running' | 'success' | 'failed' | 'skipped'
   inputs: string[]              // 节点入参参数名
@@ -578,11 +578,11 @@ interface NodeWidgetProps {
                                    // 常量或 {{ 上游.输出 }} 模板，原样下发
   paramSources?: Record<string, NodeWidgetParamSource>
                                   // 各参数绑定的来源标注（键与 params 对应），Studio 解析
-                                  // pipeline YAML 后下发；可选字段，旧版 Studio 不下发，
+                                  // workflow YAML 后下发；可选字段，旧版 Studio 不下发，
                                   // 组件需判空并回退展示 params 原始绑定串
   onParamsChange?: (params: Record<string, string>) => void
                                   // 参数写回：全量替换该节点的 config.params（传 {} 清空），
-                                  // Studio 写回 pipeline YAML 并防抖持久化；回放态（执行快照）
+                                  // Studio 写回 workflow YAML 并防抖持久化；回放态（执行快照）
                                   // 下为 undefined，组件调用前需判空进入只读模式
   execution: {                  // 流水线执行实例实时 metadata（SSE 驱动）；无运行实例时为 null
     id: string
@@ -601,9 +601,9 @@ interface NodeWidgetProps {
 
 // 参数绑定来源（paramSources 的值类型）
 interface NodeWidgetParamSource {
-  kind: 'pipeline' | 'node' | 'literal'
-  paramName?: string    // kind=pipeline：流水线参数名（YAML Param 区键名）
-  paramValue?: string   // kind=pipeline：流水线参数当前值（随参数面板编辑实时更新；未定义时缺省）
+  kind: 'workflow' | 'node' | 'literal'
+  paramName?: string    // kind=workflow：流水线参数名（YAML Param 区键名）
+  paramValue?: string   // kind=workflow：流水线参数当前值（随参数面板编辑实时更新；未定义时缺省）
   nodeId?: string       // kind=node：被引用的上游节点实例 ID
   nodeName?: string     // kind=node：被引用节点显示名（Nodes.<id>.name，缺省时回退 nodeId）
   field?: string        // kind=node：引用的输出字段名

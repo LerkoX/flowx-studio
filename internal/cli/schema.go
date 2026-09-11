@@ -4,9 +4,9 @@ import "fmt"
 
 // schemas 保存各写入类子命令参数的 JSON Schema（--schema 输出，契约层披露）。
 var schemas = map[string]string{
-	"pipeline create": `{
+	"workflow create": `{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "flowx-studio pipeline create",
+  "title": "flowx-studio workflow create",
   "type": "object",
   "properties": {
     "name":        {"type": "string", "description": "流水线名称（必填）"},
@@ -17,32 +17,32 @@ var schemas = map[string]string{
   },
   "required": ["name", "file"]
 }`,
-	"pipeline update": `{
+	"workflow update": `{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "flowx-studio pipeline update",
+  "title": "flowx-studio workflow update",
   "type": "object",
   "properties": {
     "id":          {"type": "integer", "description": "流水线 ID（必填）"},
     "name":        {"type": "string", "description": "名称；省略时保留原值"},
-    "file":        {"type": "string", "description": "FlowX YAML 文件路径，'-' 表示 stdin；省略时保留原 YAML。校验规则同 pipeline create"},
+    "file":        {"type": "string", "description": "FlowX YAML 文件路径，'-' 表示 stdin；省略时保留原 YAML。校验规则同 workflow create"},
     "description": {"type": "string", "description": "描述；省略时保留原值"},
     "intent":      {"type": "string", "description": "意图说明；省略时保留原值"},
     "status":      {"type": "string", "enum": ["draft", "active", "archived"], "description": "省略时保留原值"}
   },
   "required": ["id"]
 }`,
-	"pipeline delete": `{
+	"workflow delete": `{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "flowx-studio pipeline delete",
+  "title": "flowx-studio workflow delete",
   "type": "object",
   "properties": {
     "id": {"type": "integer", "description": "流水线 ID（必填）"}
   },
   "required": ["id"]
 }`,
-	"pipeline run": `{
+	"workflow run": `{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "flowx-studio pipeline run",
+  "title": "flowx-studio workflow run",
   "type": "object",
   "properties": {
     "id":     {"type": "integer", "description": "流水线 ID（必填）"},

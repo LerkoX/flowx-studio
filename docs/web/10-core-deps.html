@@ -69,8 +69,8 @@
 <p>评估涉及的关键文件：</p>
 <ul>
 <li><code>runtime.go</code> / <code>runtime_impl.go</code> —— Runtime 接口与实现</li>
-<li><code>dag/pipeline.go</code> / <code>dag/pipeline_impl.go</code> —— Pipeline 接口与实现</li>
-<li><code>dag/pipeline_execution.go</code> —— 执行逻辑</li>
+<li><code>dag/workflow.go</code> / <code>dag/workflow_impl.go</code> —— Workflow 接口与实现</li>
+<li><code>dag/workflow_execution.go</code> —— 执行逻辑</li>
 <li><code>dag/node.go</code> / <code>dag/node_impl.go</code> —— Node 接口与实现</li>
 <li><code>logger/logger.go</code> —— 日志推送接口</li>
 <li><code>core/config.go</code> / <code>core/const.go</code> —— 核心模型</li>
@@ -80,10 +80,10 @@
 <h3 id="1021-runtime-接口-满足">10.2.1 Runtime 接口 —— 满足</h3>
 
 <pre><code class="language-go">type Runtime interface {
-    Get(id string) (dag.Pipeline, error)
+    Get(id string) (dag.Workflow, error)
     Cancel(ctx context.Context, id string) error
-    RunAsync(ctx context.Context, id string, config string, listener dag.Listener) (dag.Pipeline, error)
-    RunSync(ctx context.Context, id string, config string, listener dag.Listener) (dag.Pipeline, error)
+    RunAsync(ctx context.Context, id string, config string, listener dag.Listener) (dag.Workflow, error)
+    RunSync(ctx context.Context, id string, config string, listener dag.Listener) (dag.Workflow, error)
     Rm(id string)
     Done() chan struct{}
     Notify(data interface{}) error
@@ -98,14 +98,14 @@
     Resume(ctx context.Context, id string) error
     ModifyGraph(ctx context.Context, id string, modifications dag.GraphModifications) error
     UpdateConfig(ctx context.Context, id string, newConfigYAML string) error
-    ListPipelines() []string
+    ListWorkflows() []string
 }</code></pre>
 
 <p><strong>评估结论</strong>：Runtime 接口功能完善，满足 flowx-studio 对执行、取消、暂停、恢复、配置导出、动态修改的全部需求。</p>
 
-<h3 id="1022-pipeline-接口-基本满足">10.2.2 Pipeline 接口 —— 基本满足</h3>
+<h3 id="1022-workflow-接口-基本满足">10.2.2 Workflow 接口 —— 基本满足</h3>
 
-<pre><code class="language-go">type Pipeline interface {
+<pre><code class="language-go">type Workflow interface {
     Id() string
     GetGraph() Graph
     SetGraph(graph Graph)
@@ -141,7 +141,7 @@
 
 <pre><code class="language-go">type Node interface {
     Id() string
-    PipelineId() string
+    WorkflowId() string
     Status() string
     Get(key string) string
     Set(key string, value any)
@@ -168,34 +168,34 @@
 <h3 id="1024-listener-事件机制-已增强">10.2.4 Listener 事件机制 —— <strong>已增强</strong> ✅</h3>
 
 <p>type Listener interface {</p>
-<p>    Handle(p Pipeline, event Event)</p>
+<p>    Handle(p Workflow, event Event)</p>
 <p>    Events() []Event</p>
 <p>}</p>
 
 <p><strong>现有事件类型</strong>：</p>
-<pre><code class="language-go">PipelineInit                // 流水线初始化
-PipelineStart               // 流水线开始执行
-PipelineFinish              // 流水线完成
-PipelineExecutorPrepare     // 流水线执行器开始准备
-PipelineExecutorPrepareDone // 流水线执行器准备完毕
-PipelineNodeStart           // 节点开始
-PipelineNodeFinish          // 节点完成
-PipelineNodeFailed          // 节点执行失败（新增）
-PipelinePaused              // 流水线暂停
-PipelineResumed             // 流水线恢复
-PipelineGraphModified       // 图被修改</code></pre>
+<pre><code class="language-go">WorkflowInit                // 流水线初始化
+WorkflowStart               // 流水线开始执行
+WorkflowFinish              // 流水线完成
+WorkflowExecutorPrepare     // 流水线执行器开始准备
+WorkflowExecutorPrepareDone // 流水线执行器准备完毕
+WorkflowNodeStart           // 节点开始
+WorkflowNodeFinish          // 节点完成
+WorkflowNodeFailed          // 节点执行失败（新增）
+WorkflowPaused              // 流水线暂停
+WorkflowResumed             // 流水线恢复
+WorkflowGraphModified       // 图被修改</code></pre>
 
-<p><strong>解决方案</strong>：通过 <code>Pipeline.CurrentNode()</code> 获取当前节点上下文</p>
+<p><strong>解决方案</strong>：通过 <code>Workflow.CurrentNode()</code> 获取当前节点上下文</p>
 
-<p>在 <code>pipeline_execution.go</code> 中，<code>executeNodeWithLifecycle</code> 执行期间会在 Pipeline 上设置当前节点：</p>
-<pre><code class="language-go">func (p *PipelineImpl) executeNodeWithLifecycle(ctx context.Context, node Node) error {
+<p>在 <code>workflow_execution.go</code> 中，<code>executeNodeWithLifecycle</code> 执行期间会在 Workflow 上设置当前节点：</p>
+<pre><code class="language-go">func (p *WorkflowImpl) executeNodeWithLifecycle(ctx context.Context, node Node) error {
     p.mu.Lock()
     p.currentNode = node
     p.mu.Unlock()
     
-    p.NotifyEvent(PipelineNodeStart)
+    p.NotifyEvent(WorkflowNodeStart)
     // ... 执行 ...
-    p.NotifyEvent(PipelineNodeFinish)
+    p.NotifyEvent(WorkflowNodeFinish)
     
     p.mu.Lock()
     p.currentNode = nil
@@ -203,16 +203,16 @@ PipelineGraphModified       // 图被修改</code></pre>
 }</code></pre>
 
 <p>Listener 可通过 <code>p.CurrentNode()</code> 直接获取触发事件的节点：</p>
-<pre><code class="language-go">func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
+<pre><code class="language-go">func (l *studioListener) Handle(p dag.Workflow, event dag.Event) {
     switch event {
-    case dag.PipelineNodeStart:
+    case dag.WorkflowNodeStart:
         if node := p.CurrentNode(); node != nil {
             l.eventCh &lt;- Event{
                 Type:   "node_start",
                 NodeID: node.Id(),
             }
         }
-    case dag.PipelineNodeFinish:
+    case dag.WorkflowNodeFinish:
         if node := p.CurrentNode(); node != nil {
             l.eventCh &lt;- Event{
                 Type:   "node_complete",
@@ -220,7 +220,7 @@ PipelineGraphModified       // 图被修改</code></pre>
                 Status: node.GetRuntimeStatus().Status,
             }
         }
-    case dag.PipelineNodeFailed:
+    case dag.WorkflowNodeFailed:
         if node := p.CurrentNode(); node != nil {
             l.eventCh &lt;- Event{
                 Type:   "node_failed",
@@ -241,7 +241,7 @@ PipelineGraphModified       // 图被修改</code></pre>
 }
 
 type Entry struct {
-    Pipeline  string    `json:"pipeline"`
+    Workflow  string    `json:"workflow"`
     BuildID   string    `json:"buildId"`
     Node      string    `json:"node"`      // 节点ID
     Step      string    `json:"step"`      // 步骤名称
@@ -267,84 +267,84 @@ type Entry struct {
 
 <ul>
 <li><code>Runtime.Cancel()</code> 可取消运行中的流水线</li>
-<li>Pipeline 内部已检查 <code>ctx.Done()</code> 信号（见 <code>runLevelByLevel</code> 和 <code>executeNodeWithLifecycle</code>）</li>
+<li>Workflow 内部已检查 <code>ctx.Done()</code> 信号（见 <code>runLevelByLevel</code> 和 <code>executeNodeWithLifecycle</code>）</li>
 <li>flowx-studio 可通过 <code>context.WithTimeout</code> 控制执行超时</li>
 </ul>
 <p><strong>评估结论</strong>：满足需求，无需核心库增强。</p>
 
 <h2 id="103-已实现增强项">10.3 已实现增强项 ✅</h2>
 
-<h3 id="1031-pipeline-接口新增-currentnode-方法-已实现">10.3.1 Pipeline 接口新增 CurrentNode() 方法 —— <strong>已实现</strong></h3>
+<h3 id="1031-workflow-接口新增-currentnode-方法-已实现">10.3.1 Workflow 接口新增 CurrentNode() 方法 —— <strong>已实现</strong></h3>
 
 <p><strong>状态</strong>：✅ 已在 <code>feat/studio-enhancements</code> 分支实现并合并</p>
 
 <p><strong>实现文件</strong>：</p>
 <ul>
-<li><code>dag/pipeline.go</code> —— Pipeline 接口添加 <code>CurrentNode() Node</code></li>
-<li><code>dag/pipeline_impl.go</code> —— PipelineImpl 添加 <code>currentNode</code> 字段 + 线程安全实现</li>
-<li><code>dag/pipeline_execution.go</code> —— <code>executeNodeWithLifecycle</code> 中设置/清理</li>
+<li><code>dag/workflow.go</code> —— Workflow 接口添加 <code>CurrentNode() Node</code></li>
+<li><code>dag/workflow_impl.go</code> —— WorkflowImpl 添加 <code>currentNode</code> 字段 + 线程安全实现</li>
+<li><code>dag/workflow_execution.go</code> —— <code>executeNodeWithLifecycle</code> 中设置/清理</li>
 </ul>
 <p><strong>验证</strong>：通过单元测试 <code>TestCurrentNode_*</code></p>
 
 <p><strong>使用方式</strong>：</p>
-<pre><code class="language-go">func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
+<pre><code class="language-go">func (l *studioListener) Handle(p dag.Workflow, event dag.Event) {
     switch event {
-    case dag.PipelineNodeStart:
+    case dag.WorkflowNodeStart:
         if node := p.CurrentNode(); node != nil {
             l.eventCh &lt;- Event{Type: "node_start", NodeID: node.Id()}
         }
-    case dag.PipelineNodeFinish:
+    case dag.WorkflowNodeFinish:
         if node := p.CurrentNode(); node != nil {
             l.eventCh &lt;- Event{Type: "node_complete", NodeID: node.Id()}
         }
     }
 }</code></pre>
 
-<h3 id="1032-新增-pipelinenodefailed-事件-已实现">10.3.2 新增 PipelineNodeFailed 事件 —— <strong>已实现</strong></h3>
+<h3 id="1032-新增-workflownodefailed-事件-已实现">10.3.2 新增 WorkflowNodeFailed 事件 —— <strong>已实现</strong></h3>
 
 <p><strong>状态</strong>：✅ 已实现</p>
 
 <p><strong>实现文件</strong>：</p>
 <ul>
-<li><code>core/const.go</code> —— 新增 <code>EventPipelineNodeFailed = "pipeline-node-failed"</code></li>
-<li><code>dag/pipeline.go</code> —— 新增 <code>PipelineNodeFailed</code> 事件变量</li>
-<li><code>dag/pipeline_execution.go</code> —— 节点执行失败时触发该事件</li>
+<li><code>core/const.go</code> —— 新增 <code>EventWorkflowNodeFailed = "workflow-node-failed"</code></li>
+<li><code>dag/workflow.go</code> —— 新增 <code>WorkflowNodeFailed</code> 事件变量</li>
+<li><code>dag/workflow_execution.go</code> —— 节点执行失败时触发该事件</li>
 </ul>
 <p><strong>使用方式</strong>：</p>
-<pre><code class="language-go">case dag.PipelineNodeFailed:
+<pre><code class="language-go">case dag.WorkflowNodeFailed:
     if node := p.CurrentNode(); node != nil {
         l.eventCh &lt;- Event{Type: "node_failed", NodeID: node.Id()}
     }</code></pre>
 
-<h3 id="1033-runtime-接口新增-listpipelines-方法-已实现">10.3.3 Runtime 接口新增 ListPipelines() 方法 —— <strong>已实现</strong></h3>
+<h3 id="1033-runtime-接口新增-listworkflows-方法-已实现">10.3.3 Runtime 接口新增 ListWorkflows() 方法 —— <strong>已实现</strong></h3>
 
 <p><strong>状态</strong>：✅ 已实现</p>
 
 <p><strong>实现文件</strong>：</p>
 <ul>
-<li><code>runtime.go</code> —— Runtime 接口添加 <code>ListPipelines() []string</code></li>
+<li><code>runtime.go</code> —— Runtime 接口添加 <code>ListWorkflows() []string</code></li>
 <li><code>runtime_impl.go</code> —— RuntimeImpl 实现方法</li>
 </ul>
 <p><strong>使用方式</strong>：</p>
-<pre><code class="language-go">activeIDs := runtime.ListPipelines()
+<pre><code class="language-go">activeIDs := runtime.ListWorkflows()
 for _, id := range activeIDs {
-    pipeline, _ := runtime.Get(id)
-    fmt.Printf("Pipeline %s status: %s\n", id, pipeline.Status())
+    workflow, _ := runtime.Get(id)
+    fmt.Printf("Workflow %s status: %s\n", id, workflow.Status())
 }</code></pre>
 
 <h2 id="104-事件桥接实现策略">10.4 事件桥接实现策略</h2>
 
 <h3 id="1041-推荐方案基于-currentnode-的精确事件推送">10.4.1 推荐方案：基于 CurrentNode() 的精确事件推送</h3>
 
-<p>由于核心库已增强 <code>CurrentNode()</code> 和 <code>PipelineNodeFailed</code> 事件，flowx-studio 可直接采用精确事件方案：</p>
+<p>由于核心库已增强 <code>CurrentNode()</code> 和 <code>WorkflowNodeFailed</code> 事件，flowx-studio 可直接采用精确事件方案：</p>
 
 <pre><code class="language-go">type studioListener struct {
     eventCh chan Event
 }
 
-func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
+func (l *studioListener) Handle(p dag.Workflow, event dag.Event) {
     switch event {
-    case dag.PipelineNodeStart:
+    case dag.WorkflowNodeStart:
         if node := p.CurrentNode(); node != nil {
             l.eventCh &lt;- Event{
                 Type:   "node_start",
@@ -352,7 +352,7 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
                 Status: node.GetRuntimeStatus().Status,
             }
         }
-    case dag.PipelineNodeFinish:
+    case dag.WorkflowNodeFinish:
         if node := p.CurrentNode(); node != nil {
             l.eventCh &lt;- Event{
                 Type:   "node_complete",
@@ -360,7 +360,7 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
                 Status: node.GetRuntimeStatus().Status,
             }
         }
-    case dag.PipelineNodeFailed:
+    case dag.WorkflowNodeFailed:
         if node := p.CurrentNode(); node != nil {
             l.eventCh &lt;- Event{
                 Type:   "node_failed",
@@ -368,10 +368,10 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
                 Status: core.StatusFailed,
             }
         }
-    case dag.PipelinePaused:
-        l.eventCh &lt;- Event{Type: "pipeline_paused"}
-    case dag.PipelineResumed:
-        l.eventCh &lt;- Event{Type: "pipeline_resumed"}
+    case dag.WorkflowPaused:
+        l.eventCh &lt;- Event{Type: "workflow_paused"}
+    case dag.WorkflowResumed:
+        l.eventCh &lt;- Event{Type: "workflow_resumed"}
     }
 }</code></pre>
 
@@ -395,12 +395,12 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 <tr>
 <td>v0.1.0</td>
 <td>伪版本 <code>v0.0.0-20260527104758-c693505dcf32</code>（<code>go.mod:8</code>），通过 <code>replace github.com/LerkoX/flowx =&gt; ../flowx</code>（<code>go.mod:5</code>）指向本地仓库</td>
-<td>初始版本，直接使用 <code>CurrentNode()</code> 和 <code>PipelineNodeFailed</code> 接口</td>
+<td>初始版本，直接使用 <code>CurrentNode()</code> 和 <code>WorkflowNodeFailed</code> 接口</td>
 </tr>
 </tbody>
 </table>
 
-<blockquote><strong>注意</strong>：FlowX 核心库目前<strong>没有任何 git tag</strong>，因此 go.mod 中记录的是基于提交时间的伪版本，而非此前预期的 <code>v1.3.0+</code>。flowx-studio 通过 <code>replace</code> 指令依赖本地 <code>../flowx</code> 目录，增强功能（<code>CurrentNode()</code>、<code>PipelineNodeFailed</code>、<code>ListPipelines()</code>）均已包含在该本地代码中，无需过渡方案。</blockquote>
+<blockquote><strong>注意</strong>：FlowX 核心库目前<strong>没有任何 git tag</strong>，因此 go.mod 中记录的是基于提交时间的伪版本，而非此前预期的 <code>v1.3.0+</code>。flowx-studio 通过 <code>replace</code> 指令依赖本地 <code>../flowx</code> 目录，增强功能（<code>CurrentNode()</code>、<code>WorkflowNodeFailed</code>、<code>ListWorkflows()</code>）均已包含在该本地代码中，无需过渡方案。</blockquote>
 
 <h2 id="106-实现记录">10.6 实现记录</h2>
 
@@ -420,21 +420,21 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 <tbody>
 <tr>
 <td>1</td>
-<td><code>Pipeline.CurrentNode()</code></td>
+<td><code>Workflow.CurrentNode()</code></td>
 <td>✅ 已合并</td>
 <td><code>TestCurrentNode_*</code></td>
 </tr>
 <tr>
 <td>2</td>
-<td><code>PipelineNodeFailed</code> 事件</td>
+<td><code>WorkflowNodeFailed</code> 事件</td>
 <td>✅ 已合并</td>
-<td><code>TestPipelineNodeFailed_*</code></td>
+<td><code>TestWorkflowNodeFailed_*</code></td>
 </tr>
 <tr>
 <td>3</td>
-<td><code>Runtime.ListPipelines()</code></td>
+<td><code>Runtime.ListWorkflows()</code></td>
 <td>✅ 已合并</td>
-<td><code>TestListPipelines_*</code></td>
+<td><code>TestListWorkflows_*</code></td>
 </tr>
 </tbody>
 </table>
@@ -444,13 +444,13 @@ func (l *studioListener) Handle(p dag.Pipeline, event dag.Event) {
 <ul>
 <li><strong>分支</strong>: <code>feat/studio-enhancements</code></li>
 <li><strong>修改文件</strong>:</li>
-<li><code>dag/pipeline.go</code> —— 接口扩展</li>
-<li><code>dag/pipeline_impl.go</code> —— <code>currentNode</code> 字段 + 实现</li>
-<li><code>dag/pipeline_execution.go</code> —— 生命周期中设置/清理</li>
+<li><code>dag/workflow.go</code> —— 接口扩展</li>
+<li><code>dag/workflow_impl.go</code> —— <code>currentNode</code> 字段 + 实现</li>
+<li><code>dag/workflow_execution.go</code> —— 生命周期中设置/清理</li>
 <li><code>core/const.go</code> —— 新增事件常量</li>
 <li><code>runtime.go</code> —— 接口扩展</li>
-<li><code>runtime_impl.go</code> —— <code>ListPipelines()</code> 实现</li>
-<li><code>dag/pipeline_studio_test.go</code> —— 新增测试（新增文件）</li>
+<li><code>runtime_impl.go</code> —— <code>ListWorkflows()</code> 实现</li>
+<li><code>dag/workflow_studio_test.go</code> —— 新增测试（新增文件）</li>
 <li><code>runtime_test.go</code> —— 新增测试</li>
 </ul>
 <h3 id="向后兼容性">向后兼容性</h3>

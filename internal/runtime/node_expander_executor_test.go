@@ -10,7 +10,7 @@ import (
 )
 
 // expandWorkflow 测试辅助：展开单节点工作流并返回解析后的配置
-func expandWorkflow(t *testing.T, node *model.Node, resolve ExecutorResolver) *core.PipelineConfig {
+func expandWorkflow(t *testing.T, node *model.Node, resolve ExecutorResolver) *core.WorkflowConfig {
 	t.Helper()
 	wfYAML := `Name: test-wf
 Graph: |
@@ -31,7 +31,7 @@ Nodes:
 	if err != nil {
 		t.Fatalf("ExpandWorkflowConfig() error = %v", err)
 	}
-	var cfg core.PipelineConfig
+	var cfg core.WorkflowConfig
 	if err := yaml.Unmarshal([]byte(out), &cfg); err != nil {
 		t.Fatalf("unmarshal expanded yaml: %v", err)
 	}
@@ -358,7 +358,7 @@ Nodes:
 	if err != nil {
 		t.Fatalf("ExpandWorkflowConfig() error = %v", err)
 	}
-	var cfg core.PipelineConfig
+	var cfg core.WorkflowConfig
 	if err := yaml.Unmarshal([]byte(out), &cfg); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -377,7 +377,7 @@ func staticTypeResolver(instances map[string]*model.Executor) ExecutorTypeResolv
 	}
 }
 
-func TestExpandWorkflow_PipelineExecutorRefOverride(t *testing.T) {
+func TestExpandWorkflow_WorkflowExecutorRefOverride(t *testing.T) {
 	node := newTestNode(&model.NodePackage{
 		Name:     "train",
 		Language: "python",
@@ -403,7 +403,7 @@ Nodes:
 	if err != nil {
 		t.Fatalf("ExpandWorkflowConfigWithTypeResolver() error = %v", err)
 	}
-	var cfg core.PipelineConfig
+	var cfg core.WorkflowConfig
 	if err := yaml.Unmarshal([]byte(out), &cfg); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -415,7 +415,7 @@ Nodes:
 	}
 }
 
-func TestExpandWorkflow_PipelineExecutorTypeSelectsInstance(t *testing.T) {
+func TestExpandWorkflow_WorkflowExecutorTypeSelectsInstance(t *testing.T) {
 	node := newTestNode(&model.NodePackage{
 		Name:     "train",
 		Language: "python",
@@ -439,7 +439,7 @@ Nodes:
 	if err != nil {
 		t.Fatalf("ExpandWorkflowConfigWithTypeResolver() error = %v", err)
 	}
-	var cfg core.PipelineConfig
+	var cfg core.WorkflowConfig
 	if err := yaml.Unmarshal([]byte(out), &cfg); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -465,7 +465,7 @@ func TestExpandWorkflow_PreferredExecutorFallsBackToSupportedType(t *testing.T) 
 	}
 }
 
-func TestExpandWorkflow_PipelineExecutorRejectsUnsupportedType(t *testing.T) {
+func TestExpandWorkflow_WorkflowExecutorRejectsUnsupportedType(t *testing.T) {
 	node := newTestNode(&model.NodePackage{
 		Name:     "local-only",
 		Language: "python",
@@ -489,7 +489,7 @@ Nodes:
 	}
 }
 
-func expandWorkflowWithTypes(t *testing.T, node *model.Node, resolve ExecutorResolver, resolveType ExecutorTypeResolver) *core.PipelineConfig {
+func expandWorkflowWithTypes(t *testing.T, node *model.Node, resolve ExecutorResolver, resolveType ExecutorTypeResolver) *core.WorkflowConfig {
 	t.Helper()
 	wfYAML := `Name: test-wf
 Graph: |
@@ -509,7 +509,7 @@ Nodes:
 	if err != nil {
 		t.Fatalf("ExpandWorkflowConfigWithTypeResolver() error = %v", err)
 	}
-	var cfg core.PipelineConfig
+	var cfg core.WorkflowConfig
 	if err := yaml.Unmarshal([]byte(out), &cfg); err != nil {
 		t.Fatalf("unmarshal expanded yaml: %v", err)
 	}
@@ -549,7 +549,7 @@ Nodes:
 	if err != nil {
 		t.Fatalf("ExpandWorkflowConfig() error = %v", err)
 	}
-	var cfg core.PipelineConfig
+	var cfg core.WorkflowConfig
 	if err := yaml.Unmarshal([]byte(out), &cfg); err != nil {
 		t.Fatalf("unmarshal expanded yaml: %v", err)
 	}

@@ -317,10 +317,10 @@ POST /api/v1/workflows
 
 ```json
 {
-  "name": "daily_image_pipeline",
+  "name": "daily_image_workflow",
   "description": "每日风景图片下载和处理流水线",
   "intent": "每天自动从 Unsplash 下载一张风景图片，压缩到 800x600，然后上传到 S3",
-  "yamlConfig": "name: daily_image_pipeline\nversion: \"1.0\"\n...",
+  "yamlConfig": "name: daily_image_workflow\nversion: \"1.0\"\n...",
   "status": "draft"
 }
 ```
@@ -340,10 +340,10 @@ GET /api/v1/workflows/:id
   "message": "success",
   "data": {
     "id": 8,
-    "name": "daily_image_pipeline",
+    "name": "daily_image_workflow",
     "description": "每日风景图片下载和处理流水线",
     "intent": "每天自动从 Unsplash 下载一张风景图片，压缩到 800x600，然后上传到 S3",
-    "yamlConfig": "name: daily_image_pipeline\nversion: \"1.0\"\n...",
+    "yamlConfig": "name: daily_image_workflow\nversion: \"1.0\"\n...",
     "status": "active",
     "createdAt": "2025-01-20T08:00:00Z",
     "updatedAt": "2025-01-20T08:00:00Z"
@@ -542,7 +542,7 @@ POST /api/v1/executions/:id/resume
   `execution_paused` SSE 事件），当前并发层的节点执行完后在层边界挂起，**不中断运行中的节点**
 - `resume`：仅 `paused` 状态可恢复，恢复后状态回到 `running`（广播 `execution_resumed`）。
   实例在内存时直接 Resume；**server 重启后也可恢复**：暂停时会导出运行时快照
-  （调用 pause 时立即导出一次 + 层边界生效时 `PipelinePaused` 事件再导出一次干净状态），
+  （调用 pause 时立即导出一次 + 层边界生效时 `WorkflowPaused` 事件再导出一次干净状态），
   resume 发现实例不在内存时自动从快照重建并增量续跑（已终结节点跳过；若崩溃发生在
   层边界之前，当时 RUNNING 的节点会重跑，at-least-once 语义）
 - `paused` 状态的执行不可续跑（`continue` 会拒绝），也不计入已结束状态
@@ -568,7 +568,7 @@ Content-Type: application/json
 - 仅影响该执行实例，不修改流水线定义（需要时用 `PUT /workflows/:id`）
 
 **无状态恢复**：执行结束时服务端会同步导出运行时快照（`flowx ExportConfig`，含各节点/步骤状态，
-不含大体积 metadata）存入 `executions.runtime_yaml`；续跑时经 `LoadPipeline` 从快照重建实例，
+不含大体积 metadata）存入 `executions.runtime_yaml`；续跑时经 `LoadWorkflow` 从快照重建实例，
 并从 `metadata_json` 恢复节点输出数据（下游 `{{ NodeId.key }}` 引用不受影响）。
 **server 重启后仍可续跑**；仅快照功能上线前创建的旧执行（runtime_yaml 为空）无法续跑。
 
@@ -644,12 +644,12 @@ PUT /api/v1/config/system
 | 命令 | 说明 | 底层 API |
 |------|------|----------|
 | `server status` / `server start` / `server stop` | server 生命周期管理（探测/后台启动/优雅停止），供 Agent 在调用其他命令前自动拉起 server | `GET /config/system`（就绪探测） |
-| `pipeline list` | 列出流水线/工作流 | `GET /workflows` |
-| `pipeline create --file wf.yaml` | 创建流水线/工作流（YAML 非法时退出码 1，stderr 含校验错误） | `POST /workflows` |
-| `pipeline update --id N --file wf.yaml` | 更新流水线/工作流 | `PUT /workflows/:id` |
-| `pipeline delete --id N` | 删除流水线/工作流 | `DELETE /workflows/:id` |
-| `pipeline run --id N [--follow]` | 运行流水线/工作流；`--follow` 跟随 SSE 日志 | `POST /workflows/:id/run`、`GET /executions/:id/stream` |
-| `execution list [--pipeline N] [--status S]` | 列出执行实例 | `GET /executions` |
+| `workflow list` | 列出流水线/工作流 | `GET /workflows` |
+| `workflow create --file wf.yaml` | 创建流水线/工作流（YAML 非法时退出码 1，stderr 含校验错误） | `POST /workflows` |
+| `workflow update --id N --file wf.yaml` | 更新流水线/工作流 | `PUT /workflows/:id` |
+| `workflow delete --id N` | 删除流水线/工作流 | `DELETE /workflows/:id` |
+| `workflow run --id N [--follow]` | 运行流水线/工作流；`--follow` 跟随 SSE 日志 | `POST /workflows/:id/run`、`GET /executions/:id/stream` |
+| `execution list [--workflow N] [--status S]` | 列出执行实例 | `GET /executions` |
 | `execution get --id E` | 执行详情（含 metadata/参数） | `GET /executions/:id` |
 | `execution nodes --id E` | 节点状态与返回数据 | `GET /executions/:id/nodes` |
 | `execution logs --id E [--node X] [--level L]` | 查询执行日志 | `GET /executions/:id/logs` |

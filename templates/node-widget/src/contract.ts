@@ -5,12 +5,12 @@
 
 export type NodeWidgetStatus = 'idle' | 'running' | 'success' | 'failed' | 'skipped'
 
-/** 参数绑定来源（Studio 解析 pipeline YAML 后随 props.paramSources 下发） */
+/** 参数绑定来源（Studio 解析 workflow YAML 后随 props.paramSources 下发） */
 export interface NodeWidgetParamSource {
-  kind: 'pipeline' | 'node' | 'literal'
-  /** kind=pipeline：流水线参数名 */
+  kind: 'workflow' | 'node' | 'literal'
+  /** kind=workflow：流水线参数名 */
   paramName?: string
-  /** kind=pipeline：流水线参数当前值（随参数面板编辑实时更新） */
+  /** kind=workflow：流水线参数当前值（随参数面板编辑实时更新） */
   paramValue?: string
   /** kind=node：被引用的上游节点实例 ID */
   nodeId?: string

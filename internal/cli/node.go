@@ -48,7 +48,7 @@ type nodeJSON struct {
 }
 
 // executorLabel 节点执行器能力/默认偏好的人类可读描述：
-// pipeline 显式选择优先；包内旧版 ref/type 固定声明次之；portable 声明展示 preferred 与支持类型。
+// workflow 显式选择优先；包内旧版 ref/type 固定声明次之；portable 声明展示 preferred 与支持类型。
 func (n nodeJSON) executorLabel() string {
 	switch {
 	case n.Executor != nil && n.Executor.Ref != "":

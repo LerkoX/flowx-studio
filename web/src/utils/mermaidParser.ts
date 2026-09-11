@@ -114,10 +114,10 @@ function templateBase(expr: string): string {
   return expr.split('|')[0].trim()
 }
 
-// 解析单个绑定值的来源：{{ Param.xxx }} → pipeline；{{ NodeId.field }} → node；其余 → literal
+// 解析单个绑定值的来源：{{ Param.xxx }} → workflow；{{ NodeId.field }} → node；其余 → literal
 function resolveParamSource(
   raw: string,
-  pipelineParams: Record<string, unknown>,
+  workflowParams: Record<string, unknown>,
   nodeNames: Record<string, string>,
 ): NodeWidgetParamSource {
   const m = FULL_TEMPLATE_RE.exec(raw)
@@ -125,9 +125,9 @@ function resolveParamSource(
   const base = templateBase(m[1])
   if (base.startsWith('Param.')) {
     const paramName = base.slice('Param.'.length).trim()
-    const source: NodeWidgetParamSource = { kind: 'pipeline', paramName }
-    if (paramName && Object.prototype.hasOwnProperty.call(pipelineParams, paramName)) {
-      const v = unwrapPipelineParamValue(pipelineParams[paramName])
+    const source: NodeWidgetParamSource = { kind: 'workflow', paramName }
+    if (paramName && Object.prototype.hasOwnProperty.call(workflowParams, paramName)) {
+      const v = unwrapWorkflowParamValue(workflowParams[paramName])
       if (v !== undefined) source.paramValue = v
     }
     return source
@@ -148,11 +148,11 @@ function resolveParamSource(
 }
 
 // Param 区参数值解包：支持标量或 { value, description } 结构，统一转字符串
-function unwrapPipelineParamValue(v: unknown): string | undefined {
+function unwrapWorkflowParamValue(v: unknown): string | undefined {
   if (v === null || v === undefined) return undefined
   if (typeof v === 'object' && !Array.isArray(v)) {
     const obj = v as Record<string, unknown>
-    if ('value' in obj) return unwrapPipelineParamValue(obj.value)
+    if ('value' in obj) return unwrapWorkflowParamValue(obj.value)
     return undefined
   }
   return typeof v === 'string' ? v : String(v)
@@ -183,7 +183,7 @@ export function parseNodeNames(yamlConfig: string): Record<string, string> {
 /**
  * 解析各节点实例参数绑定的来源信息（供节点自定义 UI 渲染「该值从哪来」）。
  * 返回 { 节点实例ID: { 参数名: 来源 } }：
- * - {{ Param.xxx }} → { kind: 'pipeline', paramName, paramValue（Param 区当前值） }
+ * - {{ Param.xxx }} → { kind: 'workflow', paramName, paramValue（Param 区当前值） }
  * - {{ NodeId.field }} → { kind: 'node', nodeId, nodeName, field }（runtimeValue 由画布运行时补充）
  * - 字面值 / 无法识别的模板 → { kind: 'literal' }
  */
@@ -194,7 +194,7 @@ export function parseParamSources(
   try {
     const doc = yaml.load(yamlConfig) as Record<string, unknown> | undefined
     if (!doc || typeof doc !== 'object') return result
-    const pipelineParams = ((doc.Param || doc.param) || {}) as Record<string, unknown>
+    const workflowParams = ((doc.Param || doc.param) || {}) as Record<string, unknown>
     const nodeNames = parseNodeNames(yamlConfig)
     const nodes = (doc.Nodes || doc.nodes) as Record<string, unknown> | undefined
     if (!nodes || typeof nodes !== 'object') return result
@@ -206,7 +206,7 @@ export function parseParamSources(
       const sources: Record<string, NodeWidgetParamSource> = {}
       for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
         const strVal = typeof v === 'string' ? v : String(v)
-        sources[k] = resolveParamSource(strVal, pipelineParams, nodeNames)
+        sources[k] = resolveParamSource(strVal, workflowParams, nodeNames)
       }
       if (Object.keys(sources).length > 0) result[id] = sources
     }

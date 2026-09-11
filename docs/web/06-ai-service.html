@@ -85,7 +85,7 @@
 
 <ul>
 <li><strong>SKILL</strong>：仓库内提供 <code>skills/flowx-studio/SKILL.md</code>，安装到 Agent 的技能目录后，Agent 在路由阶段只需加载一份简短速查表，便知道「何时用、用什么命令」。</li>
-<li><strong>CLI 客户端</strong>：<code>flowx-studio</code> 在 <code>server</code> 子命令之外提供一组客户端子命令（<code>pipeline</code> / <code>node</code> / <code>executor</code> / <code>execution</code> 等），它们是 <code>flowx-studio server</code> 的 <strong>HTTP 客户端</strong>，通过 REST API 完成全部读写。</li>
+<li><strong>CLI 客户端</strong>：<code>flowx-studio</code> 在 <code>server</code> 子命令之外提供一组客户端子命令（<code>workflow</code> / <code>node</code> / <code>executor</code> / <code>execution</code> 等），它们是 <code>flowx-studio server</code> 的 <strong>HTTP 客户端</strong>，通过 REST API 完成全部读写。</li>
 <li><strong>渐进式披露</strong>：SKILL.md 只放最小必要信息；详细用法由 <code>flowx-studio &lt;cmd&gt; --help</code> 按需展开；机器可读的参数契约由 <code>flowx-studio &lt;cmd&gt; --schema</code> 输出。Agent 只在需要时才加载更深层的信息，上下文开销最小。</li>
 </ul>
 <p>职责划分：</p>
@@ -145,7 +145,7 @@
     end
 
     subgraph FlowX Studio
-        CLI["flowx-studio CLI<br/>pipeline / node / executor / execution<br/>(HTTP 客户端)"]
+        CLI["flowx-studio CLI<br/>workflow / node / executor / execution<br/>(HTTP 客户端)"]
         HTTP["flowx-studio server<br/>Gin HTTP Server"]
         VAL[WorkflowValidator<br/>internal/validator]
         SVC[WorkflowService / NodeService<br/>NodeImportService]
@@ -256,7 +256,7 @@
 
 <p>退出码约定：<code>0</code> 成功；<code>1</code> 业务/校验失败（stderr 含错误详情与重试指引）或缺少必填参数（错误信息会提示查看 <code>--schema</code>）；<code>2</code> flag 解析错误（由 Cobra 输出用法）。</p>
 
-<p><code>pipeline</code> 命令组注册了别名 <code>workflow</code>，两者等价。</p>
+<p><code>workflow</code> 命令组注册了别名 <code>workflow</code>，两者等价。</p>
 
 <h3 id="641-server-生命周期命令daemon-管理">6.4.1 server 生命周期命令（daemon 管理）</h3>
 
@@ -287,7 +287,7 @@
 
 <p>实现要点：<code>runServer</code> 启动后将实际监听地址写入 <code>&lt;data.dir&gt;/server.json</code>（<code>{pid, host, port}</code>），<code>status</code>/<code>stop</code> 读取它探测真实端口；<code>stop</code>/<code>status</code> 通过 <code>singleton.FindRunning</code>（<code>/proc/&lt;pid&gt;/exe</code> 比对 + cmdline 子命令匹配）确认进程身份。</p>
 
-<h3 id="642-流水线命令pipeline">6.4.2 流水线命令（pipeline）</h3>
+<h3 id="642-流水线命令workflow">6.4.2 流水线命令（workflow）</h3>
 
 <table>
 <thead>
@@ -299,29 +299,29 @@
 </thead>
 <tbody>
 <tr>
-<td><code>flowx-studio pipeline list [--status s] [--search kw] [--page n] [--page-size n]</code></td>
+<td><code>flowx-studio workflow list [--status s] [--search kw] [--page n] [--page-size n]</code></td>
 <td>分页列出流水线</td>
-<td><code>list_pipelines</code></td>
+<td><code>list_workflows</code></td>
 </tr>
 <tr>
-<td><code>flowx-studio pipeline create --name n --file wf.yaml [--description d] [--status draft]</code></td>
+<td><code>flowx-studio workflow create --name n --file wf.yaml [--description d] [--status draft]</code></td>
 <td>创建流水线，YAML 经服务端校验</td>
-<td><code>create_pipeline</code></td>
+<td><code>create_workflow</code></td>
 </tr>
 <tr>
-<td><code>flowx-studio pipeline update --id N [--name n] [--file wf.yaml] [--status s]</code></td>
+<td><code>flowx-studio workflow update --id N [--name n] [--file wf.yaml] [--status s]</code></td>
 <td>更新流水线，YAML 同样被校验</td>
-<td><code>update_pipeline</code></td>
+<td><code>update_workflow</code></td>
 </tr>
 <tr>
-<td><code>flowx-studio pipeline delete --id N</code></td>
+<td><code>flowx-studio workflow delete --id N</code></td>
 <td>删除流水线</td>
-<td><code>delete_pipeline</code></td>
+<td><code>delete_workflow</code></td>
 </tr>
 <tr>
-<td><code>flowx-studio pipeline run --id N [--follow]</code></td>
+<td><code>flowx-studio workflow run --id N [--follow]</code></td>
 <td>触发执行，输出 execution id 与 stream URL；<code>--follow</code> 时在终端持续跟随 SSE 日志</td>
-<td><code>run_pipeline</code></td>
+<td><code>run_workflow</code></td>
 </tr>
 </tbody>
 </table>
@@ -330,7 +330,7 @@
 
 <ul>
 <li>YAML 通过 <code>--file</code> 从文件读入（<code>-</code> 表示 stdin），避免超长命令行转义问题。</li>
-<li><code>pipeline run</code> 默认输出 <code>Started execution id=&lt;execID&gt; streamUrl=/api/v1/executions/&lt;execID&gt;/stream</code>；加 <code>--follow</code> 后 CLI 订阅该 SSE 流并把日志打印到终端，直到执行结束。</li>
+<li><code>workflow run</code> 默认输出 <code>Started execution id=&lt;execID&gt; streamUrl=/api/v1/executions/&lt;execID&gt;/stream</code>；加 <code>--follow</code> 后 CLI 订阅该 SSE 流并把日志打印到终端，直到执行结束。</li>
 </ul>
 <h3 id="643-节点命令node">6.4.3 节点命令（node）</h3>
 
@@ -429,7 +429,7 @@
 </tr>
 <tr>
 <td><code>[[ACTION:update_workflow]]</code></td>
-<td><code>flowx-studio pipeline update --id N --file wf.yaml</code></td>
+<td><code>flowx-studio workflow update --id N --file wf.yaml</code></td>
 <td>更新流水线，非法 YAML 拒绝并给出重试指引</td>
 </tr>
 <tr>
@@ -451,7 +451,7 @@
 
 <h3 id="651-校验规则">6.5.1 校验规则</h3>
 
-<p><code>pipeline create</code> / <code>pipeline update</code> 的 YAML 由服务端 <code>WorkflowValidator</code>（<code>internal/validator/workflow.go</code>）校验，规则如下：</p>
+<p><code>workflow create</code> / <code>workflow update</code> 的 YAML 由服务端 <code>WorkflowValidator</code>（<code>internal/validator/workflow.go</code>）校验，规则如下：</p>
 
 <ol>
 <li><code>yaml_config</code> 非空且能被 YAML 解析。</li>
@@ -464,7 +464,7 @@
 </ol>
 <p>校验失败时服务端返回 400，CLI 将其转换为退出码 1，stderr 输出如：</p>
 
-<pre><code>Error: failed to create pipeline: 'Graph' must start with 'stateDiagram-v2'. Please regenerate the YAML and retry.</code></pre>
+<pre><code>Error: failed to create workflow: 'Graph' must start with 'stateDiagram-v2'. Please regenerate the YAML and retry.</code></pre>
 
 <p><strong>错误文本即重试指令</strong>，Agent 应修正 YAML 后再次执行同一命令。</p>
 
@@ -487,7 +487,7 @@
     participant V as WorkflowValidator
     participant DB as SQLite
 
-    AI->>CLI: pipeline create --file wf.yaml
+    AI->>CLI: workflow create --file wf.yaml
     CLI->>HTTP: POST /api/v1/workflows
     HTTP->>V: ValidateWorkflow(yaml)
     alt 校验失败
@@ -495,11 +495,11 @@
         HTTP-->>CLI: 400 + 错误详情
         CLI-->>AI: 退出码 1, stderr "...Please regenerate the YAML and retry."
         AI->>AI: 根据错误修正 YAML
-        AI->>CLI: pipeline create --file wf.yaml（重试）
+        AI->>CLI: workflow create --file wf.yaml（重试）
     end
     HTTP->>DB: 持久化
     HTTP-->>CLI: 200 + 工作流对象
-    CLI-->>AI: 退出码 0, "Created pipeline id=N name=..."</pre>
+    CLI-->>AI: 退出码 0, "Created workflow id=N name=..."</pre>
     </div>
 </div>
 
@@ -532,7 +532,7 @@ Nodes:
 <ol>
 <li>按 <code>nodeRef</code> 名称查找节点（<code>node list</code> 可查可用名称）；</li>
 <li>用 <code>ExpandNodeToConfig</code> 把节点包展开为 FlowX 核心 <code>NodeConfig</code>：注入环境变量（<code>env</code> 映射或默认 <code>FLOWX_PARAM_&lt;NAME&gt;</code> 模板）、写入入口文件与附属文件、拼接运行命令（<code>run</code> 或按语言默认）；</li>
-<li>按节点包 <code>supportedTypes/preferredType</code>、pipeline <code>config.executor</code> 或旧版兼容规则自动补充 Executor 定义。</li>
+<li>按节点包 <code>supportedTypes/preferredType</code>、workflow <code>config.executor</code> 或旧版兼容规则自动补充 Executor 定义。</li>
 </ol>
 <p>因此 Agent 生成 YAML 时通常只需关心 <code>Graph</code> 拓扑和 <code>nodeRef</code> 引用，节点实现细节由节点包承载。</p>
 
@@ -598,9 +598,9 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 | 列出节点（查 nodeRef） | `flowx-studio node list --json` |
 | 导入节点包 | `flowx-studio node import --type git --url &lt;repo&gt;` |
 | 创建节点 | `flowx-studio node create --file node.yaml` |
-| 创建流水线 | `flowx-studio pipeline create --name &lt;n&gt; --file wf.yaml` |
-| 更新流水线 | `flowx-studio pipeline update --id &lt;N&gt; --file wf.yaml` |
-| 运行流水线 | `flowx-studio pipeline run --id &lt;N&gt; [--follow]` |
+| 创建流水线 | `flowx-studio workflow create --name &lt;n&gt; --file wf.yaml` |
+| 更新流水线 | `flowx-studio workflow update --id &lt;N&gt; --file wf.yaml` |
+| 运行流水线 | `flowx-studio workflow run --id &lt;N&gt; [--follow]` |
 
 ## 约定
 
@@ -623,9 +623,9 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
         <pre class="mermaid">flowchart TD
     A[用户描述需求] --> B[Agent: node list --json 查询可用节点]
     B --> C[Agent: 生成 FlowX YAML 写入临时文件]
-    C --> D[Agent: pipeline create --file wf.yaml]
+    C --> D[Agent: workflow create --file wf.yaml]
     D -->|退出码 1, 校验失败| C
-    D -->|成功| E[Agent: pipeline run --id N --follow]
+    D -->|成功| E[Agent: workflow run --id N --follow]
     E --> F[用户通过 Web UI / 终端日志查看执行]
     C -.需要新节点.-> G[Agent: 编写 flowx.json + 代码]
     G --> H[Agent: node import --type folder --path ./pkg]

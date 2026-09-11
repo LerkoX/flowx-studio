@@ -40,7 +40,7 @@ Nodes:
 		t.Errorf("lookup should receive raw ref, got %q", gotRef)
 	}
 
-	var cfg core.PipelineConfig
+	var cfg core.WorkflowConfig
 	if err := yaml.Unmarshal([]byte(out), &cfg); err != nil {
 		t.Fatalf("unmarshal expanded yaml: %v", err)
 	}

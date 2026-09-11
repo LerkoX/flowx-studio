@@ -21,7 +21,7 @@
 **2026-08-17 架构调整**：移除 `internal/mcpserver` 与 `flowx-studio mcp` 子命令，改为 **SKILL + CLI** 模式：
 
 - **SKILL**：仓库内提供 `skills/flowx-studio/SKILL.md`，安装到 Agent 的技能目录后，Agent 在路由阶段只需加载一份简短速查表，便知道「何时用、用什么命令」。
-- **CLI 客户端**：`flowx-studio` 在 `server` 子命令之外提供一组客户端子命令（`pipeline` / `node` / `executor` / `execution` 等），它们是 `flowx-studio server` 的 **HTTP 客户端**，通过 REST API 完成全部读写。
+- **CLI 客户端**：`flowx-studio` 在 `server` 子命令之外提供一组客户端子命令（`workflow` / `node` / `executor` / `execution` 等），它们是 `flowx-studio server` 的 **HTTP 客户端**，通过 REST API 完成全部读写。
 - **渐进式披露**：SKILL.md 只放最小必要信息；详细用法由 `flowx-studio <cmd> --help` 按需展开；机器可读的参数契约由 `flowx-studio <cmd> --schema` 输出。Agent 只在需要时才加载更深层的信息，上下文开销最小。
 
 职责划分：
@@ -51,7 +51,7 @@ flowchart LR
     end
 
     subgraph FlowX Studio
-        CLI["flowx-studio CLI<br/>pipeline / node / executor / execution<br/>(HTTP 客户端)"]
+        CLI["flowx-studio CLI<br/>workflow / node / executor / execution<br/>(HTTP 客户端)"]
         HTTP["flowx-studio server<br/>Gin HTTP Server"]
         VAL[WorkflowValidator<br/>internal/validator]
         SVC[WorkflowService / NodeService<br/>NodeImportService]
@@ -113,7 +113,7 @@ CLI 客户端子命令覆盖原 MCP 8 个工具的全部能力，并新增原 FA
 
 退出码约定：`0` 成功；`1` 业务/校验失败（stderr 含错误详情与重试指引）或缺少必填参数（错误信息会提示查看 `--schema`）；`2` flag 解析错误（由 Cobra 输出用法）。
 
-`pipeline` 命令组注册了别名 `workflow`，两者等价。
+`workflow` 命令组注册了别名 `workflow`，两者等价。
 
 ### 6.4.1 server 生命周期命令（daemon 管理）
 
@@ -127,20 +127,20 @@ CLI 调用前可用以下命令探测与启动 server；`status` 退出码恒为
 
 实现要点：`runServer` 启动后将实际监听地址写入 `<data.dir>/server.json`（`{pid, host, port}`），`status`/`stop` 读取它探测真实端口；`stop`/`status` 通过 `singleton.FindRunning`（`/proc/<pid>/exe` 比对 + cmdline 子命令匹配）确认进程身份。
 
-### 6.4.2 流水线命令（pipeline）
+### 6.4.2 流水线命令（workflow）
 
 | 命令 | 说明 | 对应原 MCP 工具 |
 | --- | --- | --- |
-| `flowx-studio pipeline list [--status s] [--search kw] [--page n] [--page-size n]` | 分页列出流水线 | `list_pipelines` |
-| `flowx-studio pipeline create --name n --file wf.yaml [--description d] [--status draft]` | 创建流水线，YAML 经服务端校验 | `create_pipeline` |
-| `flowx-studio pipeline update --id N [--name n] [--file wf.yaml] [--status s]` | 更新流水线，YAML 同样被校验 | `update_pipeline` |
-| `flowx-studio pipeline delete --id N` | 删除流水线 | `delete_pipeline` |
-| `flowx-studio pipeline run --id N [--follow]` | 触发执行，输出 execution id 与 stream URL；`--follow` 时在终端持续跟随 SSE 日志 | `run_pipeline` |
+| `flowx-studio workflow list [--status s] [--search kw] [--page n] [--page-size n]` | 分页列出流水线 | `list_workflows` |
+| `flowx-studio workflow create --name n --file wf.yaml [--description d] [--status draft]` | 创建流水线，YAML 经服务端校验 | `create_workflow` |
+| `flowx-studio workflow update --id N [--name n] [--file wf.yaml] [--status s]` | 更新流水线，YAML 同样被校验 | `update_workflow` |
+| `flowx-studio workflow delete --id N` | 删除流水线 | `delete_workflow` |
+| `flowx-studio workflow run --id N [--follow]` | 触发执行，输出 execution id 与 stream URL；`--follow` 时在终端持续跟随 SSE 日志 | `run_workflow` |
 
 说明：
 
 - YAML 通过 `--file` 从文件读入（`-` 表示 stdin），避免超长命令行转义问题。
-- `pipeline run` 默认输出 `Started execution id=<execID> streamUrl=/api/v1/executions/<execID>/stream`；加 `--follow` 后 CLI 订阅该 SSE 流并把日志打印到终端，直到执行结束。
+- `workflow run` 默认输出 `Started execution id=<execID> streamUrl=/api/v1/executions/<execID>/stream`；加 `--follow` 后 CLI 订阅该 SSE 流并把日志打印到终端，直到执行结束。
 
 ### 6.4.3 节点命令（node）
 
@@ -170,7 +170,7 @@ CLI 调用前可用以下命令探测与启动 server；`status` 退出码恒为
 | 原 FAP 标签 | 承接方式 | 行为 |
 | --- | --- | --- |
 | `[[ACTION:create_node]]` | `flowx-studio node create --file node.yaml` | 创建节点，输出新节点摘要 |
-| `[[ACTION:update_workflow]]` | `flowx-studio pipeline update --id N --file wf.yaml` | 更新流水线，非法 YAML 拒绝并给出重试指引 |
+| `[[ACTION:update_workflow]]` | `flowx-studio workflow update --id N --file wf.yaml` | 更新流水线，非法 YAML 拒绝并给出重试指引 |
 | `[[ACTION:ask_input]]` | 已移除 | 对话式 Agent 可直接在会话中向用户提问，无需专用命令 |
 | `[[ACTION:show_info]]` | 已移除 | 对话式 Agent 可直接在会话中汇报结果，无需专用命令 |
 
@@ -180,7 +180,7 @@ CLI 调用前可用以下命令探测与启动 server；`status` 退出码恒为
 
 ### 6.5.1 校验规则
 
-`pipeline create` / `pipeline update` 的 YAML 由服务端 `WorkflowValidator`（`internal/validator/workflow.go`）校验，规则如下：
+`workflow create` / `workflow update` 的 YAML 由服务端 `WorkflowValidator`（`internal/validator/workflow.go`）校验，规则如下：
 
 1. `yaml_config` 非空且能被 YAML 解析。
 2. 必须包含非空字符串字段 `Name`。
@@ -193,7 +193,7 @@ CLI 调用前可用以下命令探测与启动 server；`status` 退出码恒为
 校验失败时服务端返回 400，CLI 将其转换为退出码 1，stderr 输出如：
 
 ```
-Error: failed to create pipeline: 'Graph' must start with 'stateDiagram-v2'. Please regenerate the YAML and retry.
+Error: failed to create workflow: 'Graph' must start with 'stateDiagram-v2'. Please regenerate the YAML and retry.
 ```
 
 **错误文本即重试指令**，Agent 应修正 YAML 后再次执行同一命令。
@@ -208,7 +208,7 @@ sequenceDiagram
     participant V as WorkflowValidator
     participant DB as SQLite
 
-    AI->>CLI: pipeline create --file wf.yaml
+    AI->>CLI: workflow create --file wf.yaml
     CLI->>HTTP: POST /api/v1/workflows
     HTTP->>V: ValidateWorkflow(yaml)
     alt 校验失败
@@ -216,11 +216,11 @@ sequenceDiagram
         HTTP-->>CLI: 400 + 错误详情
         CLI-->>AI: 退出码 1, stderr "...Please regenerate the YAML and retry."
         AI->>AI: 根据错误修正 YAML
-        AI->>CLI: pipeline create --file wf.yaml（重试）
+        AI->>CLI: workflow create --file wf.yaml（重试）
     end
     HTTP->>DB: 持久化
     HTTP-->>CLI: 200 + 工作流对象
-    CLI-->>AI: 退出码 0, "Created pipeline id=N name=..."
+    CLI-->>AI: 退出码 0, "Created workflow id=N name=..."
 ```
 
 ### 6.5.3 nodeRef 引用与展开
@@ -255,7 +255,7 @@ Nodes:
 
 1. 按 `nodeRef` 名称查找节点（`node list` 可查可用名称）；
 2. 用 `ExpandNodeToConfig` 把节点包展开为 FlowX 核心 `NodeConfig`：注入环境变量（`env` 映射或默认 `FLOWX_PARAM_<NAME>` 模板）、写入入口文件与附属文件、拼接运行命令（`run` 或按语言默认）；
-3. 按节点包 `supportedTypes/preferredType`、pipeline `config.executor` 或旧版兼容规则自动补充 Executor 定义。
+3. 按节点包 `supportedTypes/preferredType`、workflow `config.executor` 或旧版兼容规则自动补充 Executor 定义。
 
 因此 Agent 生成 YAML 时通常只需关心 `Graph` 拓扑和 `nodeRef` 引用，节点实现细节由节点包承载。
 
@@ -321,9 +321,9 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 | 列出节点（查 nodeRef） | `flowx-studio node list --json` |
 | 导入节点包 | `flowx-studio node import --type git --url <repo>` |
 | 创建节点 | `flowx-studio node create --file node.yaml` |
-| 创建流水线 | `flowx-studio pipeline create --name <n> --file wf.yaml` |
-| 更新流水线 | `flowx-studio pipeline update --id <N> --file wf.yaml` |
-| 运行流水线 | `flowx-studio pipeline run --id <N> [--follow]` |
+| 创建流水线 | `flowx-studio workflow create --name <n> --file wf.yaml` |
+| 更新流水线 | `flowx-studio workflow update --id <N> --file wf.yaml` |
+| 运行流水线 | `flowx-studio workflow run --id <N> [--follow]` |
 
 ## 约定
 
@@ -338,9 +338,9 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 flowchart TD
     A[用户描述需求] --> B[Agent: node list --json 查询可用节点]
     B --> C[Agent: 生成 FlowX YAML 写入临时文件]
-    C --> D[Agent: pipeline create --file wf.yaml]
+    C --> D[Agent: workflow create --file wf.yaml]
     D -->|退出码 1, 校验失败| C
-    D -->|成功| E[Agent: pipeline run --id N --follow]
+    D -->|成功| E[Agent: workflow run --id N --follow]
     E --> F[用户通过 Web UI / 终端日志查看执行]
     C -.需要新节点.-> G[Agent: 编写 flowx.json + 代码]
     G --> H[Agent: node import --type folder --path ./pkg]

@@ -73,7 +73,7 @@
 <ul>
 <li>新增 <code>executors</code> 表（迁移 010）：命名执行器实例（<code>name/type/description/config/is_default</code>）；<strong>local 全局限一个</strong>（部分唯一索引）、<strong>docker 可多实例</strong>、全局唯一默认执行器（迁移时自动播种 <code>local</code>）。</li>
 <li><code>ExecutorService</code> + <code>ExecutorHandler</code>：<code>GET/POST /api/v1/executors</code>、<code>GET/PUT/DELETE /executors/:id</code>、<code>PUT /executors/:id/default</code>；name/type 不可变更、默认执行器禁删；config 按类型做键白名单与类型校验；写操作接审计与事件总线。</li>
-<li><strong>portable 执行器声明</strong>：flowx.json 推荐用 <code>executor.supportedTypes</code> + <code>executor.preferredType</code> 声明支持类型与偏好，不绑定用户环境中的实例名；pipeline YAML 可用 <code>config.executor</code> 按类型或具体实例覆盖。旧版 <code>executor.ref</code>/<code>executor.type</code> 继续兼容。运行时解析：pipeline 显式选择 → 旧版 <code>ref</code> → 旧版 <code>type+config</code> → portable 偏好/降级 → 有 <code>image</code> 归 docker / 无 <code>image</code> 用全局默认执行器。解析结果同时决定资产引导方式（local→cp，docker→签名 URL）。</li>
+<li><strong>portable 执行器声明</strong>：flowx.json 推荐用 <code>executor.supportedTypes</code> + <code>executor.preferredType</code> 声明支持类型与偏好，不绑定用户环境中的实例名；workflow YAML 可用 <code>config.executor</code> 按类型或具体实例覆盖。旧版 <code>executor.ref</code>/<code>executor.type</code> 继续兼容。运行时解析：workflow 显式选择 → 旧版 <code>ref</code> → 旧版 <code>type+config</code> → portable 偏好/降级 → 有 <code>image</code> 归 docker / 无 <code>image</code> 用全局默认执行器。解析结果同时决定资产引导方式（local→cp，docker→签名 URL）。</li>
 <li><strong>k8s 暂不支持</strong>：<code>executor.type: k8s/kubernetes</code> 导入拒绝；前端 <code>/executors</code> 移除 K8s 卡片。</li>
 <li><strong>远程 Docker</strong>（FlowX 核心同步增强）：docker adapter 新增 <code>host</code>/<code>tlsVerify</code>/<code>certPath</code> 配置（<code>tcp://…</code>、<code>ssh://user@host</code>），client 惰性创建，未配置 <code>host</code> 时回退 <code>DOCKER_HOST</code> 环境变量（原行为不变）；每个 docker 实例可连不同 daemon。</li>
 <li>前端 <code>/executors</code> 重写为实例管理页（真实 API 落地 + SSE 实时刷新 + 设为默认/删除），假监控面板移除；CLI 新增 <code>executor list/create/update/delete/set-default</code>（含 <code>--schema</code>）。</li>
@@ -111,8 +111,8 @@
 <h3 id="架构方向调整mcp-服务端-skill-cli-渐进式披露已落地">架构方向调整：MCP 服务端 → SKILL + CLI 渐进式披露（已落地）</h3>
 <ul>
 <li>移除 <code>internal/mcpserver</code> 与 <code>flowx-studio mcp</code> 子命令，不再以 stdio MCP 服务端形式集成 AI。</li>
-<li>新增 <strong><code>internal/cli</code> CLI 客户端子命令</strong>：<code>pipeline list/create/update/delete/run</code>、<code>node list/create/delete/import/mock</code>，作为 <code>flowx-studio server</code> 的 HTTP 客户端。</li>
-<li>新增 <strong>终端交互命令</strong> <code>ask</code> / <code>info</code>，承接原 FAP 的 <code>ask_input</code> / <code>show_info</code> 动作语义；原 FAP 的 <code>create_node</code> / <code>update_workflow</code> 由 <code>node create</code> / <code>pipeline update</code> 承接。<strong>FAP 协议整体废弃，不再实现标签解析</strong>。（后续调整：<code>ask</code> / <code>info</code> 已移除——对话式 Agent 可直接在会话中提问与汇报，无需 CLI 中介。）</li>
+<li>新增 <strong><code>internal/cli</code> CLI 客户端子命令</strong>：<code>workflow list/create/update/delete/run</code>、<code>node list/create/delete/import/mock</code>，作为 <code>flowx-studio server</code> 的 HTTP 客户端。</li>
+<li>新增 <strong>终端交互命令</strong> <code>ask</code> / <code>info</code>，承接原 FAP 的 <code>ask_input</code> / <code>show_info</code> 动作语义；原 FAP 的 <code>create_node</code> / <code>update_workflow</code> 由 <code>node create</code> / <code>workflow update</code> 承接。<strong>FAP 协议整体废弃，不再实现标签解析</strong>。（后续调整：<code>ask</code> / <code>info</code> 已移除——对话式 Agent 可直接在会话中提问与汇报，无需 CLI 中介。）</li>
 <li>新增 <strong><code>skills/flowx-studio/SKILL.md</code></strong>：AI Agent 技能速查表；配合 CLI 的 <code>--help</code>（用法层）与 <code>--schema</code>（参数 JSON Schema 契约层）实现渐进式披露。</li>
 <li>约定：查询类子命令支持 <code>--json</code>；校验失败退出码 1、stderr 含重试指引；flag 用法错误退出码 2；<code>--server</code> flag / <code>FLOWX_STUDIO_SERVER_URL</code> 指定 server 地址。</li>
 <li>收益：所有写操作收敛到 HTTP server 单进程，Web UI 经 SSE 可实时感知 Agent 操作（旧 MCP 模式跨进程事件不可达的问题消失）。</li>
@@ -271,7 +271,7 @@
 <td>13</td>
 <td>CLI 客户端与 SKILL</td>
 <td>✅ 已完成</td>
-<td><code>internal/cli</code>（pipeline/node/executor/execution 等）+ <code>skills/flowx-studio/SKILL.md</code> 已落地；<code>mcp</code> 子命令与 <code>ask</code>/<code>info</code> 交互命令已移除</td>
+<td><code>internal/cli</code>（workflow/node/executor/execution 等）+ <code>skills/flowx-studio/SKILL.md</code> 已落地；<code>mcp</code> 子命令与 <code>ask</code>/<code>info</code> 交互命令已移除</td>
 </tr>
 </tbody>
 </table>
@@ -293,7 +293,7 @@
 <li>[x] 统一 API 响应格式 (<code>{code, data, message}</code>)</li>
 <li>[x] <code>go:embed</code> 嵌入前端资源</li>
 <li>[x] SPA fallback 到 <code>index.html</code></li>
-<li>[x] Cobra CLI（<code>server</code> / <code>version</code> 子命令 + 客户端子命令 <code>pipeline</code>/<code>node</code>/<code>executor</code>/<code>execution</code> 等；版本信息由 <code>-ldflags</code> 注入）</li>
+<li>[x] Cobra CLI（<code>server</code> / <code>version</code> 子命令 + 客户端子命令 <code>workflow</code>/<code>node</code>/<code>executor</code>/<code>execution</code> 等；版本信息由 <code>-ldflags</code> 注入）</li>
 <li>[x] Makefile (<code>build</code>, <code>run</code>, <code>clean</code>)</li>
 </ul>
 <h4 id="2-数据模型">2. 数据模型</h4>
@@ -408,7 +408,7 @@
 <h4 id="8-cli-客户端与-skill替代原-mcp-服务端">8. CLI 客户端与 SKILL（替代原 MCP 服务端）</h4>
 <ul>
 <li>[x] <code>internal/cli</code> HTTP 客户端封装（<code>--server</code> flag / <code>FLOWX_STUDIO_SERVER_URL</code>，默认 <code>http://127.0.0.1:8080</code>）</li>
-<li>[x] <code>pipeline list / create / update / delete / run</code> 子命令（<code>run --follow</code> 跟随 SSE 日志）</li>
+<li>[x] <code>workflow list / create / update / delete / run</code> 子命令（<code>run --follow</code> 跟随 SSE 日志）</li>
 <li>[x] <code>node list / create / delete / import / mock</code> 子命令</li>
 <li>[x] 全局 <code>--json</code> 机器可读输出、写命令 <code>--schema</code> 参数 JSON Schema 输出</li>
 <li>[x] 校验失败退出码 1 + stderr 重试指引；flag 用法错误退出码 2</li>
@@ -452,7 +452,7 @@
 </tr>
 <tr>
 <td><code>[[ACTION:update_workflow]]</code></td>
-<td><code>flowx-studio pipeline update --id N --file wf.yaml</code></td>
+<td><code>flowx-studio workflow update --id N --file wf.yaml</code></td>
 </tr>
 <tr>
 <td><code>[[ACTION:ask_input]]</code></td>
@@ -504,7 +504,7 @@
 │   │   └── event_handler.go          # SSE 事件订阅 API
 │   ├── cli/                          # CLI 客户端子命令（HTTP client）
 │   │   ├── client.go                 # HTTP 客户端封装（--server / FLOWX_STUDIO_SERVER_URL）
-│   │   ├── pipeline.go               # pipeline list/create/update/delete/run
+│   │   ├── workflow.go               # workflow list/create/update/delete/run
 │   │   ├── node.go                   # node list/create/delete/import/mock
 │   │   ├── daemon.go                 # server start/stop/status 守护管理
 │   │   ├── audit.go                  # audit list 审计日志查询

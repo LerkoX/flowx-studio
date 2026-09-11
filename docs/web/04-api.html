@@ -445,10 +445,10 @@
 <p><strong>请求体</strong>：绑定 <code>model.Workflow</code> 结构，<code>name</code> 与 <code>yamlConfig</code> 必填。</p>
 
 <pre><code class="language-json">{
-  "name": "daily_image_pipeline",
+  "name": "daily_image_workflow",
   "description": "每日风景图片下载和处理流水线",
   "intent": "每天自动从 Unsplash 下载一张风景图片，压缩到 800x600，然后上传到 S3",
-  "yamlConfig": "name: daily_image_pipeline\nversion: \"1.0\"\n...",
+  "yamlConfig": "name: daily_image_workflow\nversion: \"1.0\"\n...",
   "status": "draft"
 }</code></pre>
 
@@ -464,10 +464,10 @@
   "message": "success",
   "data": {
     "id": 8,
-    "name": "daily_image_pipeline",
+    "name": "daily_image_workflow",
     "description": "每日风景图片下载和处理流水线",
     "intent": "每天自动从 Unsplash 下载一张风景图片，压缩到 800x600，然后上传到 S3",
-    "yamlConfig": "name: daily_image_pipeline\nversion: \"1.0\"\n...",
+    "yamlConfig": "name: daily_image_workflow\nversion: \"1.0\"\n...",
     "status": "active",
     "createdAt": "2025-01-20T08:00:00Z",
     "updatedAt": "2025-01-20T08:00:00Z"
@@ -705,7 +705,7 @@ POST /api/v1/executions/:id/resume</code></pre>
 <li><code>resume</code>：仅 <code>paused</code> 状态可恢复，恢复后状态回到 <code>running</code>（广播 <code>execution_resumed</code>）。</li>
 </ul>
 <p>  实例在内存时直接 Resume；<strong>server 重启后也可恢复</strong>：暂停时会导出运行时快照</p>
-<p>  （调用 pause 时立即导出一次 + 层边界生效时 <code>PipelinePaused</code> 事件再导出一次干净状态），</p>
+<p>  （调用 pause 时立即导出一次 + 层边界生效时 <code>WorkflowPaused</code> 事件再导出一次干净状态），</p>
 <p>  resume 发现实例不在内存时自动从快照重建并增量续跑（已终结节点跳过；若崩溃发生在</p>
 <p>  层边界之前，当时 RUNNING 的节点会重跑，at-least-once 语义）</p>
 <ul>
@@ -729,7 +729,7 @@ Content-Type: application/json
 <li>仅影响该执行实例，不修改流水线定义（需要时用 <code>PUT /workflows/:id</code>）</li>
 </ul>
 <p><strong>无状态恢复</strong>：执行结束时服务端会同步导出运行时快照（<code>flowx ExportConfig</code>，含各节点/步骤状态，</p>
-<p>不含大体积 metadata）存入 <code>executions.runtime_yaml</code>；续跑时经 <code>LoadPipeline</code> 从快照重建实例，</p>
+<p>不含大体积 metadata）存入 <code>executions.runtime_yaml</code>；续跑时经 <code>LoadWorkflow</code> 从快照重建实例，</p>
 <p>并从 <code>metadata_json</code> 恢复节点输出数据（下游 <code>{{ NodeId.key }}</code> 引用不受影响）。</p>
 <p><strong>server 重启后仍可续跑</strong>；仅快照功能上线前创建的旧执行（runtime_yaml 为空）无法续跑。</p>
 
@@ -803,32 +803,32 @@ Content-Type: application/json
 <td><code>GET /config/system</code>（就绪探测）</td>
 </tr>
 <tr>
-<td><code>pipeline list</code></td>
+<td><code>workflow list</code></td>
 <td>列出流水线/工作流</td>
 <td><code>GET /workflows</code></td>
 </tr>
 <tr>
-<td><code>pipeline create --file wf.yaml</code></td>
+<td><code>workflow create --file wf.yaml</code></td>
 <td>创建流水线/工作流（YAML 非法时退出码 1，stderr 含校验错误）</td>
 <td><code>POST /workflows</code></td>
 </tr>
 <tr>
-<td><code>pipeline update --id N --file wf.yaml</code></td>
+<td><code>workflow update --id N --file wf.yaml</code></td>
 <td>更新流水线/工作流</td>
 <td><code>PUT /workflows/:id</code></td>
 </tr>
 <tr>
-<td><code>pipeline delete --id N</code></td>
+<td><code>workflow delete --id N</code></td>
 <td>删除流水线/工作流</td>
 <td><code>DELETE /workflows/:id</code></td>
 </tr>
 <tr>
-<td><code>pipeline run --id N [--follow]</code></td>
+<td><code>workflow run --id N [--follow]</code></td>
 <td>运行流水线/工作流；<code>--follow</code> 跟随 SSE 日志</td>
 <td><code>POST /workflows/:id/run</code>、<code>GET /executions/:id/stream</code></td>
 </tr>
 <tr>
-<td><code>execution list [--pipeline N] [--status S]</code></td>
+<td><code>execution list [--workflow N] [--status S]</code></td>
 <td>列出执行实例</td>
 <td><code>GET /executions</code></td>
 </tr>

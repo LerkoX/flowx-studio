@@ -343,7 +343,7 @@ func (s *ExecutorService) SetDefault(id int64) (*model.Executor, error) {
 
 // ResolveTypeForNode 按执行器类型选择实例：优先全局默认实例（类型匹配时），
 // 否则按 List 的稳定顺序选择该类型的第一个实例；没有该类型实例时返回 nil。
-// 供 portable 节点包（supportedTypes/preferredType）与 pipeline 类型级覆盖使用。
+// 供 portable 节点包（supportedTypes/preferredType）与 workflow 类型级覆盖使用。
 func (s *ExecutorService) ResolveTypeForNode(execType string) (*model.Executor, error) {
 	execType = strings.ToLower(strings.TrimSpace(execType))
 	if execType == "" {

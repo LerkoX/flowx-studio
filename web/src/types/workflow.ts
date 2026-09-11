@@ -1,4 +1,4 @@
-export interface PipelineParam {
+export interface WorkflowParam {
   key: string
   value: string | number | boolean | object
   description?: string

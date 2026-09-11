@@ -32,7 +32,7 @@ interface GlowNodeData {
   nodeUpdatedAt?: string
   /** 自定义 UI 组件配置 */
   ui?: NodeUIConfig
-  /** 节点实例当前参数绑定（pipeline YAML config.params），供自定义 UI 展示 */
+  /** 节点实例当前参数绑定（workflow YAML config.params），供自定义 UI 展示 */
   params?: Record<string, string>
   /** 各参数绑定的来源信息（Studio 解析 YAML 生成；node 类的 runtimeValue 由本组件补充） */
   paramSources?: Record<string, NodeWidgetParamSource>
@@ -255,9 +255,11 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
 
         {/* 内嵌自定义 UI 组件（桌面端常显；移动端随详情展开） */}
         {hasUI && (!isMobile || detailsExpanded) && (
-          // 预览模式拦截组件区域的指针事件；“查看数据”开关恢复可点击
+          // 预览/回放态不再拦截指针事件：只读由契约保证（回放态不下发 onParamsChange，
+          // 组件自行进入只读）；交互式组件（如对话弹窗、查看详情）在预览态需要可点击。
+          // 拖拽/滚轮误触由 ModuleNodeWidget 容器的 nodrag nowheel class 拦截。
           <div
-            className={`mt-2 pt-2 border-t border-white/10 ${interactive ? '' : 'pointer-events-none'}`}
+            className="mt-2 pt-2 border-t border-white/10"
           >
             {widgetScale < 1 ? (
               // 移动端收窄：按原始尺寸挂载组件，再用 transform 等比缩小到节点宽度

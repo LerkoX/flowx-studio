@@ -64,10 +64,10 @@ FXS_LOCAL() { FLOWX_STUDIO_DATA_DIR="${DATA_DIR}" "${BINARY}" "$@"; }  # server 
 # ---------- 1. CLI 基础 ----------
 say "== 1. CLI basics =="
 assert_exit "1.1 help lists command tree" 0 "${BINARY}" --help
-for c in server pipeline node version; do
+for c in server workflow node version; do
     assert_contains "1.1 help contains '$c'" "$c"
 done
-assert_exit "1.2 pipeline create --schema" 0 FXS pipeline create --schema
+assert_exit "1.2 workflow create --schema" 0 FXS workflow create --schema
 assert_contains "1.2 schema has required" '"required"'
 echo "${LAST_OUT}" | python3 -c "import json,sys; json.load(sys.stdin)" 2>/dev/null \
     && ok "1.2 schema is valid JSON" || bad "1.2 schema is valid JSON"
@@ -76,7 +76,7 @@ assert_contains "1.3 version output" "flowx-studio"
 
 # ---------- 6.1 server 未启动时的错误路径（在启动前验证） ----------
 say "== 6. error paths (before start) =="
-assert_exit "6.1 pipeline list without server" 1 FXS pipeline list
+assert_exit "6.1 workflow list without server" 1 FXS workflow list
 assert_contains "6.1 connect error message" "cannot connect to server"
 assert_contains "6.1 hints server command" "flowx-studio server"
 
@@ -163,7 +163,7 @@ NOT_FOUND=$(curl -s -o /dev/null -w '%{http_code}' -H "${AUTH_HEADER}" "${BASE_U
 [ "${NOT_FOUND}" = "404" ] && ok "3b.5 missing ui file is 404" || bad "3b.5 missing ui file is 404 (got ${NOT_FOUND})"
 
 # ---------- 4. 流水线管理 ----------
-say "== 4. pipeline management =="
+say "== 4. workflow management =="
 cat > "${WORK_DIR}/wf.yaml" <<'EOF'
 Version: "1.0"
 Name: e2e-wf
@@ -181,29 +181,29 @@ Nodes:
     executor: local
     steps:
       - name: hello
-        run: echo "e2e pipeline ran"
+        run: echo "e2e workflow ran"
 EOF
-assert_exit "4.1 pipeline create" 0 FXS pipeline create --name e2e-wf --file "${WORK_DIR}/wf.yaml"
-assert_contains "4.1 created message" "Created pipeline id="
+assert_exit "4.1 workflow create" 0 FXS workflow create --name e2e-wf --file "${WORK_DIR}/wf.yaml"
+assert_contains "4.1 created message" "Created workflow id="
 WF_ID=$(printf '%s' "${LAST_OUT}" | sed -n 's/.*id=\([0-9]*\).*/\1/p' | head -1)
 
 echo 'Name: bad' > "${WORK_DIR}/bad-wf.yaml"
-assert_exit "4.2 create invalid yaml" 1 FXS pipeline create --name bad --file "${WORK_DIR}/bad-wf.yaml"
+assert_exit "4.2 create invalid yaml" 1 FXS workflow create --name bad --file "${WORK_DIR}/bad-wf.yaml"
 assert_contains "4.2 retry hint" "Please regenerate the YAML and retry."
 
-assert_exit "6.3 missing required flags" 1 FXS pipeline create
+assert_exit "6.3 missing required flags" 1 FXS workflow create
 assert_contains "6.3 hints --schema" "--schema"
 
 # 更新合并语义：不传 --file 时 yaml 保持原值
 BEFORE=$(curl -s -H "Authorization: Bearer $(cat "${DATA_DIR}/auth.token")" "${BASE_URL}/api/v1/workflows/${WF_ID}" | python3 -c "import json,sys; print(json.load(sys.stdin)['data']['yamlConfig'])")
-assert_exit "4.3 pipeline update status only" 0 FXS pipeline update --id "${WF_ID}" --status active
+assert_exit "4.3 workflow update status only" 0 FXS workflow update --id "${WF_ID}" --status active
 AFTER=$(curl -s -H "Authorization: Bearer $(cat "${DATA_DIR}/auth.token")" "${BASE_URL}/api/v1/workflows/${WF_ID}" | python3 -c "import json,sys; print(json.load(sys.stdin)['data']['yamlConfig'])")
 [ "${BEFORE}" = "${AFTER}" ] && ok "4.3 yaml preserved on partial update" || bad "4.3 yaml preserved on partial update"
 
-assert_exit "4.4 pipeline list json" 0 FXS pipeline list --json
+assert_exit "4.4 workflow list json" 0 FXS workflow list --json
 assert_contains "4.4 list contains workflow" "e2e-wf"
 
-assert_exit "4.5 run --follow success" 0 FXS pipeline run --id "${WF_ID}" --follow
+assert_exit "4.5 run --follow success" 0 FXS workflow run --id "${WF_ID}" --follow
 assert_contains "4.5 node name shown" "Hello"
 assert_contains "4.5 success status" "SUCCESS"
 
@@ -226,13 +226,13 @@ Nodes:
       - name: boom
         run: exit 1
 EOF
-FXS pipeline create --name e2e-fail-wf --file "${WORK_DIR}/fail-wf.yaml" >/dev/null 2>&1
-FAIL_WF_ID=$(FXS pipeline list --json | python3 -c "import json,sys; print([w['id'] for w in json.load(sys.stdin)['items'] if w['name']=='e2e-fail-wf'][0])")
-assert_exit "4.6 run --follow failure exits 1" 1 FXS pipeline run --id "${FAIL_WF_ID}" --follow
+FXS workflow create --name e2e-fail-wf --file "${WORK_DIR}/fail-wf.yaml" >/dev/null 2>&1
+FAIL_WF_ID=$(FXS workflow list --json | python3 -c "import json,sys; print([w['id'] for w in json.load(sys.stdin)['items'] if w['name']=='e2e-fail-wf'][0])")
+assert_exit "4.6 run --follow failure exits 1" 1 FXS workflow run --id "${FAIL_WF_ID}" --follow
 assert_contains "4.6 failed status" "FAILED"
 
-assert_exit "4.7 pipeline delete" 0 FXS pipeline delete --id "${WF_ID}"
-assert_contains "4.7 deleted message" "Deleted pipeline id="
+assert_exit "4.7 workflow delete" 0 FXS workflow delete --id "${WF_ID}"
+assert_contains "4.7 deleted message" "Deleted workflow id="
 
 # ---------- 7. 审计日志 ----------
 say "== 7. audit logs =="
@@ -306,7 +306,7 @@ assert_contains "11.8 schema has host" "host"
 
 # ---------- 5. 其余错误路径 ----------
 say "== 6. error paths =="
-assert_exit "6.2 unknown flag" 2 FXS pipeline list --nope
+assert_exit "6.2 unknown flag" 2 FXS workflow list --nope
 assert_contains "6.2 unknown flag message" "unknown flag"
 
 # ---------- 收尾：生命周期停止用例 ----------

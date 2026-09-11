@@ -149,23 +149,23 @@ Nodes:
 
   it('识别流水线参数引用并附当前值', () => {
     const sources = parseParamSources(yaml)
-    expect(sources.KSampler.seed).toEqual({ kind: 'pipeline', paramName: 'seed', paramValue: '-1' })
+    expect(sources.KSampler.seed).toEqual({ kind: 'workflow', paramName: 'seed', paramValue: '-1' })
     expect(sources.KSampler.steps).toEqual({ kind: 'literal' })
   })
 
   it('解包 { value, description } 形式的流水线参数', () => {
     const sources = parseParamSources(yaml)
-    expect(sources.KSampler.prompt).toEqual({ kind: 'pipeline', paramName: 'prompt', paramValue: 'a cat' })
+    expect(sources.KSampler.prompt).toEqual({ kind: 'workflow', paramName: 'prompt', paramValue: 'a cat' })
   })
 
   it('空字符串参数值正常下发', () => {
     const sources = parseParamSources(yaml)
-    expect(sources.KSampler.token).toEqual({ kind: 'pipeline', paramName: 'token', paramValue: '' })
+    expect(sources.KSampler.token).toEqual({ kind: 'workflow', paramName: 'token', paramValue: '' })
   })
 
   it('引用未定义的流水线参数时 paramValue 缺省', () => {
     const sources = parseParamSources(yaml)
-    expect(sources.KSampler.missing).toEqual({ kind: 'pipeline', paramName: 'not_defined' })
+    expect(sources.KSampler.missing).toEqual({ kind: 'workflow', paramName: 'not_defined' })
     expect(sources.KSampler.missing.paramValue).toBeUndefined()
   })
 
@@ -186,7 +186,7 @@ Nodes:
 
   it('剥离模板过滤器', () => {
     const sources = parseParamSources(yaml)
-    expect(sources.KSampler.filtered).toEqual({ kind: 'pipeline', paramName: 'seed', paramValue: '-1' })
+    expect(sources.KSampler.filtered).toEqual({ kind: 'workflow', paramName: 'seed', paramValue: '-1' })
   })
 
   it('混合文本（多模板/拼接）按字面值处理', () => {
