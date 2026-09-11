@@ -68,7 +68,7 @@ func (l *Lock) isRunning(pid int) bool {
 	// 优先通过 /proc/<pid>/exe 与当前可执行文件比对，对二进制重命名（如测试构建）健壮
 	if self, err := os.Executable(); err == nil {
 		if exe, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid)); err == nil {
-			if exe != self {
+			if !exePathMatches(self, exe) {
 				return false
 			}
 		}
@@ -82,6 +82,14 @@ func (l *Lock) isRunning(pid int) bool {
 		return false
 	}
 	return true
+}
+
+// exePathMatches 比对进程 exe 路径与当前可执行文件路径。
+// 运行中二进制被替换（热升级，如 mv 新二进制覆盖旧文件）后，
+// /proc/<pid>/exe 的 readlink 结果会带 " (deleted)" 后缀指向旧 inode，
+// 剥除后缀再比对，否则升级后 server stop/status 会把存活进程误判为未运行。
+func exePathMatches(self, exe string) bool {
+	return exe == self || strings.TrimSuffix(exe, " (deleted)") == self
 }
 
 func (l *Lock) kill(pid int) error {
