@@ -60,6 +60,7 @@ func NewExecutionCmd() *cobra.Command {
 		newExecutionContinueCmd(),
 		newExecutionPauseCmd(),
 		newExecutionResumeCmd(),
+		newExecutionCancelCmd(),
 	)
 	return cmd
 }
@@ -400,5 +401,34 @@ func newExecutionResumeCmd() *cobra.Command {
 	}
 	cmd.Flags().Int64Var(&id, "id", 0, "execution ID (required)")
 	cmd.Flags().BoolVar(&follow, "follow", false, "follow the SSE log stream until the execution finishes")
+	return cmd
+}
+
+// newExecutionCancelCmd 取消执行实例：终止运行中节点进程，执行置为 cancelled
+func newExecutionCancelCmd() *cobra.Command {
+	var id int64
+	cmd := &cobra.Command{
+		Use:   "cancel",
+		Short: "Cancel a running/paused execution (terminates running node processes)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if maybePrintSchema("execution cancel") {
+				return nil
+			}
+			if id <= 0 {
+				return fmt.Errorf("--id is required. Run `flowx-studio execution cancel --schema` for the parameter contract")
+			}
+
+			data, err := do(cmd.Context(), http.MethodPost,
+				"/executions/"+strconv.FormatInt(id, 10)+"/cancel", nil, nil)
+			if err != nil {
+				return fail("cancel execution", err, false)
+			}
+			printData(data, func() {
+				fmt.Printf("Cancelled execution id=%d\n", id)
+			})
+			return nil
+		},
+	}
+	cmd.Flags().Int64Var(&id, "id", 0, "execution ID (required)")
 	return cmd
 }

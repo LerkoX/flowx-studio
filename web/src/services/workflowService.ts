@@ -109,6 +109,17 @@ export async function pauseExecution(
 }
 
 /**
+ * 取消执行实例（真终止：运行中节点进程被杀，running/paused 均可）
+ * POST /api/v1/executions/:id/cancel
+ */
+export async function cancelExecution(
+  executionId: string
+): Promise<ApiResponse<{ executionId: number; status: string }>> {
+  const response = await apiClient.post(`/api/v1/executions/${executionId}/cancel`)
+  return response.data
+}
+
+/**
  * 恢复已暂停的执行实例
  * POST /api/v1/executions/:id/resume
  */

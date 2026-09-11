@@ -49,6 +49,7 @@ func (h *WorkflowHandler) RegisterRoutes(r *gin.RouterGroup) {
 		executions.POST("/:id/continue", h.ContinueExecution)
 		executions.POST("/:id/pause", h.PauseExecution)
 		executions.POST("/:id/resume", h.ResumeExecution)
+		executions.POST("/:id/cancel", h.CancelExecution)
 	}
 }
 
@@ -300,6 +301,22 @@ func (h *WorkflowHandler) ResumeExecution(c *gin.Context) {
 	}
 
 	Success(c, gin.H{"executionId": id, "status": "running"})
+}
+
+// CancelExecution 取消执行实例（终止运行中节点，running/paused 均可）
+func (h *WorkflowHandler) CancelExecution(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		Error(c, http.StatusBadRequest, "invalid execution id")
+		return
+	}
+
+	if err := h.service.CancelExecution(id); err != nil {
+		Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	Success(c, gin.H{"executionId": id, "status": "cancelled"})
 }
 
 // GetExecutionYAML 获取执行实例的运行时快照 YAML（剥离 runtime 状态段）

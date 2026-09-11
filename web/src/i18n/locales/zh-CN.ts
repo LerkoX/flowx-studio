@@ -65,6 +65,8 @@ export default {
     noNewNodes: '没有可续跑的新节点',
     pauseExecution: '暂停执行（当前层节点完成后生效）',
     resumeExecution: '恢复执行',
+    cancelExecution: '终止执行',
+    cancelExecutionHint: '将立即终止运行中的节点进程，执行标记为已取消。之后可通过续跑恢复未完成的节点。',
     paused: '已暂停',
     collapsePanel: '收起参数面板',
     expandPanel: '展开参数面板',

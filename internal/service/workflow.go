@@ -457,6 +457,38 @@ func (s *WorkflowService) ResumeExecution(execID int64) error {
 	return nil
 }
 
+// CancelExecution 取消执行实例（running/paused 均可）。引擎侧取消上下文，
+// 运行中的节点进程经 exec.CommandContext 被终止（真终止，区别于层边界暂停）；
+// 实例不在内存（server 重启残留记录）时直接落库 cancelled 收尾。
+func (s *WorkflowService) CancelExecution(execID int64) error {
+	exec, err := s.GetExecution(execID)
+	if err != nil {
+		return err
+	}
+	if exec.Status != "running" && exec.Status != "paused" {
+		return fmt.Errorf("execution %d is %s, only running/paused executions can be cancelled", execID, exec.Status)
+	}
+	if err := s.runtime.CancelExecution(context.Background(), execID); err != nil {
+		if !strings.Contains(err.Error(), "not found") {
+			return err
+		}
+		// 实例不在内存（server 重启过）：无引擎事件，走下方落库收尾
+	}
+	// 立即落库并广播：不依赖引擎事件；在内存时 runWorkflowAsync 轮询收尾与
+	// execution_complete 事件随后到达，重复写入相同状态（幂等）
+	now := time.Now()
+	_, _ = s.db.Exec("UPDATE executions SET status = ?, completed_at = COALESCE(completed_at, ?) WHERE id = ?", "cancelled", now, execID)
+	// 兜底：仍挂 running 的节点统一置 cancelled，避免 UI 残留黄灯
+	_, _ = s.db.Exec("UPDATE execution_nodes SET status = ?, completed_at = COALESCE(completed_at, ?) WHERE execution_id = ? AND status = 'running'", "cancelled", now, execID)
+	s.setExecutionMetadata(execID, "cancelled", "", nil, nil, "")
+	s.eventBus.Publish(event.Event{
+		Type: "execution_cancelled",
+		Data: map[string]interface{}{"execution_id": execID, "status": "cancelled"},
+	})
+	s.auditRecord("cancel_execution", fmt.Sprintf("%d", execID), fmt.Sprintf("workflow=%d", exec.WorkflowID))
+	return nil
+}
+
 // GetExecutionYAML 返回执行实例的运行时快照 YAML（已剥离各节点 runtime 状态段）。
 // 快照是执行实例的单一事实来源：前端回放态按它渲染图结构与 nodeRef，
 // 而非流水线模板。无快照（快照功能上线前的旧执行）时返回空串。
@@ -611,6 +643,12 @@ func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 			finalStatus = "success"
 		}
 	}
+	// CancelExecution 先行落库 cancelled 时尊重该终态：RunAsync 完成即删实例，
+	// 上面的状态读取可能跑输拿到空串，不能覆盖回 success/failed
+	var dbStatus string
+	if err := s.db.Get(&dbStatus, "SELECT status FROM executions WHERE id = ?", execID); err == nil && dbStatus == "cancelled" {
+		finalStatus = "cancelled"
+	}
 
 	completedAt := time.Now()
 	durationMs := int(time.Since(startTime).Milliseconds())
@@ -677,10 +715,17 @@ func (s *WorkflowService) resolveFinalStatusFromNodes(execID int64) (string, str
 	if len(nodes) == 0 {
 		return "failed", "no execution nodes found"
 	}
+	hasCancelled := false
 	for _, n := range nodes {
 		if n.Status == "failed" {
 			return "failed", ""
 		}
+		if n.Status == "cancelled" {
+			hasCancelled = true
+		}
+	}
+	if hasCancelled {
+		return "cancelled", ""
 	}
 	return "success", ""
 }

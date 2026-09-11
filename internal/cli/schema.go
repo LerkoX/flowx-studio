@@ -71,6 +71,15 @@ var schemas = map[string]string{
   },
   "required": ["id"]
 }`,
+	"execution cancel": `{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "flowx-studio execution cancel",
+  "type": "object",
+  "properties": {
+    "id": {"type": "integer", "description": "执行实例 ID（必填）；running/paused 状态的实例可取消。真终止：运行中的节点进程被杀死，执行置为 cancelled，可用 execution continue 增量续跑"}
+  },
+  "required": ["id"]
+}`,
 	"execution resume": `{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "flowx-studio execution resume",

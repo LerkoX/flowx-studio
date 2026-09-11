@@ -637,6 +637,18 @@ function WorkflowCanvasInner({
       return
     }
 
+    if (type === 'execution_cancelled') {
+      const payload = data as { execution_id?: number }
+      if (payload.execution_id) {
+        const id = String(payload.execution_id)
+        useExecutionStore.getState().updateExecutionStatus(id, 'cancelled')
+        // 取消后运行中节点被终止：后端已将 running 节点落库 cancelled，
+        // 重新拉取节点状态并同步画布，避免残留黄灯
+        void useExecutionStore.getState().loadExecutionNodes(id).then(() => syncCanvasStatusesFromExecutionNodes())
+      }
+      return
+    }
+
     if (type === 'node_start') {
       const payload = data as { node_id?: string }
       if (payload.node_id) updateNodeStatus(payload.node_id, 'running')

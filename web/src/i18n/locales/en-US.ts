@@ -65,6 +65,8 @@ export default {
     noNewNodes: 'No new nodes to continue',
     pauseExecution: 'Pause execution (takes effect after current layer finishes)',
     resumeExecution: 'Resume execution',
+    cancelExecution: 'Cancel execution',
+    cancelExecutionHint: 'Running node processes will be terminated immediately and the execution marked as cancelled. You can resume unfinished nodes later via continue.',
     paused: 'Paused',
     collapsePanel: 'Collapse panel',
     expandPanel: 'Expand panel',

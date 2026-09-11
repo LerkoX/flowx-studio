@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams, Navigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronRight, ChevronLeft, Play, Pause, Loader2, History } from 'lucide-react'
+import { ChevronRight, ChevronLeft, Play, Pause, Loader2, History, Square } from 'lucide-react'
 import WorkflowCanvas, { flushNodeParamsPersist } from '@/features/workflow-canvas/WorkflowCanvas'
 import WorkflowConfigPanel from '@/features/workflow-canvas/WorkflowConfigPanel'
 import ExecutionContextBar from '@/features/workflow-canvas/ExecutionContextBar'
@@ -11,9 +11,10 @@ import LogViewer from '@/components/LogViewer'
 import { useAppStore } from '@/stores/appStore'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { useExecutionStore } from '@/stores/executionStore'
-import { runWorkflow, continueExecution, pauseExecution, resumeExecution, getWorkflow } from '@/services/workflowService'
+import { runWorkflow, continueExecution, pauseExecution, resumeExecution, cancelExecution, getWorkflow } from '@/services/workflowService'
 import { parseNodeRefs } from '@/utils/mermaidParser'
 import { useIsMobile } from '@/hooks/useMediaQuery'
+import { useConfirm } from '@/hooks/useConfirm'
 import { useTranslation } from 'react-i18next'
 import { toast } from '@/stores/toastStore'
 
@@ -54,6 +55,8 @@ export default function WorkflowCanvasPage() {
   const beginContinue = useExecutionStore((s) => s.beginContinue)
   const [starting, setStarting] = useState(false)
   const [pausePending, setPausePending] = useState(false)
+  const [cancelPending, setCancelPending] = useState(false)
+  const { confirm, dialog: confirmDialog } = useConfirm()
   const { id: routeWorkflowId } = useParams<{ id: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -225,6 +228,39 @@ export default function WorkflowCanvasPage() {
     </button>
   ) : null
 
+  // 终止：真终止运行中节点进程，执行置为 cancelled（可用续跑恢复）。
+  // 状态由 SSE（execution_cancelled）回写，按钮先行进入 pending 反馈
+  const showCancel = !!liveExecutionId && (selectedStatus === 'running' || selectedStatus === 'paused')
+  const handleCancel = async () => {
+    if (!liveExecutionId || cancelPending) return
+    const ok = await confirm({
+      title: t('canvas.cancelExecution'),
+      message: t('canvas.cancelExecutionHint'),
+      confirmText: t('canvas.cancelExecution'),
+    })
+    if (!ok) return
+    setCancelPending(true)
+    try {
+      await cancelExecution(liveExecutionId)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCancelPending(false)
+    }
+  }
+  const cancelButton = showCancel ? (
+    <button
+      onClick={handleCancel}
+      disabled={cancelPending}
+      className="flex items-center justify-center w-7 h-7 rounded-md flex-shrink-0
+                 text-rose-300 hover:bg-rose-400/15
+                 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      title={t('canvas.cancelExecution')}
+    >
+      {cancelPending ? <Loader2 size={13} className="animate-spin" /> : <Square size={12} />}
+    </button>
+  ) : null
+
   // 运行按钮渲染在画布顶部工具栏内（与流水线名/ID、方向切换按钮并排）。
   // 移动端为图标-only 按钮，桌面端保留文字
   const runTitle = isPlayback
@@ -265,12 +301,13 @@ export default function WorkflowCanvasPage() {
     )
   ) : null
 
-  // 顶部工具栏动作区：运行/续跑按钮 + 实时执行时的暂停/恢复按钮
+  // 顶部工具栏动作区：运行/续跑按钮 + 实时执行时的暂停/恢复/终止按钮
   const canvasAction =
-    runButton || pauseResumeButton ? (
+    runButton || pauseResumeButton || cancelButton ? (
       <>
         {runButton}
         {pauseResumeButton}
+        {cancelButton}
       </>
     ) : null
 
@@ -422,6 +459,7 @@ export default function WorkflowCanvasPage() {
               </motion.div>
           )}
         </AnimatePresence>
+        {confirmDialog}
       </div>
     )
   }
@@ -429,6 +467,7 @@ export default function WorkflowCanvasPage() {
   // 桌面端布局
   return (
     <div className="h-full flex relative">
+      {confirmDialog}
       {/* 中央画布区域 */}
       <div className="flex-1 relative">
         <WorkflowCanvas action={canvasAction} onShowHistory={handleShowHistory} />
