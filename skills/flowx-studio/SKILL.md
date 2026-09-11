@@ -223,6 +223,7 @@ config:
 
 - `entry`：包内预编译单文件 `.js` bundle（≤10MB），格式不限——ESM 默认导出 `mount`，或 IIFE 调用 `window.FlowXNodeWidget.define(mount)`
 - 契约：`mount(el, props) => { update(props), unmount() }`；`props` 含 `status`/`inputs`/`outputs`/`execution`（流水线实时 metadata，无运行实例为 null）与 `params`（该节点实例当前的 `config.params` 绑定值，常量或 `{{ 上游.输出 }}` 模板原样下发）
+- **参数来源标注（必做）**：渲染参数时不要直接展示 `{{ Param.xxx }}` 原始绑定串，优先用 `props.paramSources[key]` 渲染来源说明——`workflow` → `⚡ 流水线参数 · 参数名 = 当前值`（附 paramValue）；`node` → `🔗 上游节点显示名 · 字段`（执行中/回放时用 runtimeValue 补实时值）；`literal` → `✏️ 自定义值`。`paramSources` 缺省时（旧版 Studio）才回退展示原始绑定串。参考实现：flowx-txt2img 各节点 widget 的 `sourceCaptionOf`
 - **参数调整控件**：组件渲染滑杆/下拉等控件后调用 `props.onParamsChange(params)` 把**完整参数表**写回该节点的 `config.params`（全量替换，传 `{}` 清空），Studio 自动写回 workflow YAML 并持久化；回放态（查看历史执行快照）下 `onParamsChange` 为 undefined，调用前必须判空进入只读模式
 - 参考实现：免构建原生 JS 示例 `tests/e2e/testdata/ui-demo-node/ui/node-widget.js`；React+Vite 工程模板 `templates/node-widget/`
 - 改组件后只需重新 `node import` 生效，无需重启 server；在「节点管理→测试」面板有 UI 预览（预览中 onParamsChange 写回 Mock 测试的输入参数表单）
