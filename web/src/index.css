@@ -123,6 +123,17 @@
   }
 }
 
+@layer utilities {
+  /* 隐藏滚动条但保留滚动能力（如顶部工具栏横向滑动） */
+  .scrollbar-hide {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 @layer components {
   .glass-panel {
     background: var(--bg-panel);

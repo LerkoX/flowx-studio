@@ -816,16 +816,24 @@ function WorkflowCanvasInner({
       </ReactFlow>
 
       {/* 顶部工具栏：流水线名称/ID + 当前执行 ID + 运行控制按钮。
-          不再使用浮动画布上的圆角胶囊（Panel），改为固定顶栏 */}
+          不再使用浮动画布上的圆角胶囊（Panel），改为固定顶栏。
+          控件全部出现时（运行中：运行/暂停/终止 + 历史 + 模式 + 方向）
+          宽度可能不足，内层容器支持横向滑动，避免控件互相重叠 */}
       <div
-        className={`absolute top-0 inset-x-0 z-10 flex items-center gap-2
+        className={`absolute top-0 inset-x-0 z-10
                     border-b border-white/10 bg-panel/80 backdrop-blur-2xl
-                    ${isMobile ? 'h-11 px-2' : 'h-12 px-4'}`}
+                    ${isMobile ? 'h-11' : 'h-12'}`}
       >
+        <div
+          className={`flex items-center gap-2 h-full overflow-x-auto overflow-y-hidden
+                      scrollbar-hide ${isMobile ? 'px-2' : 'px-4'}`}
+        >
         {/* 左侧：流水线名称 + 流水线 ID + 当前执行 ID */}
-        <div className="flex items-center gap-2 min-w-0 flex-1">
+        <div className="flex items-center gap-2 flex-shrink-0">
           <span
-            className={`text-white/80 font-medium truncate ${isMobile ? 'text-xs' : 'text-sm'}`}
+            className={`text-white/80 font-medium truncate ${
+              isMobile ? 'text-xs max-w-[120px]' : 'text-sm max-w-[240px]'
+            }`}
           >
             {currentWorkflow?.name || t('canvas.noWorkflowSelected')}
           </span>
@@ -847,7 +855,9 @@ function WorkflowCanvasInner({
           )}
         </div>
 
-        {/* 右侧：运行/暂停按钮（action）+ 历史执行 + 预览/编辑切换 + 方向切换 */}
+        {/* 右侧：运行/暂停按钮（action）+ 历史执行 + 预览/编辑切换 + 方向切换。
+            ml-auto：宽度充足时贴右；不足时随整栏横向滑动 */}
+        <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
         {action}
         <button
           onClick={onShowHistory}
@@ -888,6 +898,8 @@ function WorkflowCanvasInner({
             <ArrowUpDown className={isMobile ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
           )}
         </button>
+        </div>
+        </div>
       </div>
     </div>
   )
