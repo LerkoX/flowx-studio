@@ -99,7 +99,7 @@ function WorkflowCanvasInner({
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [direction, setDirection] = useState<'TB' | 'LR'>('TB')
-  // preview：只能平移画布；edit：可拖动节点、切换布局方向
+  // preview：只能平移画布、切换布局方向；edit：额外可拖动节点、编辑参数
   const [mode, setMode] = useState<'preview' | 'edit'>('preview')
   // 解析 effect 不能依赖 mode（切换模式重跑 mermaid+dagre 会丢失手动拖动的位置），
   // 构建节点 data 时通过 ref 读当前模式；mode 变化由独立 effect 同步 data.interactive
@@ -884,12 +884,8 @@ function WorkflowCanvasInner({
         </button>
         <button
           onClick={() => setDirection((d) => (d === 'TB' ? 'LR' : 'TB'))}
-          disabled={mode !== 'edit'}
-          className={`p-1.5 rounded-md flex-shrink-0 transition-colors ${
-            mode !== 'edit'
-              ? 'text-white/25 cursor-not-allowed'
-              : 'text-white/60 hover:text-white/80 hover:bg-white/10'
-          }`}
+          className="p-1.5 rounded-md flex-shrink-0 transition-colors
+                     text-white/60 hover:text-white/80 hover:bg-white/10"
           title={direction === 'TB' ? t('canvas.switchToHorizontal') : t('canvas.switchToVertical')}
         >
           {direction === 'TB' ? (
