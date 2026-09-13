@@ -25,7 +25,7 @@ import { parseWorkflowGraph, parseNodeRefs, parseNodeParams, parseParamSources }
 import { updateWorkflow, getWorkflow } from '@/services/workflowService'
 import { useEventStream } from '@/services/eventService'
 import type { ExecutionLog, ExecutionStatus } from '@/types/execution'
-import { ArrowUpDown, ArrowLeftRight, Eye, PencilLine, History } from 'lucide-react'
+import { ArrowUpDown, ArrowLeftRight, Eye, LockKeyholeOpen, History } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 const nodeTypes = { glowNode: GlowNode, terminalNode: TerminalNode }
@@ -879,7 +879,7 @@ function WorkflowCanvasInner({
           {mode === 'preview' ? (
             <Eye className={isMobile ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
           ) : (
-            <PencilLine className={isMobile ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
+            <LockKeyholeOpen className={isMobile ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
           )}
         </button>
         <button

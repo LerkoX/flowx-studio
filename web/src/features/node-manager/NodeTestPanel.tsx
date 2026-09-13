@@ -9,6 +9,7 @@ import type { NodeWidgetProps } from '@/types/nodeWidget'
 import { mockTestNode } from '@/services/nodeService'
 import ModuleNodeWidget, { buildWidgetUrl } from '@/components/ModuleNodeWidget'
 import GlassPanel from '@/components/GlassPanel'
+import OutputExplorer from '@/components/OutputExplorer'
 
 interface NodeTestPanelProps {
   node: NodeDefinition | null
@@ -326,10 +327,7 @@ export default function NodeTestPanel({ node, isOpen, onClose }: NodeTestPanelPr
                   {result.output && Object.keys(result.output).length > 0 && (
                     <GlassPanel className="p-3">
                       <h4 className="text-white/60 text-xs font-medium mb-2">{t('node.parsedOutput')}</h4>
-                      <pre className="text-indigo-400 text-xs font-mono bg-black/30 rounded-lg p-3 
-                                    overflow-x-auto">
-                        {JSON.stringify(result.output, null, 2)}
-                      </pre>
+                      <OutputExplorer outputs={result.output} />
                     </GlassPanel>
                   )}
 

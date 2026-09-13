@@ -9,6 +9,7 @@ import { useWorkflowStore } from '@/stores/workflowStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { getCurrentTheme } from '@/utils/theme'
 import ModuleNodeWidget, { buildWidgetUrl } from '@/components/ModuleNodeWidget'
+import OutputExplorer from '@/components/OutputExplorer'
 import type { NodeWidgetExecution, NodeWidgetParamSource, NodeWidgetProps } from '@/types/nodeWidget'
 import type { NodeUIConfig } from '@/types/node'
 import type { ExecutionStatus } from '@/types/execution'
@@ -349,17 +350,7 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
                       </div>
                     )}
                     {hasOutputs && (
-                      <div>
-                        <div className="text-[10px] text-white/30 uppercase tracking-wider mb-1">{t('canvas.outputs')}</div>
-                        <div className="space-y-1">
-                          {Object.entries(nodeData.outputs!).map(([key, value]) => (
-                            <div key={key} className="flex items-center gap-2 text-[10px]">
-                              <span className="text-white/40 font-mono">{key}:</span>
-                              <span className="text-white/60 font-mono truncate">{String(value)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                      <OutputExplorer outputs={nodeData.outputs!} compact />
                     )}
                   </div>
                 )}
@@ -383,17 +374,7 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
                   </div>
                 )}
                 {hasOutputs && (
-                  <div>
-                    <div className="text-[10px] text-white/30 uppercase tracking-wider mb-1">{t('canvas.outputs')}</div>
-                    <div className="space-y-1">
-                      {Object.entries(nodeData.outputs!).map(([key, value]) => (
-                        <div key={key} className="flex items-center gap-2 text-[10px]">
-                          <span className="text-white/40 font-mono">{key}:</span>
-                          <span className="text-white/60 font-mono truncate">{String(value)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                  <OutputExplorer outputs={nodeData.outputs!} compact />
                 )}
               </>
             )}
