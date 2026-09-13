@@ -223,21 +223,30 @@ function ParamField({
           {param.description && (
             <div className="text-white/30 text-xs mb-2">{param.description}</div>
           )}
-          <input
-            type="text"
-            value={editingValue}
-            onChange={(e) => onChange(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10
-                       text-white/80 text-sm font-mono
-                       focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.07]
-                       transition-colors placeholder:text-white/20"
-            placeholder={t('canvas.currentValue', { value: String(param.originalValue) })}
-          />
+          {typeof param.value === 'string' ? (
+            // 字符串参数：多行文本框，随内容自动增高、软换行
+            <AutoResizeTextarea
+              value={editingValue}
+              onChange={onChange}
+              placeholder={t('canvas.currentValue', { value: String(param.originalValue) })}
+            />
+          ) : (
+            <input
+              type="text"
+              value={editingValue}
+              onChange={(e) => onChange(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10
+                         text-white/80 text-sm font-mono
+                         focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.07]
+                         transition-colors placeholder:text-white/20"
+              placeholder={t('canvas.currentValue', { value: String(param.originalValue) })}
+            />
+          )}
           <div className="flex items-center gap-2 mt-1.5">
             <span className="text-[10px] text-white/20">
               {t('canvas.typeLabel')}: {typeof param.value}
             </span>
-            <span className="text-[10px] text-white/20">
+            <span className="text-[10px] text-white/20 break-all">
               {t('canvas.originalValue')}: {String(param.originalValue)}
             </span>
           </div>
@@ -256,6 +265,42 @@ function parseValue(value: string, originalType: string): string | number | bool
     return value === 'true'
   }
   return value
+}
+
+// AutoResizeTextarea 长文本参数输入框：随内容自动增高（上限 240px），软换行
+function AutoResizeTextarea({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 240) + 'px'
+  }, [value])
+
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      wrap="soft"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10
+                 text-white/80 text-sm font-mono whitespace-pre-wrap break-words
+                 resize-none overflow-y-auto
+                 focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.07]
+                 transition-colors placeholder:text-white/20"
+      placeholder={placeholder}
+    />
+  )
 }
 
 function MetadataRow({ label, value }: { label: string; value?: string }) {
