@@ -1,18 +1,49 @@
+import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { GitBranch, Container, Code, Trash2, Eye, Play } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import Select from '@/components/Select'
 import type { NodeDefinition } from '@/types/node'
 
 interface NodeCardProps {
-  node: NodeDefinition
+  /** 同名节点的所有版本，卡片内可切换，默认展示最新版本 */
+  versions: NodeDefinition[]
   onView: (node: NodeDefinition) => void
   onTest: (node: NodeDefinition) => void
   onDelete: (nodeId: string) => void
 }
 
-export default function NodeCard({ node, onView, onTest, onDelete }: NodeCardProps) {
+/** 版本号降序比较：数字段按数值比较，非数字段按字符串比较，空版本归一为 '0' */
+function compareVersionsDesc(a?: string, b?: string): number {
+  const pa = (a || '0').split('.')
+  const pb = (b || '0').split('.')
+  const len = Math.max(pa.length, pb.length)
+  for (let i = 0; i < len; i++) {
+    const sa = pa[i] ?? '0'
+    const sb = pb[i] ?? '0'
+    const na = Number(sa)
+    const nb = Number(sb)
+    if (!Number.isNaN(na) && !Number.isNaN(nb)) {
+      if (na !== nb) return nb - na
+    } else if (sa !== sb) {
+      return sb.localeCompare(sa)
+    }
+  }
+  return 0
+}
+
+export default function NodeCard({ versions, onView, onTest, onDelete }: NodeCardProps) {
   const { t } = useTranslation()
+  // 版本降序：最新版本排前面，作为默认选中项
+  const sortedVersions = useMemo(
+    () => [...versions].sort((a, b) => compareVersionsDesc(a.version, b.version)),
+    [versions]
+  )
+  const [selectedId, setSelectedId] = useState(sortedVersions[0]?.id)
+  // 选中版本被删除后回退到当前最新版本
+  const node = sortedVersions.find((n) => n.id === selectedId) ?? sortedVersions[0]
   const isImageNode = node.nodeType === 'image'
+  const hasMultipleVersions = sortedVersions.length > 1
 
   return (
     <motion.div
@@ -56,9 +87,23 @@ export default function NodeCard({ node, onView, onTest, onDelete }: NodeCardPro
             {node.language || 'code'}
           </span>
         )}
-        <span className="text-[10px] text-white/30">
-          v{node.version || '1.0.0'}
-        </span>
+        {/* 版本：多版本可切换，单版本静态展示 */}
+        {hasMultipleVersions ? (
+          <Select
+            value={node.id}
+            onChange={setSelectedId}
+            options={sortedVersions.map((v) => ({
+              value: v.id,
+              label: `v${v.version || '1.0.0'}`,
+            }))}
+            className="w-28"
+            triggerClassName="px-2 py-0.5 rounded-full text-[10px] text-white/50"
+          />
+        ) : (
+          <span className="text-[10px] text-white/30">
+            v{node.version || '1.0.0'}
+          </span>
+        )}
       </div>
 
       {/* 镜像地址（仅镜像节点） */}

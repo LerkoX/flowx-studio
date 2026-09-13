@@ -53,6 +53,18 @@ export default function NodeManagerPage() {
   const [tagsExpanded, setTagsExpanded] = useState(false)
 
   const filteredNodes = getFilteredNodes()
+  // 同名节点的不同版本合并为一个分组（一张卡片），组内保持原始顺序，排序由 NodeCard 处理
+  const nodeGroups: NodeDefinition[][] = []
+  const groupIndexByName = new Map<string, number>()
+  for (const node of filteredNodes) {
+    const index = groupIndexByName.get(node.name)
+    if (index === undefined) {
+      groupIndexByName.set(node.name, nodeGroups.length)
+      nodeGroups.push([node])
+    } else {
+      nodeGroups[index].push(node)
+    }
+  }
   const allTags = getAllTags()
   const allLanguages = getAllLanguages()
 
@@ -300,7 +312,7 @@ export default function NodeManagerPage() {
           <>
             <div className="flex items-center justify-between mb-4">
               <span className="text-white/30 text-xs">
-                {t('node.totalCount', { count: filteredNodes.length })}
+                {t('node.totalCount', { count: nodeGroups.length })}
               </span>
             </div>
             <motion.div 
@@ -308,10 +320,10 @@ export default function NodeManagerPage() {
               className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
             >
               <AnimatePresence mode="popLayout">
-                {filteredNodes.map((node) => (
+                {nodeGroups.map((versions) => (
                   <NodeCard
-                    key={node.id}
-                    node={node}
+                    key={versions[0].name}
+                    versions={versions}
                     onView={handleViewNode}
                     onTest={handleTestNode}
                     onDelete={handleDeleteNode}
