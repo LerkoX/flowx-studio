@@ -87,6 +87,13 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	// AutomaticEnv 的值不会反映在未注册键（无默认值/配置文件项）的 Unmarshal
+	// 结果中，assets.http_base 需显式回读，否则 FLOWX_STUDIO_ASSETS_HTTP_BASE
+	// 环境变量形同虚设。
+	if cfg.Assets.HTTPBase == "" {
+		cfg.Assets.HTTPBase = viper.GetString("assets.http_base")
+	}
+
 	// 展开 ~
 	cfg.Data.Dir = expandPath(cfg.Data.Dir, home)
 	cfg.Data.DBPath = expandPath(cfg.Data.DBPath, home)

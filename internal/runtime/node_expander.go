@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"net/url"
 	"path"
 	"reflect"
 	"sort"
@@ -97,14 +98,17 @@ func expandNodeWithExecutorType(node *model.Node, executorTypeOverride string, p
 		}
 		writeAssetFiles(&runScript, node, pkg, writeAssetFetch)
 	case httpBacked:
-		fmt.Fprintf(&runScript, "FLOWX_ASSETS_URL=%s\n", shellQuote(node.AssetURL))
-		// curl 优先，wget 兜底（精简镜像可能二缺一）
-		runScript.WriteString("flowx_fetch() { curl -fsSL \"$FLOWX_ASSETS_URL/$1\" -o \"$1\" 2>/dev/null || wget -qO \"$1\" \"$FLOWX_ASSETS_URL/$1\"; }\n")
+		// AssetURL 形如 http://host/api/v1/assets/nodes/<name>@<ver>?expires=..&sig=..
+		// 文件路径必须插在查询串之前（路由 /:nodeRef/*filepath），
+		// 直接往末尾追加会污染 sig 参数导致验签 403。
+		// flowx_fetch <完整URL> <本地相对路径>；curl 优先，wget 次之，python3(urllib) 兑底
+		//（python:*-slim 镜像 curl/wget 都没有，但 python3 必然存在）
+		runScript.WriteString("flowx_fetch() { curl -fsSL \"$1\" -o \"$2\" 2>/dev/null || wget -qO \"$2\" \"$1\" 2>/dev/null || python3 -c 'import sys,urllib.request;urllib.request.urlretrieve(sys.argv[1],sys.argv[2])' \"$1\" \"$2\"; }\n")
 		writeAssetFetch := func(rel string) {
 			if dir := path.Dir(rel); dir != "." {
 				fmt.Fprintf(&runScript, "mkdir -p %s\n", shellQuote(dir))
 			}
-			fmt.Fprintf(&runScript, "flowx_fetch %s\n", shellQuote(rel))
+			fmt.Fprintf(&runScript, "flowx_fetch %s %s\n", shellQuote(assetFileURL(node.AssetURL, rel)), shellQuote(rel))
 		}
 		writeAssetFiles(&runScript, node, pkg, writeAssetFetch)
 	default:
@@ -655,6 +659,21 @@ func writeFileHeredoc(sb *strings.Builder, name, content string) {
 // shellQuote 单引号包裹，内部单引号转义为 '\”
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+// assetFileURL 把包内相对路径插入签名资产 URL 的查询串之前：
+// <base>/<name>@<ver>/<rel>?expires=..&sig=..（路径段逐段转义）。
+// 路由为 /api/v1/assets/nodes/:nodeRef/*filepath，路径必须在 ? 之前。
+func assetFileURL(assetURL, rel string) string {
+	escaped := make([]string, 0, 4)
+	for _, seg := range strings.Split(rel, "/") {
+		escaped = append(escaped, url.PathEscape(seg))
+	}
+	p := strings.Join(escaped, "/")
+	if i := strings.IndexByte(assetURL, '?'); i >= 0 {
+		return assetURL[:i] + "/" + p + assetURL[i:]
+	}
+	return assetURL + "/" + p
 }
 
 // sortedKeys 返回 map 的有序键（保证展开输出确定，便于测试与 diff）

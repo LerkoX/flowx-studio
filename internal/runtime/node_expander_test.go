@@ -231,11 +231,11 @@ func TestExpandNodeToConfig_DockerHTTPBootstrap(t *testing.T) {
 	}
 	run := cfg.Steps[0].Run
 
-	if !strings.Contains(run, "FLOWX_ASSETS_URL='http://192.168.1.10:8080/api/v1/assets/nodes/docker-node@1?expires=999&sig=abc'") {
-		t.Errorf("expected signed assets url, run:\n%s", run)
+	if !strings.Contains(run, "flowx_fetch 'http://192.168.1.10:8080/api/v1/assets/nodes/docker-node@1/main.sh?expires=999&sig=abc' 'main.sh'") {
+		t.Errorf("expected signed per-file url with path before query, run:\n%s", run)
 	}
-	if !strings.Contains(run, "flowx_fetch 'main.sh'") || !strings.Contains(run, "flowx_fetch 'lib/helper.sh'") {
-		t.Errorf("expected curl/wget fetch for entry and runtime deps, run:\n%s", run)
+	if !strings.Contains(run, "flowx_fetch 'http://192.168.1.10:8080/api/v1/assets/nodes/docker-node@1/lib/helper.sh?expires=999&sig=abc' 'lib/helper.sh'") {
+		t.Errorf("expected curl/wget/python3 fetch for runtime deps, run:\n%s", run)
 	}
 	if strings.Contains(run, "FLOWX_ASSETS_DIR") || strings.Contains(run, "FLOWX_FILE_EOF") || strings.Contains(run, "node-widget.js") {
 		t.Errorf("http bootstrap must not reference host dir / inline contents / ui files, run:\n%s", run)
