@@ -275,6 +275,7 @@ type Executor struct {
 	Config      map[string]interface{} `json:"config" db:"-"`
 	ConfigJSON  string                 `json:"-" db:"config"`
 	IsDefault   bool                   `json:"isDefault" db:"is_default"`
+	Disabled    bool                   `json:"disabled" db:"disabled"` // 禁用后不参与类型解析；按名引用报错
 	CreatedAt   time.Time              `json:"createdAt" db:"created_at"`
 	UpdatedAt   time.Time              `json:"updatedAt" db:"updated_at"`
 }

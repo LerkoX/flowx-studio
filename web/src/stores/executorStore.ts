@@ -6,6 +6,7 @@ import {
   updateExecutor,
   deleteExecutor,
   setDefaultExecutor,
+  setExecutorDisabled,
 } from '@/services/executorService'
 
 interface ExecutorState {
@@ -17,6 +18,7 @@ interface ExecutorState {
   update: (id: number, input: ExecutorUpdateInput) => Promise<void>
   remove: (id: number) => Promise<void>
   setDefault: (id: number) => Promise<void>
+  setDisabled: (id: number, disabled: boolean) => Promise<void>
 }
 
 export const useExecutorStore = create<ExecutorState>((set, get) => ({
@@ -51,6 +53,11 @@ export const useExecutorStore = create<ExecutorState>((set, get) => ({
 
   setDefault: async (id) => {
     await setDefaultExecutor(id)
+    await get().loadExecutors()
+  },
+
+  setDisabled: async (id, disabled) => {
+    await setExecutorDisabled(id, disabled)
     await get().loadExecutors()
   },
 }))

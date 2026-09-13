@@ -67,12 +67,13 @@ func scanExecutor(row interface {
 }) (*model.Executor, error) {
 	var e model.Executor
 	var desc sql.NullString
-	var isDefault int
-	if err := row.Scan(&e.ID, &e.Name, &e.Type, &desc, &e.ConfigJSON, &isDefault, &e.CreatedAt, &e.UpdatedAt); err != nil {
+	var isDefault, disabled int
+	if err := row.Scan(&e.ID, &e.Name, &e.Type, &desc, &e.ConfigJSON, &isDefault, &disabled, &e.CreatedAt, &e.UpdatedAt); err != nil {
 		return nil, err
 	}
 	e.Description = desc.String
 	e.IsDefault = isDefault == 1
+	e.Disabled = disabled == 1
 	if e.ConfigJSON != "" {
 		if err := json.Unmarshal([]byte(e.ConfigJSON), &e.Config); err != nil {
 			return nil, fmt.Errorf("corrupt executor config json: %w", err)
@@ -84,7 +85,7 @@ func scanExecutor(row interface {
 	return &e, nil
 }
 
-const executorColumns = "id, name, type, description, config, is_default, created_at, updated_at"
+const executorColumns = "id, name, type, description, config, is_default, disabled, created_at, updated_at"
 
 // List 列出全部执行器实例（local 置顶，其余按名称排序）
 func (s *ExecutorService) List() ([]*model.Executor, error) {
@@ -306,6 +307,41 @@ func (s *ExecutorService) Delete(id int64) error {
 	return nil
 }
 
+// SetDisabled 禁用/启用执行器实例。默认执行器禁止禁用（它是全局兜底）；
+// 禁用后不参与 ResolveTypeForNode 类型解析，按名引用时报明确错误。
+func (s *ExecutorService) SetDisabled(id int64, disabled bool) (*model.Executor, error) {
+	target, err := s.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+	if target == nil {
+		return nil, fmt.Errorf("executor not found")
+	}
+	if disabled && target.IsDefault {
+		return nil, fmt.Errorf("cannot disable the default executor; set another executor as default first")
+	}
+	if target.Disabled == disabled {
+		return target, nil // 幂等
+	}
+
+	v := 0
+	if disabled {
+		v = 1
+	}
+	if _, err := s.db.Exec(`UPDATE executors SET disabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, v, id); err != nil {
+		return nil, fmt.Errorf("failed to update executor disabled state: %w", err)
+	}
+
+	target.Disabled = disabled
+	action := "disable_executor"
+	if !disabled {
+		action = "enable_executor"
+	}
+	s.auditRecord(action, fmt.Sprintf("%d", id), "name="+target.Name)
+	s.publish("executor.updated", target)
+	return target, nil
+}
+
 // SetDefault 把指定执行器设为全局默认（事务内清旧置新）
 func (s *ExecutorService) SetDefault(id int64) (*model.Executor, error) {
 	target, err := s.GetByID(id)
@@ -314,6 +350,9 @@ func (s *ExecutorService) SetDefault(id int64) (*model.Executor, error) {
 	}
 	if target == nil {
 		return nil, fmt.Errorf("executor not found")
+	}
+	if target.Disabled {
+		return nil, fmt.Errorf("cannot set a disabled executor as default; enable it first")
 	}
 	if target.IsDefault {
 		return target, nil // 幂等
@@ -354,7 +393,7 @@ func (s *ExecutorService) ResolveTypeForNode(execType string) (*model.Executor, 
 		return nil, err
 	}
 	for _, e := range all {
-		if e != nil && e.Type == execType {
+		if e != nil && e.Type == execType && !e.Disabled {
 			return e, nil
 		}
 	}
@@ -372,6 +411,9 @@ func (s *ExecutorService) ResolveForNode(ref string, defaultFallback bool) (*mod
 		}
 		if e == nil {
 			return nil, fmt.Errorf("executor %q not found; create it on the /executors page or fix the node's executor.ref", ref)
+		}
+		if e.Disabled {
+			return nil, fmt.Errorf("executor %q is disabled; enable it on the /executors page or choose another executor", ref)
 		}
 		return e, nil
 	}

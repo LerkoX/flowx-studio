@@ -51,3 +51,15 @@ export async function setDefaultExecutor(id: number): Promise<ApiResponse<Execut
   const response = await apiClient.put(`/api/v1/executors/${id}/default`)
   return response.data
 }
+
+/**
+ * 禁用/启用执行器（默认执行器禁止禁用）
+ * PUT /api/v1/executors/:id/disabled
+ */
+export async function setExecutorDisabled(
+  id: number,
+  disabled: boolean
+): Promise<ApiResponse<Executor>> {
+  const response = await apiClient.put(`/api/v1/executors/${id}/disabled`, { disabled })
+  return response.data
+}

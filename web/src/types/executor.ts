@@ -8,6 +8,7 @@ export interface Executor {
   description?: string
   config: Record<string, unknown>
   isDefault: boolean
+  disabled: boolean
   createdAt: string
   updatedAt: string
 }

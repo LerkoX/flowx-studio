@@ -220,6 +220,11 @@ export default {
     saving: 'Saving…',
     createExecutor: 'Create executor',
     saveConfig: 'Save config',
+    disabled: 'Disabled',
+    disable: 'Disable',
+    enable: 'Enable',
+    disableConfirmTitle: 'Disable executor',
+    disableConfirmMessage: 'Disable executor "{{name}}"? Type-based resolution will skip it, and workflows referencing it by name will fail at runtime.',
   },
   settings: {
     title: 'Settings',

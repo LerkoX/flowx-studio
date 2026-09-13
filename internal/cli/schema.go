@@ -183,7 +183,25 @@ var schemas = map[string]string{
   "title": "flowx-studio executor set-default",
   "type": "object",
   "properties": {
-    "id": {"type": "integer", "description": "执行器 ID（必填）；设为全局默认后，未声明 executor 的 nodeRef 节点将使用它"}
+    "id": {"type": "integer", "description": "执行器 ID（必填）；设为全局默认后，未声明 executor 的 nodeRef 节点将使用它；被禁用的实例不能设为默认"}
+  },
+  "required": ["id"]
+}`,
+	"executor disable": `{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "flowx-studio executor disable",
+  "type": "object",
+  "properties": {
+    "id": {"type": "integer", "description": "执行器 ID（必填）；禁用后不参与类型级解析（ResolveTypeForNode 跳过），workflow 按名引用它会在运行时明确报错；默认执行器禁止禁用；幂等"}
+  },
+  "required": ["id"]
+}`,
+	"executor enable": `{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "flowx-studio executor enable",
+  "type": "object",
+  "properties": {
+    "id": {"type": "integer", "description": "执行器 ID（必填）；解除禁用，恢复参与类型级解析与按名引用；幂等"}
   },
   "required": ["id"]
 }`,

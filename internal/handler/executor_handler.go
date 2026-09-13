@@ -30,6 +30,7 @@ func (h *ExecutorHandler) RegisterRoutes(r *gin.RouterGroup) {
 		executors.PUT("/:id", h.Update)
 		executors.DELETE("/:id", h.Delete)
 		executors.PUT("/:id/default", h.SetDefault)
+		executors.PUT("/:id/disabled", h.SetDisabled)
 	}
 }
 
@@ -40,7 +41,7 @@ func executorError(c *gin.Context, err error) {
 	case strings.Contains(msg, "not found"):
 		Error(c, http.StatusNotFound, msg)
 	case strings.Contains(msg, "already exists"), strings.Contains(msg, "only one local executor"),
-		strings.Contains(msg, "cannot delete the default"):
+		strings.Contains(msg, "cannot delete the default"), strings.Contains(msg, "cannot disable the default"):
 		Error(c, http.StatusConflict, msg)
 	default:
 		Error(c, http.StatusBadRequest, msg)
@@ -123,6 +124,27 @@ func (h *ExecutorHandler) Delete(c *gin.Context) {
 		return
 	}
 	Success(c, gin.H{"message": "executor deleted"})
+}
+
+// SetDisabled 禁用/启用执行器实例（默认执行器禁止禁用）
+func (h *ExecutorHandler) SetDisabled(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		Error(c, http.StatusBadRequest, "invalid executor id")
+		return
+	}
+	var req struct {
+		Disabled bool `json:"disabled"`
+	}
+	if !BindJSON(c, &req) {
+		return
+	}
+	e, err := h.service.SetDisabled(id, req.Disabled)
+	if err != nil {
+		executorError(c, err)
+		return
+	}
+	Success(c, e)
 }
 
 // SetDefault 设为全局默认执行器

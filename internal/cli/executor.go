@@ -17,6 +17,7 @@ type executorJSON struct {
 	Description string                 `json:"description,omitempty"`
 	Config      map[string]interface{} `json:"config"`
 	IsDefault   bool                   `json:"isDefault"`
+	Disabled    bool                   `json:"disabled"`
 }
 
 // NewExecutorCmd 执行器实例管理命令组（local 单例、docker 多实例、全局默认）
@@ -31,6 +32,8 @@ func NewExecutorCmd() *cobra.Command {
 		newExecutorUpdateCmd(),
 		newExecutorDeleteCmd(),
 		newExecutorSetDefaultCmd(),
+		newExecutorSetDisabledCmd("disable", true),
+		newExecutorSetDisabledCmd("enable", false),
 	)
 	return cmd
 }
@@ -51,6 +54,9 @@ func newExecutorListCmd() *cobra.Command {
 					def := ""
 					if e.IsDefault {
 						def = " (default)"
+					}
+					if e.Disabled {
+						def += " (disabled)"
 					}
 					fmt.Printf("id=%d name=%s type=%s%s\n", e.ID, e.Name, e.Type, def)
 				}
@@ -153,6 +159,43 @@ func newExecutorDeleteCmd() *cobra.Command {
 			}
 			printData(data, func() {
 				fmt.Printf("Deleted executor id=%d\n", id)
+			})
+			return nil
+		},
+	}
+	cmd.Flags().Int64Var(&id, "id", 0, "executor ID (required)")
+	return cmd
+}
+
+// newExecutorSetDisabledCmd 生成 disable/enable 子命令（同一端点，仅取值不同）
+func newExecutorSetDisabledCmd(use string, disabled bool) *cobra.Command {
+	var id int64
+	verb := "Disable"
+	if !disabled {
+		verb = "Enable"
+	}
+	cmd := &cobra.Command{
+		Use:   use,
+		Short: verb + " an executor instance (disabled executors are skipped by type resolution; referencing them by name fails)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if maybePrintSchema("executor " + use) {
+				return nil
+			}
+			if id == 0 {
+				return fmt.Errorf("--id is required. Run `flowx-studio executor %s --schema` for the parameter contract", use)
+			}
+			data, err := do(cmd.Context(), http.MethodPut, fmt.Sprintf("/executors/%d/disabled", id), nil, map[string]bool{"disabled": disabled})
+			if err != nil {
+				return fail(use+" executor", err, false)
+			}
+			var e executorJSON
+			_ = json.Unmarshal(data, &e)
+			printData(data, func() {
+				state := "disabled"
+				if !e.Disabled {
+					state = "enabled"
+				}
+				fmt.Printf("Executor id=%d name=%s is now %s\n", e.ID, e.Name, state)
 			})
 			return nil
 		},

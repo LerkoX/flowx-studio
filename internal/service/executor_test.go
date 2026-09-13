@@ -256,3 +256,65 @@ func TestExecutorService_ResolveTypeForNode(t *testing.T) {
 		t.Errorf("ResolveTypeForNode(missing) = %+v, %v, want nil", e, err)
 	}
 }
+
+func TestExecutorService_SetDisabled(t *testing.T) {
+	svc, cleanup := newExecutorTestService(t)
+	defer cleanup()
+
+	docker := &model.Executor{Name: "docker-gpu", Type: "docker"}
+	if err := svc.Create(docker); err != nil {
+		t.Fatalf("Create(docker-gpu) error = %v", err)
+	}
+
+	// 默认执行器（local）禁止禁用
+	def, err := svc.Default()
+	if err != nil || def == nil {
+		t.Fatalf("Default() = %+v, %v", def, err)
+	}
+	if _, err := svc.SetDisabled(def.ID, true); err == nil {
+		t.Errorf("SetDisabled(default) expected error, got nil")
+	}
+
+	// 禁用 docker 实例：幂等 + 状态落库
+	got, err := svc.SetDisabled(docker.ID, true)
+	if err != nil || !got.Disabled {
+		t.Fatalf("SetDisabled(docker, true) = %+v, %v", got, err)
+	}
+	if got, err := svc.SetDisabled(docker.ID, true); err != nil || !got.Disabled {
+		t.Errorf("SetDisabled idempotent = %+v, %v", got, err)
+	}
+	reloaded, err := svc.GetByID(docker.ID)
+	if err != nil || !reloaded.Disabled {
+		t.Errorf("GetByID after disable = %+v, %v, want Disabled=true", reloaded, err)
+	}
+
+	// 禁用后：按名引用报错；类型解析跳过（无可用 docker 时返回 nil）
+	if _, err := svc.ResolveForNode("docker-gpu", false); err == nil {
+		t.Errorf("ResolveForNode(disabled ref) expected error, got nil")
+	}
+	if e, err := svc.ResolveTypeForNode("docker"); err != nil || e != nil {
+		t.Errorf("ResolveTypeForNode(docker) with only disabled instance = %+v, %v, want nil", e, err)
+	}
+
+	// 被禁用的实例不能设为默认
+	if _, err := svc.SetDefault(docker.ID); err == nil {
+		t.Errorf("SetDefault(disabled) expected error, got nil")
+	}
+
+	// 启用后恢复：可解析、可设默认
+	got, err = svc.SetDisabled(docker.ID, false)
+	if err != nil || got.Disabled {
+		t.Fatalf("SetDisabled(docker, false) = %+v, %v", got, err)
+	}
+	if e, err := svc.ResolveTypeForNode("docker"); err != nil || e == nil || e.Name != "docker-gpu" {
+		t.Errorf("ResolveTypeForNode(docker) after enable = %+v, %v", e, err)
+	}
+	if _, err := svc.SetDefault(docker.ID); err != nil {
+		t.Errorf("SetDefault after enable error = %v", err)
+	}
+
+	// 不存在的实例
+	if _, err := svc.SetDisabled(9999, true); err == nil {
+		t.Errorf("SetDisabled(missing) expected error, got nil")
+	}
+}

@@ -220,6 +220,11 @@ export default {
     saving: '保存中…',
     createExecutor: '创建执行器',
     saveConfig: '保存配置',
+    disabled: '已禁用',
+    disable: '禁用',
+    enable: '启用',
+    disableConfirmTitle: '禁用执行器',
+    disableConfirmMessage: '确定禁用执行器「{{name}}」吗？禁用后按类型解析会跳过它，按名引用它的 workflow 运行时将报错。',
   },
   settings: {
     title: '设置',

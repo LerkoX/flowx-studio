@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Server, Container, Plus, Star, Trash2 } from 'lucide-react'
+import { Server, Container, Plus, Star, Trash2, Ban, CircleCheck } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import ExecutorForm from '@/features/executor-config/ExecutorForm'
 import GlassPanel from '@/components/GlassPanel'
@@ -15,7 +15,7 @@ const typeIcon = { local: Server, docker: Container }
 export default function ExecutorConfigPage() {
   const { t } = useTranslation()
   const { confirm, dialog } = useConfirm()
-  const { executors, isLoading, error, loadExecutors, create, update, remove, setDefault } =
+  const { executors, isLoading, error, loadExecutors, create, update, remove, setDefault, setDisabled } =
     useExecutorStore()
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [creating, setCreating] = useState(false)
@@ -67,6 +67,7 @@ export default function ExecutorConfigPage() {
             className={`
               ${compact ? 'flex-shrink-0 p-3 rounded-xl' : 'w-full p-4 rounded-2xl'}
               text-left transition-all
+              ${executor.disabled ? 'opacity-50' : ''}
               ${isActive
                 ? 'bg-white/10 border border-white/20'
                 : 'bg-white/5 border border-white/10 hover:bg-white/[0.07]'
@@ -86,9 +87,17 @@ export default function ExecutorConfigPage() {
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-white/90 font-medium text-sm truncate">{executor.name}</span>
+                  <span className={`font-medium text-sm truncate ${executor.disabled ? 'text-white/50 line-through' : 'text-white/90'}`}>
+                    {executor.name}
+                  </span>
                   {executor.isDefault && (
                     <Star size={12} className="text-amber-400 fill-amber-400 flex-shrink-0" />
+                  )}
+                  {executor.disabled && (
+                    <span className="flex-shrink-0 px-1.5 py-0.5 rounded text-[9px] leading-none
+                                     bg-white/5 border border-white/15 text-white/40">
+                      {t('executor.disabled')}
+                    </span>
                   )}
                 </div>
                 <div className="text-white/40 text-xs mt-0.5">{t(`executor.typeDesc.${executor.type}`)}</div>
@@ -160,6 +169,34 @@ export default function ExecutorConfigPage() {
             <span className="text-amber-400/80 text-xs flex items-center gap-1.5">
               <Star size={12} className="fill-amber-400" /> {t('executor.currentDefault')}
             </span>
+          )}
+          {selected.type === 'docker' && !selected.isDefault && (
+            <button
+              onClick={async () => {
+                if (selected.disabled) {
+                  runOp(() => setDisabled(selected.id, false))
+                  return
+                }
+                const ok = await confirm({
+                  title: t('executor.disableConfirmTitle'),
+                  message: t('executor.disableConfirmMessage', { name: selected.name }),
+                  confirmText: t('executor.disable'),
+                  danger: true,
+                })
+                if (ok) runOp(() => setDisabled(selected.id, true))
+              }}
+              disabled={saving}
+              className={`px-3 py-1.5 rounded-lg text-xs transition-all
+                         disabled:opacity-40 flex items-center gap-1.5
+                         ${selected.disabled
+                           ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/20'
+                           : 'bg-amber-500/10 border border-amber-500/20 text-amber-300 hover:bg-amber-500/20'
+                         }`}
+            >
+              {selected.disabled
+                ? <><CircleCheck size={12} /> {t('executor.enable')}</>
+                : <><Ban size={12} /> {t('executor.disable')}</>}
+            </button>
           )}
           {selected.type === 'docker' && !selected.isDefault && (
             <button
