@@ -49,6 +49,16 @@ export interface NodeWidgetExecution {
   metadata?: Record<string, unknown>
 }
 
+/** 节点实时预览帧（运行中由节点脚本经 FLOWX_CALLBACK_URL 推送，SSE 下发） */
+export interface NodeWidgetPreview {
+  /** base64 编码的预览图像帧 */
+  image: string
+  /** 图像媒体类型（image/jpeg、image/png 等） */
+  mime: string
+  /** 可选进度 0~1 */
+  progress?: number
+}
+
 export interface NodeWidgetProps {
   /** workflow 中的节点实例 ID */
   nodeId: string
@@ -79,6 +89,12 @@ export interface NodeWidgetProps {
   onParamsChange?: (params: Record<string, string>) => void
   /** 流水线执行实例实时 metadata；无运行实例时为 null */
   execution: NodeWidgetExecution | null
+  /**
+   * 节点实时预览帧（可选）：节点脚本执行中途经 FLOWX_CALLBACK_URL 推送，
+   * 随 SSE 下发；瞬态数据——node_complete 时清除，回放态/未执行时缺省，
+   * 组件需判空。节点预览 UI 由组件自行渲染（画布外壳不渲染预览）。
+   */
+  preview?: NodeWidgetPreview
   /** 当前主题 */
   theme: 'dark' | 'light'
   /** 语言环境，预留 */

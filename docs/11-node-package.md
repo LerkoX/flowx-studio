@@ -595,7 +595,7 @@ interface NodeWidgetProps {
                                   // 下为 undefined，组件调用前需判空进入只读模式
   execution: {                  // 流水线执行实例实时 metadata（SSE 驱动）；无运行实例时为 null
     id: string
-    status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
+    status: 'pending' | 'running' | 'paused' | 'success' | 'failed' | 'cancelled'
     trigger?: string
     startedAt?: string
     completedAt?: string
@@ -604,6 +604,11 @@ interface NodeWidgetProps {
     errorNodeId?: string
     metadata?: Record<string, unknown>
   } | null
+  preview?: {                   // 节点实时预览帧（可选）：节点脚本执行中途经
+    image: string               // FLOWX_CALLBACK_URL 推送，随 SSE 下发（见 11.16）。
+    mime: string                // 瞬态：node_complete 清除，回放态缺省，需判空。
+    progress?: number           // 预览 UI 由组件自行渲染，画布外壳不渲染预览
+  }
   theme: 'dark'                 // 预留
   locale: string                // 预留
 }
@@ -724,8 +729,9 @@ localStorage、auth token、Studio 内部状态），**只应导入可信来源�
 
 **实时预览推送**：节点脚本在执行中途可向 `FLOWX_CALLBACK_URL` POST
 `{"image": "<base64>", "mime": "image/jpeg", "progress": 0.4}`，服务端广播
-`node_preview` SSE 事件（不落库），前端画布节点实时渲染预览图与进度条；
-`node_complete` 后前端清除预览，展示最终输出。未注入 `FLOWX_CALLBACK_URL`
+`node_preview` SSE 事件（不落库），前端将预览帧透传给节点自定义 UI 组件
+（`props.preview`，见 11.13.2）由其自行渲染——画布外壳不渲染预览；
+`node_complete` 后前端清除预览帧。未注入 `FLOWX_CALLBACK_URL`
 （如 Mock 测试）时脚本应静默跳过。参考实现：`flowx-pixelforge/nodes/ksampler/`
 （KSampler 采样逐步预览：节点透传回调地址给推理服务，服务端 sample 算子在
 采样循环中逐步 POST latent 预览帧）。
