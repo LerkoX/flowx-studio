@@ -48,8 +48,8 @@ type BackupConfig struct {
 // AssetsConfig 节点资产存储配置
 type AssetsConfig struct {
 	// 远程执行器（docker/k8s）拉取资产用的 HTTP base，需执行器网络可达。
-	// 留空时按 server.host:port 推导（0.0.0.0 视为 127.0.0.1）。
-	// 跨主机/容器场景应显式配置，如 http://192.168.1.10:8080
+	// 留空时按 server.host:port 推导（0.0.0.0 等通配地址自动探测局域网 IP）。
+	// 跨主机/容器场景可显式配置覆盖，如 http://192.168.1.10:8080
 	HTTPBase string `mapstructure:"http_base"`
 }
 
