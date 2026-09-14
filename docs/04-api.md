@@ -582,6 +582,27 @@ Content-Type: application/json
 }
 ```
 
+### 4.5.8 节点实时预览回调
+
+```http
+POST /api/v1/executions/:id/nodes/:nodeId/preview
+Content-Type: application/json
+
+{
+  "image": "<base64 图像帧>",
+  "mime": "image/jpeg",          // 可选，缺省 image/jpeg；支持 jpeg/png/webp/gif
+  "progress": 0.4                 // 可选，0~1
+}
+```
+
+运行中的节点脚本经 `FLOWX_CALLBACK_URL` 环境变量回调该端点，推送执行中途的实时预览帧
+（如 ComfyUI 采样每一步的 latent 预览图）。服务端将帧以 `node_preview` 事件广播到全局
+SSE 事件流（**瞬态数据，不落库**），前端画布节点实时展示。body 上限 8MB。
+
+节点脚本侧所需环境变量由服务端在运行/续跑展开时自动注入（见 11.16 节）：
+`FLOWX_CALLBACK_URL`（本端点完整地址）、`FLOWX_AUTH_TOKEN`（Bearer 认证 token）。
+未注入时节点应静默跳过预览推送。
+
 ## 4.6 全局事件流 API
 
 ### 4.6.1 订阅全局事件
@@ -590,7 +611,7 @@ Content-Type: application/json
 GET /api/v1/events
 ```
 
-**说明**：全局 SSE 事件流，推送事件总线上的所有事件（事件名为 `evt.Type`，数据为完整事件对象），客户端断开连接时自动取消订阅。
+**说明**：全局 SSE 事件流，推送事件总线上的所有事件（事件名为 `evt.Type`，数据为完整事件对象），客户端断开连接时自动取消订阅。节点实时预览帧以 `node_preview` 事件出现在该流中：`{"execution_id": 42, "node_id": "Sampler", "image": "<base64>", "mime": "image/jpeg", "progress": 0.4, "timestamp": ...}`。
 
 ## 4.7 配置管理 API
 

@@ -118,6 +118,20 @@ type usageError struct{ err error }
 func (e *usageError) Error() string { return e.err.Error() }
 func (e *usageError) Unwrap() error { return e.err }
 
+// resolveHTTPBase 推导执行器可达的 server HTTP 地址（资产签名 URL / 节点预览回调共用）：
+// assets.http_base 未显式配置时按 server.host:port 推导
+//（0.0.0.0 对执行器不可达，视为 127.0.0.1；跨主机/容器请配置 assets.http_base）
+func resolveHTTPBase(cfg *config.Config) string {
+	if cfg.Assets.HTTPBase != "" {
+		return cfg.Assets.HTTPBase
+	}
+	host := cfg.Server.Host
+	if host == "0.0.0.0" || host == "::" || host == "" {
+		host = "127.0.0.1"
+	}
+	return fmt.Sprintf("http://%s:%d", host, cfg.Server.Port)
+}
+
 func newAppServices(cfg *config.Config) (*appServices, func(), error) {
 	database, err := db.New(cfg.Data.DBPath)
 	if err != nil {
@@ -127,16 +141,8 @@ func newAppServices(cfg *config.Config) (*appServices, func(), error) {
 	bus := event.NewBus()
 	rt := runtime.NewAdapter()
 	assetStore := assets.NewStore(cfg.Data.Dir)
-	// P3：远程执行器资产拉取。HTTPBase 未显式配置时按 server.host:port 推导
-	//（0.0.0.0 对执行器不可达，视为 127.0.0.1；跨主机/容器请配置 assets.http_base）
-	httpBase := cfg.Assets.HTTPBase
-	if httpBase == "" {
-		host := cfg.Server.Host
-		if host == "0.0.0.0" || host == "::" || host == "" {
-			host = "127.0.0.1"
-		}
-		httpBase = fmt.Sprintf("http://%s:%d", host, cfg.Server.Port)
-	}
+	// P3：远程执行器资产拉取；同一 base 复用于节点预览回调地址注入
+	httpBase := resolveHTTPBase(cfg)
 	assetStore.HTTPBase = httpBase
 	if key, err := assets.LoadOrCreateSignKey(cfg.Data.Dir); err != nil {
 		log.Printf("asset signing key init failed (remote asset pull disabled): %v", err)
@@ -244,6 +250,12 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to init auth token: %w", err)
 	}
+
+	// 节点运行时回调（实时预览推送）：运行/续跑时向节点环境变量注入
+	// FLOWX_CALLBACK_URL / FLOWX_AUTH_TOKEN，节点脚本 curl 回调即可上送预览帧。
+	// local 执行器与 server 同机，走回环地址（http_base 可能配为局域网 IP）
+	loopbackBase := fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)
+	svcs.workflowSvc.SetRuntimeCallback(resolveHTTPBase(cfg), loopbackBase, token)
 
 	srv := server.New()
 	srv.SetPort(cfg.Server.Port)

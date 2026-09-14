@@ -12,6 +12,7 @@ import ModuleNodeWidget, { buildWidgetUrl } from '@/components/ModuleNodeWidget'
 import OutputExplorer from '@/components/OutputExplorer'
 import type { NodeWidgetExecution, NodeWidgetParamSource, NodeWidgetProps } from '@/types/nodeWidget'
 import type { NodeUIConfig } from '@/types/node'
+import type { NodePreview } from '@/types/workflow'
 import type { ExecutionStatus } from '@/types/execution'
 import type { NodeWidgetStatus } from '@/types/nodeWidget'
 
@@ -45,6 +46,8 @@ interface GlowNodeData {
   interactive?: boolean
   /** 离场标记：节点被外部删除后先播缩小淡出动画，再由画布移除 */
   leaving?: boolean
+  /** 节点运行中推送的实时预览帧（如 ComfyUI 采样逐帧图像），node_complete 时清除 */
+  preview?: NodePreview
 }
 
 function toWidgetExecution(exec: ExecutionStatus | null): NodeWidgetExecution | null {
@@ -259,6 +262,32 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
           id="source"
           className="w-3 h-3 !bg-white/20 !border-white/30"
         />
+
+        {/* 实时预览帧（节点运行中由脚本经 FLOWX_CALLBACK_URL 推送，如 ComfyUI 采样过程）；
+            迟到帧保护：仅在 running 状态展示，node_complete 已清除残留 */}
+        {nodeData.preview && status === 'running' && (
+          <div className="mt-2 pt-2 border-t border-white/10">
+            <div className="relative rounded-lg overflow-hidden border border-white/10 bg-black/40">
+              <img
+                src={`data:${nodeData.preview.mime};base64,${nodeData.preview.image}`}
+                alt="preview"
+                draggable={false}
+                className="w-full block select-none"
+              />
+              {nodeData.preview.progress !== undefined && (
+                <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/50">
+                  <div
+                    className="h-full transition-[width] duration-300 ease-out"
+                    style={{
+                      width: `${Math.round(nodeData.preview.progress * 100)}%`,
+                      background: config.color,
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* 内嵌自定义 UI 组件（桌面端常显；移动端随详情展开） */}
         {hasUI && (!isMobile || detailsExpanded) && (

@@ -50,6 +50,7 @@ func (h *WorkflowHandler) RegisterRoutes(r *gin.RouterGroup) {
 		executions.POST("/:id/pause", h.PauseExecution)
 		executions.POST("/:id/resume", h.ResumeExecution)
 		executions.POST("/:id/cancel", h.CancelExecution)
+		executions.POST("/:id/nodes/:nodeId/preview", h.PostNodePreview)
 	}
 }
 
@@ -317,6 +318,71 @@ func (h *WorkflowHandler) CancelExecution(c *gin.Context) {
 	}
 
 	Success(c, gin.H{"executionId": id, "status": "cancelled"})
+}
+
+// nodePreviewRequest 节点实时预览帧请求体（节点脚本经 FLOWX_CALLBACK_URL 回调）
+type nodePreviewRequest struct {
+	Image    string   `json:"image"`              // base64 编码的图像帧
+	Mime     string   `json:"mime"`               // 媒体类型，缺省 image/jpeg
+	Progress *float64 `json:"progress,omitempty"` // 可选进度 0~1
+}
+
+// PostNodePreview 接收运行中节点推送的实时预览帧（如 ComfyUI 采样逐帧图像），
+// 经事件总线广播 node_preview 事件（瞬态数据，不落库），前端画布节点实时展示。
+// POST /executions/:id/nodes/:nodeId/preview
+func (h *WorkflowHandler) PostNodePreview(c *gin.Context) {
+	execID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		Error(c, http.StatusBadRequest, "invalid execution id")
+		return
+	}
+	nodeID := c.Param("nodeId")
+	if nodeID == "" {
+		Error(c, http.StatusBadRequest, "node id is required")
+		return
+	}
+
+	// 预览帧为 base64 图像，限制 body 最大 8MB（约 6MB 原始图像），防止恶意大请求
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8<<20)
+	var req nodePreviewRequest
+	if !BindJSON(c, &req) {
+		return
+	}
+	if req.Image == "" {
+		Error(c, http.StatusBadRequest, "image is required")
+		return
+	}
+	mime := req.Mime
+	if mime == "" {
+		mime = "image/jpeg"
+	}
+	switch mime {
+	case "image/jpeg", "image/png", "image/webp", "image/gif":
+	default:
+		Error(c, http.StatusBadRequest, "unsupported mime type")
+		return
+	}
+	if req.Progress != nil {
+		p := *req.Progress
+		if p < 0 {
+			p = 0
+		}
+		if p > 1 {
+			p = 1
+		}
+		req.Progress = &p
+	}
+
+	if err := h.service.PublishNodePreview(execID, nodeID, req.Image, mime, req.Progress); err != nil {
+		if err.Error() == "execution not found" {
+			Error(c, http.StatusNotFound, err.Error())
+			return
+		}
+		Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	Success(c, gin.H{"ok": true})
 }
 
 // GetExecutionYAML 获取执行实例的运行时快照 YAML（剥离 runtime 状态段）

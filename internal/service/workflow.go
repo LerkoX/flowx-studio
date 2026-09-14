@@ -31,6 +31,11 @@ type WorkflowService struct {
 	logRing   *LogRingBuffer
 	metaMu    sync.Mutex
 	metaCache map[int64]map[string]interface{}
+	// 节点运行时回调（实时预览推送）：执行器可达的 server 地址与认证 token，
+	// 由 main 在 token 初始化后注入；为空时展开配置不注入 FLOWX_CALLBACK_* 环境变量
+	callbackBase    string
+	loopbackBase    string // local 执行器（与 server 同机）使用的回环地址
+	callbackToken   string
 }
 
 // NewWorkflowService 创建工作流服务
@@ -78,6 +83,18 @@ func (s *WorkflowService) SetExecutors(e *ExecutorService) {
 // SetSystemConfig 注入系统配置服务（可选）；用于最大并发执行数限制
 func (s *WorkflowService) SetSystemConfig(cfg *SystemConfigService) {
 	s.sysCfg = cfg
+}
+
+// SetRuntimeCallback 配置节点运行时回调所需的 server 地址与认证 token。
+// base 为执行器网络可达地址（同资产签名 URL 推导）；loopbackBase 为回环地址
+//（127.0.0.1:port），供与 server 同机的 local 执行器节点使用。
+// 运行/续跑时注入到每个节点的环境变量（FLOWX_CALLBACK_URL 等），
+// 供节点脚本在执行中途推送实时预览帧（见 InjectRuntimeContext 与预览回调 API）。
+// base 为空时不注入（节点中预览推送逻辑应静默跳过）。
+func (s *WorkflowService) SetRuntimeCallback(base, loopbackBase, token string) {
+	s.callbackBase = base
+	s.loopbackBase = loopbackBase
+	s.callbackToken = token
 }
 
 // executorResolver 供 ExpandWorkflowConfig 解析执行器实例；
@@ -361,6 +378,10 @@ func (s *WorkflowService) updateExecutionGraph(execID int64, yamlContent string)
 			}
 			yamlContent = expanded
 		}
+		// 新展开节点注入运行时上下文（同一 execID 下与快照中旧节点的注入值一致，幂等）
+		if injected, err := runtime.InjectRuntimeContext(yamlContent, execID, s.callbackBase, s.loopbackBase, s.callbackToken); err == nil {
+			yamlContent = injected
+		}
 		// 校验放在展开之后：新节点的 executor 由展开器填充，物化旧节点自带 executor
 		wf := &model.Workflow{YAMLConfig: yamlContent}
 		if src, err := s.Get(exec.WorkflowID); err == nil {
@@ -587,6 +608,16 @@ func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 			return
 		}
 		yamlConfig = expanded
+	}
+
+	// 注入运行时上下文环境变量（FLOWX_EXECUTION_ID / FLOWX_NODE_ID /
+	// FLOWX_CALLBACK_URL / FLOWX_AUTH_TOKEN），供节点执行中途推送实时预览。
+	// 失败（理论上仅序列化问题，上方展开已成功解析同一 YAML）不阻断执行，
+	// 仅记录日志——预览是增强能力，节点拿不到回调地址时应静默跳过
+	if injected, err := runtime.InjectRuntimeContext(yamlConfig, execID, s.callbackBase, s.loopbackBase, s.callbackToken); err != nil {
+		s.logExecutionError(execID, "", "failed to inject runtime context: "+err.Error())
+	} else {
+		yamlConfig = injected
 	}
 
 	s.db.Exec("UPDATE executions SET status = ?, started_at = ? WHERE id = ?",
@@ -864,6 +895,27 @@ func (s *WorkflowService) RecentExecutionLogs(executionID int64) []map[string]in
 func (s *WorkflowService) SubscribeEvents() chan event.Event {
 	ch, _ := s.eventBus.Subscribe()
 	return ch
+}
+
+// PublishNodePreview 发布节点实时预览帧（瞬态数据：仅经 SSE 广播给在线前端，不落库）。
+// image 为 base64 编码的图像帧，mime 为其媒体类型，progress 可选（0~1）。
+// 节点脚本经 FLOWX_CALLBACK_URL 回调 POST /executions/:id/nodes/:nodeId/preview 触发。
+func (s *WorkflowService) PublishNodePreview(execID int64, nodeID, image, mime string, progress *float64) error {
+	if _, err := s.GetExecution(execID); err != nil {
+		return err
+	}
+	data := map[string]interface{}{
+		"execution_id": execID,
+		"node_id":      nodeID,
+		"image":        image,
+		"mime":         mime,
+		"timestamp":    time.Now(),
+	}
+	if progress != nil {
+		data["progress"] = *progress
+	}
+	s.eventBus.Publish(event.Event{Type: "node_preview", Data: data})
+	return nil
 }
 
 // UnsubscribeEvents 取消订阅事件

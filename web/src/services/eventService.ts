@@ -15,6 +15,7 @@ const KNOWN_EVENTS = [
   'execution_resumed',
   'node_start',
   'node_complete',
+  'node_preview',
   'workflow.created',
   'workflow.updated',
   'workflow.deleted',

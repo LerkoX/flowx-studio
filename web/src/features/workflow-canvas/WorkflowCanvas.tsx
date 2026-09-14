@@ -483,17 +483,22 @@ function WorkflowCanvasInner({
     )
   }, [nodeStatuses, nodeCompletedAt, nodePrevCompletedAt, setNodes, setEdges])
 
-  // 同步节点运行时数据（入参和返回）：退出回放态时 nodeRuntimeData 清空，
-  // 此处同步清掉节点上残留的 inputs/outputs，不能 early-return
+  // 同步节点运行时数据（入参/返回/实时预览）：退出回放态时 nodeRuntimeData 清空，
+  // 此处同步清掉节点上残留的 inputs/outputs/preview，不能 early-return
   useEffect(() => {
     setNodes((nds) =>
       nds.map((node) => {
         const runtime = nodeRuntimeData[node.id]
         const inputs = runtime?.inputs
         const outputs = runtime?.outputs
+        const preview = runtime?.preview
 
         // 引用未变直接跳过：一次更新中大多数节点没有变化
-        if (inputs === node.data.inputs && outputs === node.data.outputs) {
+        if (
+          inputs === node.data.inputs &&
+          outputs === node.data.outputs &&
+          preview === node.data.preview
+        ) {
           return node
         }
 
@@ -503,6 +508,7 @@ function WorkflowCanvasInner({
             ...node.data,
             inputs,
             outputs,
+            preview,
           },
         }
       })
@@ -655,6 +661,30 @@ function WorkflowCanvasInner({
       return
     }
 
+    if (type === 'node_preview') {
+      // 节点运行中途推送的实时预览帧（瞬态，不落库）：仅应用到当前画布正在
+      // 展示的执行（选中回放或正在运行的），其他执行的帧直接忽略
+      const payload = data as {
+        execution_id?: number
+        node_id?: string
+        image?: string
+        mime?: string
+        progress?: number
+      }
+      if (!payload.execution_id || !payload.node_id || !payload.image) return
+      const execStore = useExecutionStore.getState()
+      const liveId = execStore.selectedExecutionId ?? execStore.runningExecutionId
+      if (String(payload.execution_id) !== liveId) return
+      setNodeRuntimeData(payload.node_id, {
+        preview: {
+          image: payload.image,
+          mime: payload.mime || 'image/jpeg',
+          progress: payload.progress,
+        },
+      })
+      return
+    }
+
     if (type === 'node_complete') {
       const payload = data as {
         node_id?: string
@@ -664,6 +694,8 @@ function WorkflowCanvasInner({
       }
       if (payload.node_id) {
         updateNodeStatus(payload.node_id, statusMap[payload.status || ''] || 'idle')
+        // 节点终结：清除实时预览帧，画布回退展示最终输出
+        setNodeRuntimeData(payload.node_id, { preview: undefined })
         // 节点输出随 node_complete 实时下发：驱动画布节点 UI 即时展示输出，
         // 不必等执行结束后 metadata 的一次性同步（循环中跳过节点重发的事件
         // 携带相同输出，重复设置幂等无副作用）

@@ -703,7 +703,34 @@ localStorage、auth token、Studio 内部状态），**只应导入可信来源�
 - 不符合命名规则的目录（如人工放置的）→ 保留不动
 - 每次清理写入审计日志（`gc_assets`）
 
-## 11.16 参考资料
+## 11.16 运行时上下文环境变量与实时预览推送
+
+运行/续跑时，服务端在展开后的工作流 YAML 上为**每个节点**追加注入以下环境变量
+（`internal/runtime/inject.go` 的 `InjectRuntimeContext`；同一 execID 下幂等，
+不影响快照比对与续跑）：
+
+| 变量 | 说明 |
+|------|------|
+| `FLOWX_EXECUTION_ID` | 执行实例 ID |
+| `FLOWX_NODE_ID` | 节点实例 ID（workflow YAML 的 `Nodes` 键，与执行事件 `node_id` 一致） |
+| `FLOWX_CALLBACK_URL` | 实时预览回调地址（按执行器类型选择，见下；节点自己推送预览时用它） |
+| `FLOWX_CALLBACK_URL_PUBLIC` | 预览回调的 LAN/公网可达地址（恒为 `assets.http_base` 推导值）；节点不自己推送、需把回调地址转发给远程服务（如 ksampler 透传给推理服务）时用它 |
+| `FLOWX_AUTH_TOKEN` | 回调所需的 Bearer 认证 token |
+
+回调地址按执行器类型选择：**local 执行器与 server 同机，走回环地址**
+`http://127.0.0.1:<port>`（`assets.http_base` 可能配为局域网 IP 供 docker 拉资产，
+该地址本机不一定可达）；docker/k8s 容器执行器走 `assets.http_base`（缺省按
+`server.host:port` 推导；跨主机场景需配置为执行器可达地址）。
+
+**实时预览推送**：节点脚本在执行中途可向 `FLOWX_CALLBACK_URL` POST
+`{"image": "<base64>", "mime": "image/jpeg", "progress": 0.4}`，服务端广播
+`node_preview` SSE 事件（不落库），前端画布节点实时渲染预览图与进度条；
+`node_complete` 后前端清除预览，展示最终输出。未注入 `FLOWX_CALLBACK_URL`
+（如 Mock 测试）时脚本应静默跳过。参考实现：`flowx-pixelforge/nodes/ksampler/`
+（KSampler 采样逐步预览：节点透传回调地址给推理服务，服务端 sample 算子在
+采样循环中逐步 POST latent 预览帧）。
+
+## 11.17 参考资料
 
 - `flowx/core/config.go:113-124` — `NodeConfig` 结构定义
 - `flowx/dag/eval_context.go:80-115` — 模板上下文（`Param` 与 `Metadata`）
