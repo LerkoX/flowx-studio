@@ -281,7 +281,7 @@ export default function ExecutorConfigPage() {
 
   if (isMobile) {
     return (
-      <div className="h-full overflow-auto p-4 space-y-4">
+      <div className="h-full overflow-auto p-4 pb-[calc(2rem+env(safe-area-inset-bottom))] space-y-4">
         <h2 className="text-white/90 font-semibold text-lg">{t('executor.title')}</h2>
         {error && <p className="text-rose-400 text-xs">{error}</p>}
         <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">{executorList(true)}</div>

@@ -3,7 +3,7 @@ import Sidebar from './Sidebar'
 
 export default function Layout() {
   return (
-    <div className="h-screen w-screen overflow-hidden">
+    <div className="h-screen supports-[height:100dvh]:h-dvh w-screen overflow-hidden">
       <Sidebar />
       <main className="h-full overflow-hidden md:ml-12">
         <Outlet />
