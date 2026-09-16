@@ -689,6 +689,7 @@ PUT /api/v1/config/system
 | `executor update --id N --file exec.yaml` | 更新执行器 description/config（name/type 不可变更） | `PUT /executors/:id` |
 | `executor delete --id N` | 删除执行器（默认执行器需先 set-default 切换） | `DELETE /executors/:id` |
 | `executor set-default --id N` | 设为全局默认执行器（未声明 executor 的 nodeRef 节点将使用它） | `PUT /executors/:id/default` |
+| `executor test --id N` | 测试 docker 执行器与 daemon 的连接状态（Ping + 版本信息，不创建容器；仅 docker 实例支持；连接失败退出码 1） | `POST /executors/:id/test` |
 | `backup create` / `backup list` / `backup download` | 备份创建/列表/下载（`.db` + 配套 `.assets.tar.gz` 节点资产包） | `POST /backups`、`GET /backups`、`GET /backups/:name/download` |
 | `backup restore --file f` | 恢复备份（要求 server 已停止；`f` 旁存在 `.assets.tar.gz` 时自动恢复资产，自动保留 `.pre-restore` 回滚副本） | 无（直接操作数据库文件） |
 
@@ -744,7 +745,8 @@ PUT /api/v1/config/system
 │   ├── GET    /:id       执行器详情
 │   ├── PUT    /:id       更新（name/type 不可变更，仅 description/config）
 │   ├── DELETE /:id       删除（默认执行器禁止删除 → 409）
-│   └── PUT    /:id/default  设为全局默认执行器
+│   ├── PUT    /:id/default  设为全局默认执行器
+│   └── POST   /:id/test     测试 docker daemon 连接（返回 ok/serverVersion/apiVersion/os/arch/latencyMs，失败 ok=false+message）
 │
 ├── /assets                    ※ 免认证（签名 URL 自校验，供 docker/k8s 执行器拉取节点资产）
 │   └── GET    /nodes/:nodeRef/*filepath?expires&sig  签名 URL 拉取节点文件（HMAC-SHA256 + 时效）

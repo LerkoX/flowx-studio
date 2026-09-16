@@ -41,6 +41,7 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 | 创建执行器（docker 可多个，支持远程 host） | `flowx-studio executor create --file exec.yaml` |
 | 设为全局默认执行器 | `flowx-studio executor set-default --id <N>` |
 | 禁用/启用执行器（docker 实例；禁用后类型解析跳过、按名引用报错；默认执行器禁止禁用） | `flowx-studio executor disable --id <N>` / `executor enable --id <N>` |
+| 测试 docker 执行器与 daemon 的连接状态（不创建容器；仅 docker 实例；失败退出码 1） | `flowx-studio executor test --id <N>` |
 | 列出执行实例 | `flowx-studio execution list [--workflow <N>] [--status success] --json` |
 | 查询执行详情（metadata/参数） | `flowx-studio execution get --id <E> --json` |
 | 导出执行的快照 YAML（独立图定义） | `flowx-studio execution yaml --id <E> > snap.yaml` |

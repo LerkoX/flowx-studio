@@ -667,6 +667,27 @@ func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 
 	status, _ := s.runtime.GetWorkflowStatus(execID)
 	finalStatus := strings.ToLower(status)
+
+	completedAt := time.Now()
+	durationMs := int(time.Since(startTime).Milliseconds())
+	var errorMsg string
+	if workflowErr != nil {
+		// workflow 实例完成即被 RunAsync 删除，GetWorkflowStatus 可能跑输拿到 not found。
+		// 此时 execution_complete 事件先于实例删除进入事件队列，事件桥随后会把引擎
+		// 权威终态落库；短暂等待该终态，避免抢在事件桥前面用节点表猜测
+		// （竞态窗口内节点可能仍显示 running，猜出来的是错误结论）
+		if st := s.waitEventBridgeTerminal(execID, 3*time.Second); st != "" {
+			finalStatus = st
+		} else {
+			// 事件桥超时未落库：按执行节点状态兜底判断
+			nodeStatus, nodeErrMsg := s.resolveFinalStatusFromNodes(execID)
+			finalStatus = nodeStatus
+			if nodeErrMsg != "" {
+				errorMsg = nodeErrMsg
+				s.logExecutionError(execID, "", "workflow execution failed: "+errorMsg)
+			}
+		}
+	}
 	if finalStatus == "" {
 		if workflowErr != nil {
 			finalStatus = "failed"
@@ -679,24 +700,6 @@ func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 	var dbStatus string
 	if err := s.db.Get(&dbStatus, "SELECT status FROM executions WHERE id = ?", execID); err == nil && dbStatus == "cancelled" {
 		finalStatus = "cancelled"
-	}
-
-	completedAt := time.Now()
-	durationMs := int(time.Since(startTime).Milliseconds())
-	var errorMsg string
-	if workflowErr != nil {
-		// 如果 workflow 实例已从 runtime 删除（RunAsync 完成即删的正常竞态），
-		// 根据执行节点状态兜底判断；仅确实失败时才写错误日志
-		nodeStatus, nodeErrMsg := s.resolveFinalStatusFromNodes(execID)
-		if nodeStatus != "" {
-			finalStatus = nodeStatus
-			if nodeErrMsg != "" {
-				errorMsg = nodeErrMsg
-			}
-		} else {
-			errorMsg = workflowErr.Error()
-			s.logExecutionError(execID, "", "workflow execution failed: "+errorMsg)
-		}
 	}
 
 	s.db.Exec("UPDATE executions SET status = ?, completed_at = ?, duration_ms = ?, error_message = ? WHERE id = ?",
@@ -737,10 +740,29 @@ func (s *WorkflowService) logExecutionError(execID int64, nodeName, message stri
 	})
 }
 
+// waitEventBridgeTerminal 等待事件桥把引擎权威终态落库。
+// workflow 实例完成即被 RunAsync 删除，而 execution_complete 事件先于删除入队，
+// 事件桥消费后写入 success/failed/cancelled；轮询收尾跑赢事件桥时调用本方法
+// 短暂等待，超时返回空串（调用方再走节点状态兜底）。
+func (s *WorkflowService) waitEventBridgeTerminal(execID int64, timeout time.Duration) string {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		var st string
+		if err := s.db.Get(&st, "SELECT status FROM executions WHERE id = ?", execID); err == nil {
+			switch st {
+			case "success", "failed", "cancelled":
+				return st
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return ""
+}
+
 // resolveFinalStatusFromNodes 当 workflow 已被清理时，根据执行节点状态兜底判断最终结果
 func (s *WorkflowService) resolveFinalStatusFromNodes(execID int64) (string, string) {
 	var nodes []model.ExecutionNode
-	if err := s.db.Select(&nodes, "SELECT status FROM execution_nodes WHERE execution_id = ?", execID); err != nil {
+	if err := s.db.Select(&nodes, "SELECT node_id, status FROM execution_nodes WHERE execution_id = ?", execID); err != nil {
 		return "failed", err.Error()
 	}
 	if len(nodes) == 0 {
@@ -750,6 +772,11 @@ func (s *WorkflowService) resolveFinalStatusFromNodes(execID int64) (string, str
 	for _, n := range nodes {
 		if n.Status == "failed" {
 			return "failed", ""
+		}
+		if n.Status == "running" || n.Status == "pending" {
+			// 实例已终结但节点仍停留在进行中状态：节点收尾事件丢失
+			// （如 executor 准备失败未触发 node-failed），属异常终止而非成功
+			return "failed", fmt.Sprintf("node %q was still %s when the workflow ended", n.NodeID, n.Status)
 		}
 		if n.Status == "cancelled" {
 			hasCancelled = true
