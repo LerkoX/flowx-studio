@@ -318,3 +318,42 @@ func TestExecutorService_SetDisabled(t *testing.T) {
 		t.Errorf("SetDisabled(missing) expected error, got nil")
 	}
 }
+
+func TestExecutorService_TestConnection(t *testing.T) {
+	svc, cleanup := newExecutorTestService(t)
+	defer cleanup()
+
+	// 不存在的实例
+	if _, err := svc.TestConnection(9999); err == nil || !contains(err.Error(), "not found") {
+		t.Errorf("TestConnection(missing) expected not-found error, got %v", err)
+	}
+
+	// local 实例不支持连接测试
+	local, err := svc.Default()
+	if err != nil || local == nil {
+		t.Fatalf("Default() error = %v", err)
+	}
+	if _, err := svc.TestConnection(local.ID); err == nil || !contains(err.Error(), "only supported for docker") {
+		t.Errorf("TestConnection(local) expected docker-only error, got %v", err)
+	}
+
+	// docker 实例指向不可达 daemon：返回 ok=false 的结果而不是 Go error
+	d := &model.Executor{
+		Name:   "docker-dead",
+		Type:   "docker",
+		Config: map[string]interface{}{"host": "tcp://127.0.0.1:1"},
+	}
+	if err := svc.Create(d); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	res, err := svc.TestConnection(d.ID)
+	if err != nil {
+		t.Fatalf("TestConnection(dead daemon) should not return Go error, got %v", err)
+	}
+	if res.OK {
+		t.Error("TestConnection(dead daemon) OK = true, want false")
+	}
+	if !contains(res.Message, "ping failed") {
+		t.Errorf("Message = %q, want ping failure detail", res.Message)
+	}
+}

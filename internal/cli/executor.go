@@ -34,6 +34,7 @@ func NewExecutorCmd() *cobra.Command {
 		newExecutorSetDefaultCmd(),
 		newExecutorSetDisabledCmd("disable", true),
 		newExecutorSetDisabledCmd("enable", false),
+		newExecutorTestCmd(),
 	)
 	return cmd
 }
@@ -197,6 +198,55 @@ func newExecutorSetDisabledCmd(use string, disabled bool) *cobra.Command {
 				}
 				fmt.Printf("Executor id=%d name=%s is now %s\n", e.ID, e.Name, state)
 			})
+			return nil
+		},
+	}
+	cmd.Flags().Int64Var(&id, "id", 0, "executor ID (required)")
+	return cmd
+}
+
+// executorTestJSON 连接测试结果的 API 投影
+type executorTestJSON struct {
+	OK            bool   `json:"ok"`
+	Message       string `json:"message,omitempty"`
+	ServerVersion string `json:"serverVersion,omitempty"`
+	APIVersion    string `json:"apiVersion,omitempty"`
+	OS            string `json:"os,omitempty"`
+	Arch          string `json:"arch,omitempty"`
+	DockerName    string `json:"dockerName,omitempty"`
+	LatencyMs     int64  `json:"latencyMs"`
+}
+
+func newExecutorTestCmd() *cobra.Command {
+	var id int64
+	cmd := &cobra.Command{
+		Use:   "test",
+		Short: "Test a docker executor's connection to its daemon (no image pull, no container created)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if maybePrintSchema("executor test") {
+				return nil
+			}
+			if id == 0 {
+				return fmt.Errorf("--id is required. Run `flowx-studio executor test --schema` for the parameter contract")
+			}
+			data, err := do(cmd.Context(), http.MethodPost, fmt.Sprintf("/executors/%d/test", id), nil, nil)
+			if err != nil {
+				return fail("test executor connection", err, false)
+			}
+			var r executorTestJSON
+			_ = json.Unmarshal(data, &r)
+			printData(data, func() {
+				if r.OK {
+					fmt.Printf("Connection OK: docker %s (api=%s %s/%s name=%s) latency=%dms\n",
+						r.ServerVersion, r.APIVersion, r.OS, r.Arch, r.DockerName, r.LatencyMs)
+				} else {
+					fmt.Printf("Connection FAILED: %s\n", r.Message)
+				}
+			})
+			if !r.OK {
+				// 连接失败按业务失败处理：退出码 1，stderr 给出修复指引
+				return fail("test executor connection", fmt.Errorf("%s. Check the executor's host/tlsVerify/certPath config and that the daemon is reachable, then retry", r.Message), false)
+			}
 			return nil
 		},
 	}

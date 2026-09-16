@@ -225,6 +225,10 @@ export default {
     enable: 'Enable',
     disableConfirmTitle: 'Disable executor',
     disableConfirmMessage: 'Disable executor "{{name}}"? Type-based resolution will skip it, and workflows referencing it by name will fail at runtime.',
+    testConnection: 'Test connection',
+    testing: 'Testing…',
+    testOk: 'Connected: Docker {{version}} (API {{api}} · {{platform}} · {{latency}}ms)',
+    testFailed: 'Connection failed: {{message}}',
   },
   settings: {
     title: 'Settings',

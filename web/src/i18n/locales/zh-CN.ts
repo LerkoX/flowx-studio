@@ -225,6 +225,10 @@ export default {
     enable: '启用',
     disableConfirmTitle: '禁用执行器',
     disableConfirmMessage: '确定禁用执行器「{{name}}」吗？禁用后按类型解析会跳过它，按名引用它的 workflow 运行时将报错。',
+    testConnection: '测试连接',
+    testing: '测试中…',
+    testOk: '连接正常：Docker {{version}}（API {{api}} · {{platform}} · 延迟 {{latency}}ms）',
+    testFailed: '连接失败：{{message}}',
   },
   settings: {
     title: '设置',

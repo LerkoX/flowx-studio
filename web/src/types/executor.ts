@@ -24,3 +24,15 @@ export interface ExecutorUpdateInput {
   description?: string
   config?: Record<string, unknown>
 }
+
+// 连接测试结果（与后端 service.ExecutorTestResult 对应）
+export interface ExecutorTestResult {
+  ok: boolean
+  message?: string
+  serverVersion?: string
+  apiVersion?: string
+  os?: string
+  arch?: string
+  dockerName?: string
+  latencyMs: number
+}

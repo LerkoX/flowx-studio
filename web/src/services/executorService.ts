@@ -1,6 +1,6 @@
 import { apiClient } from './api'
 import type { ApiResponse } from '@/types/api'
-import type { Executor, ExecutorCreateInput, ExecutorUpdateInput } from '@/types/executor'
+import type { Executor, ExecutorCreateInput, ExecutorUpdateInput, ExecutorTestResult } from '@/types/executor'
 
 /**
  * 列出执行器实例
@@ -61,5 +61,14 @@ export async function setExecutorDisabled(
   disabled: boolean
 ): Promise<ApiResponse<Executor>> {
   const response = await apiClient.put(`/api/v1/executors/${id}/disabled`, { disabled })
+  return response.data
+}
+
+/**
+ * 测试 docker 执行器与 daemon 的连接状态（不创建容器）
+ * POST /api/v1/executors/:id/test
+ */
+export async function testExecutor(id: number): Promise<ApiResponse<ExecutorTestResult>> {
+  const response = await apiClient.post(`/api/v1/executors/${id}/test`)
   return response.data
 }

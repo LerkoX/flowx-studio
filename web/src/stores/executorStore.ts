@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Executor, ExecutorCreateInput, ExecutorUpdateInput } from '@/types/executor'
+import type { Executor, ExecutorCreateInput, ExecutorUpdateInput, ExecutorTestResult } from '@/types/executor'
 import {
   getExecutors,
   createExecutor,
@@ -7,6 +7,7 @@ import {
   deleteExecutor,
   setDefaultExecutor,
   setExecutorDisabled,
+  testExecutor,
 } from '@/services/executorService'
 
 interface ExecutorState {
@@ -19,6 +20,7 @@ interface ExecutorState {
   remove: (id: number) => Promise<void>
   setDefault: (id: number) => Promise<void>
   setDisabled: (id: number, disabled: boolean) => Promise<void>
+  test: (id: number) => Promise<ExecutorTestResult>
 }
 
 export const useExecutorStore = create<ExecutorState>((set, get) => ({
@@ -59,5 +61,10 @@ export const useExecutorStore = create<ExecutorState>((set, get) => ({
   setDisabled: async (id, disabled) => {
     await setExecutorDisabled(id, disabled)
     await get().loadExecutors()
+  },
+
+  test: async (id) => {
+    const resp = await testExecutor(id)
+    return resp.data
   },
 }))

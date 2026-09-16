@@ -205,6 +205,15 @@ var schemas = map[string]string{
   },
   "required": ["id"]
 }`,
+	"executor test": `{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "flowx-studio executor test",
+  "type": "object",
+  "properties": {
+    "id": {"type": "integer", "description": "执行器 ID（必填）；仅支持 docker 实例：按其 config（host/tlsVerify/certPath）Ping daemon 并返回版本/延迟信息，不拉取镜像也不创建容器。连接失败时退出码为 1，stderr 含失败原因"}
+  },
+  "required": ["id"]
+}`,
 }
 
 // maybePrintSchema 在 --schema 生效时打印该命令的参数 JSON Schema 并返回 true。

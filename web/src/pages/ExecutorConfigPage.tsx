@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Server, Container, Plus, Star, Trash2, Ban, CircleCheck } from 'lucide-react'
+import { Server, Container, Plus, Star, Trash2, Ban, CircleCheck, PlugZap, Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import ExecutorForm from '@/features/executor-config/ExecutorForm'
 import GlassPanel from '@/components/GlassPanel'
@@ -8,19 +8,21 @@ import { useExecutorStore } from '@/stores/executorStore'
 import { useEventStream } from '@/services/eventService'
 import { useIsMobile } from '@/hooks/useMediaQuery'
 import { useConfirm } from '@/hooks/useConfirm'
-import type { Executor } from '@/types/executor'
+import type { Executor, ExecutorTestResult } from '@/types/executor'
 
 const typeIcon = { local: Server, docker: Container }
 
 export default function ExecutorConfigPage() {
   const { t } = useTranslation()
   const { confirm, dialog } = useConfirm()
-  const { executors, isLoading, error, loadExecutors, create, update, remove, setDefault, setDisabled } =
+  const { executors, isLoading, error, loadExecutors, create, update, remove, setDefault, setDisabled, test } =
     useExecutorStore()
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [creating, setCreating] = useState(false)
   const [opError, setOpError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<ExecutorTestResult | null>(null)
   const isMobile = useIsMobile()
 
   useEffect(() => {
@@ -45,10 +47,24 @@ export default function ExecutorConfigPage() {
     try {
       await op()
       setCreating(false)
+      setTestResult(null)
     } catch (err) {
       setOpError(err instanceof Error ? err.message : t('executor.opFailed'))
     } finally {
       setSaving(false)
+    }
+  }
+
+  // 连接测试独立于 runOp：失败不算操作错误，结果渲染在按钮下方
+  const runTest = async (id: number) => {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      setTestResult(await test(id))
+    } catch (err) {
+      setTestResult({ ok: false, message: err instanceof Error ? err.message : t('executor.opFailed'), latencyMs: 0 })
+    } finally {
+      setTesting(false)
     }
   }
 
@@ -63,6 +79,7 @@ export default function ExecutorConfigPage() {
             onClick={() => {
               setCreating(false)
               setSelectedId(executor.id)
+              setTestResult(null)
             }}
             className={`
               ${compact ? 'flex-shrink-0 p-3 rounded-xl' : 'w-full p-4 rounded-2xl'}
@@ -154,6 +171,19 @@ export default function ExecutorConfigPage() {
 
       {!creating && selected && (
         <GlassPanel className="p-4 flex items-center gap-3 flex-wrap">
+          {selected.type === 'docker' && (
+            <button
+              onClick={() => runTest(selected.id)}
+              disabled={saving || testing}
+              className="px-3 py-1.5 rounded-lg bg-sky-500/10 border border-sky-500/20
+                         text-sky-300 text-xs hover:bg-sky-500/20 transition-all
+                         disabled:opacity-40 flex items-center gap-1.5"
+            >
+              {testing
+                ? <><Loader2 size={12} className="animate-spin" /> {t('executor.testing')}</>
+                : <><PlugZap size={12} /> {t('executor.testConnection')}</>}
+            </button>
+          )}
           {!selected.isDefault && (
             <button
               onClick={() => runOp(() => setDefault(selected.id))}
@@ -216,6 +246,32 @@ export default function ExecutorConfigPage() {
             >
               <Trash2 size={12} /> {t('common.delete')}
             </button>
+          )}
+        </GlassPanel>
+      )}
+      {!creating && selected && testResult && (
+        <GlassPanel className={`p-4 text-xs flex items-start gap-2 ${
+          testResult.ok ? 'border border-emerald-500/20' : 'border border-rose-500/20'
+        }`}>
+          {testResult.ok ? (
+            <>
+              <CircleCheck size={14} className="text-emerald-400 flex-shrink-0 mt-0.5" />
+              <span className="text-emerald-300">
+                {t('executor.testOk', {
+                  version: testResult.serverVersion,
+                  api: testResult.apiVersion,
+                  platform: `${testResult.os}/${testResult.arch}`,
+                  latency: testResult.latencyMs,
+                })}
+              </span>
+            </>
+          ) : (
+            <>
+              <Ban size={14} className="text-rose-400 flex-shrink-0 mt-0.5" />
+              <span className="text-rose-300 break-all">
+                {t('executor.testFailed', { message: testResult.message })}
+              </span>
+            </>
           )}
         </GlassPanel>
       )}

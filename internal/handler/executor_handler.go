@@ -31,6 +31,7 @@ func (h *ExecutorHandler) RegisterRoutes(r *gin.RouterGroup) {
 		executors.DELETE("/:id", h.Delete)
 		executors.PUT("/:id/default", h.SetDefault)
 		executors.PUT("/:id/disabled", h.SetDisabled)
+		executors.POST("/:id/test", h.TestConnection)
 	}
 }
 
@@ -145,6 +146,22 @@ func (h *ExecutorHandler) SetDisabled(c *gin.Context) {
 		return
 	}
 	Success(c, e)
+}
+
+// TestConnection 测试 docker 执行器与 daemon 的连接状态（不创建容器）。
+// 连接失败也返回 200，由响应体的 ok/message 表达结果。
+func (h *ExecutorHandler) TestConnection(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		Error(c, http.StatusBadRequest, "invalid executor id")
+		return
+	}
+	result, err := h.service.TestConnection(id)
+	if err != nil {
+		executorError(c, err)
+		return
+	}
+	Success(c, result)
 }
 
 // SetDefault 设为全局默认执行器

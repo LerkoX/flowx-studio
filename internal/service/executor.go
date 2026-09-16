@@ -1,15 +1,18 @@
 package service
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/LerkoX/flowx-studio/internal/db"
 	"github.com/LerkoX/flowx-studio/internal/event"
 	"github.com/LerkoX/flowx-studio/internal/model"
+	flowxdocker "github.com/LerkoX/flowx/executor/docker"
 )
 
 // 执行器实例名格式（与节点名规则一致）
@@ -340,6 +343,55 @@ func (s *ExecutorService) SetDisabled(id int64, disabled bool) (*model.Executor,
 	s.auditRecord(action, fmt.Sprintf("%d", id), "name="+target.Name)
 	s.publish("executor.updated", target)
 	return target, nil
+}
+
+// ExecutorTestResult 执行器连接测试结果。
+// 连接失败不算系统错误：OK=false + Message 说明原因，HTTP 仍返回 200。
+type ExecutorTestResult struct {
+	OK            bool   `json:"ok"`
+	Message       string `json:"message,omitempty"`       // 失败原因或附加说明
+	ServerVersion string `json:"serverVersion,omitempty"` // daemon 的 Docker 版本
+	APIVersion    string `json:"apiVersion,omitempty"`    // 协商后的 API 版本
+	OS            string `json:"os,omitempty"`
+	Arch          string `json:"arch,omitempty"`
+	DockerName    string `json:"dockerName,omitempty"` // daemon 节点名
+	LatencyMs     int64  `json:"latencyMs"`
+}
+
+// 连接测试超时上限（远程 daemon 不可达时避免长时间挂起）
+const executorTestTimeout = 10 * time.Second
+
+// TestConnection 测试执行器连接状态。
+// 仅支持 docker 实例：按实例 config（host/tlsVerify/certPath）Ping daemon 并读取版本信息；
+// 不拉取镜像也不创建容器。local 实例无需连接测试，返回明确提示。
+func (s *ExecutorService) TestConnection(id int64) (*ExecutorTestResult, error) {
+	target, err := s.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+	if target == nil {
+		return nil, fmt.Errorf("executor not found")
+	}
+	if target.Type != "docker" {
+		return nil, fmt.Errorf("connection test is only supported for docker executors (local runs on this host)")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), executorTestTimeout)
+	defer cancel()
+
+	info, err := flowxdocker.TestConnectionWithConfig(ctx, target.Config)
+	if err != nil {
+		return &ExecutorTestResult{OK: false, Message: err.Error()}, nil
+	}
+	return &ExecutorTestResult{
+		OK:            true,
+		ServerVersion: info.ServerVersion,
+		APIVersion:    info.APIVersion,
+		OS:            info.OS,
+		Arch:          info.Arch,
+		DockerName:    info.Name,
+		LatencyMs:     info.LatencyMs,
+	}, nil
 }
 
 // SetDefault 把指定执行器设为全局默认（事务内清旧置新）
