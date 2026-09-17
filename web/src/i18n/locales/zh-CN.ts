@@ -10,6 +10,7 @@ export default {
     close: '关闭',
     reset: '重置',
     loading: '加载中...',
+    loadedCount: '已加载 {{loaded}} / 共 {{total}} 条，下拉加载更多',
     none: '暂无',
     all: '全部',
     search: '搜索',

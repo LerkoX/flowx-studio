@@ -26,6 +26,9 @@ export default function ExecutionContextBar({
   const loadingHistory = useExecutionStore((s) => s.loadingHistory)
   const loadingSelected = useExecutionStore((s) => s.loadingSelected)
   const loadExecutions = useExecutionStore((s) => s.loadExecutions)
+  const executionsTotal = useExecutionStore((s) => s.executionsTotal)
+  const loadingMoreExecutions = useExecutionStore((s) => s.loadingMoreExecutions)
+  const loadMoreExecutions = useExecutionStore((s) => s.loadMoreExecutions)
 
   useEffect(() => {
     if (workflowId) loadExecutions(workflowId)
@@ -43,6 +46,14 @@ export default function ExecutionContextBar({
 
   const handleExit = async () => {
     await selectExecutionAndSync(null)
+  }
+
+  // 下拉滚动到底时懒加载下一页执行历史（store 内部有并发与越页保护）
+  const handleListScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 40) {
+      void loadMoreExecutions()
+    }
   }
 
   return (
@@ -115,6 +126,7 @@ export default function ExecutionContextBar({
             className="absolute inset-x-0 top-full z-30 max-h-72 overflow-y-auto
                        bg-panel/95 backdrop-blur-2xl border-b border-white/10
                        shadow-xl shadow-black/40 p-2 space-y-1.5"
+            onScroll={handleListScroll}
           >
             {loadingHistory && executions.length === 0 && (
               <div className="text-center py-6 text-white/30 text-xs">{t('common.loading')}</div>
@@ -154,6 +166,14 @@ export default function ExecutionContextBar({
                 </div>
               </button>
             ))}
+            {loadingMoreExecutions && (
+              <div className="text-center py-2 text-white/30 text-xs">{t('common.loading')}</div>
+            )}
+            {!loadingMoreExecutions && executions.length > 0 && executions.length < executionsTotal && (
+              <div className="text-center py-2 text-white/20 text-[11px]">
+                {t('common.loadedCount', { loaded: executions.length, total: executionsTotal })}
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

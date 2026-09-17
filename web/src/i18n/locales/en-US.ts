@@ -10,6 +10,7 @@ export default {
     close: 'Close',
     reset: 'Reset',
     loading: 'Loading...',
+    loadedCount: 'Loaded {{loaded}} / {{total}}, scroll for more',
     none: 'None',
     all: 'All',
     search: 'Search',

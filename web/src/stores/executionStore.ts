@@ -24,6 +24,11 @@ interface ExecutionState {
   executionLog: ExecutionLog[]
   logsTotal: number
   loadingHistory: boolean
+  // 执行历史分页（下拉懒加载）：total 为后端总数，page 为已加载到的页码
+  executionsTotal: number
+  executionsPage: number
+  executionsWorkflowId: string | null
+  loadingMoreExecutions: boolean
   loadingNodes: boolean
   loadingLogs: boolean
   loadingOlder: boolean
@@ -31,6 +36,8 @@ interface ExecutionState {
   logFilter: LogFilter
 
   loadExecutions: (workflowId: string) => Promise<void>
+  // 下拉懒加载下一页执行历史（到底自动触发，内部判重与并发保护）
+  loadMoreExecutions: () => Promise<void>
   selectExecution: (id: string | null) => Promise<void>
   loadExecutionNodes: (executionId: string) => Promise<void>
   loadLatestLogs: (executionId: string) => Promise<void>
@@ -54,6 +61,9 @@ interface ExecutionState {
 
 // 日志分页大小：初始加载最后 300 条，向上滚动时按 300 条一页懒加载更旧的日志
 const LOG_PAGE_SIZE = 300
+
+// 执行历史分页大小：下拉滚动到底时按 50 条一页懒加载更早的执行
+const EXECUTION_PAGE_SIZE = 50
 
 // 过滤条件变化时防抖重载日志
 let filterDebounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -85,6 +95,10 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
   isExecuting: false,
   runningExecutionId: null,
   executions: [],
+  executionsTotal: 0,
+  executionsPage: 0,
+  executionsWorkflowId: null,
+  loadingMoreExecutions: false,
   selectedExecutionId: null,
   selectedExecution: null,
   selectedExecutionYaml: null,
@@ -106,18 +120,57 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
   loadExecutions: async (workflowId) => {
     set({ loadingHistory: true })
     try {
-      const resp = await getExecutions({ workflow_id: Number(workflowId), page_size: 50 })
+      const resp = await getExecutions({ workflow_id: Number(workflowId), page: 1, page_size: EXECUTION_PAGE_SIZE })
       if (resp.code === 200 && resp.data) {
         const executions = (resp.data.items || []).map(normalizeExecution)
         const selectedId = get().selectedExecutionId
         const selectedExecution = selectedId
           ? executions.find((e) => e.id === selectedId) || get().selectedExecution
           : get().selectedExecution
-        set({ executions, selectedExecution, loadingHistory: false })
+        set({
+          executions,
+          selectedExecution,
+          loadingHistory: false,
+          executionsTotal: resp.data.total ?? executions.length,
+          executionsPage: 1,
+          executionsWorkflowId: workflowId,
+        })
       }
     } catch (error) {
       set({ loadingHistory: false })
       console.error('Failed to load executions', error)
+    }
+  },
+
+  loadMoreExecutions: async () => {
+    const state = get()
+    if (!state.executionsWorkflowId || state.loadingHistory || state.loadingMoreExecutions) return
+    if (state.executions.length >= state.executionsTotal) return
+    set({ loadingMoreExecutions: true })
+    try {
+      const nextPage = state.executionsPage + 1
+      const resp = await getExecutions({
+        workflow_id: Number(state.executionsWorkflowId),
+        page: nextPage,
+        page_size: EXECUTION_PAGE_SIZE,
+      })
+      if (resp.code === 200 && resp.data) {
+        const existing = new Set(get().executions.map((e) => e.id))
+        const more = (resp.data.items || [])
+          .map(normalizeExecution)
+          .filter((e) => !existing.has(e.id))
+        set({
+          executions: [...get().executions, ...more],
+          executionsPage: nextPage,
+          executionsTotal: resp.data.total ?? get().executionsTotal,
+          loadingMoreExecutions: false,
+        })
+        return
+      }
+      set({ loadingMoreExecutions: false })
+    } catch (error) {
+      set({ loadingMoreExecutions: false })
+      console.error('Failed to load more executions', error)
     }
   },
 

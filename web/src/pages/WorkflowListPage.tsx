@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import { Play, Trash2, GitBranch } from 'lucide-react'
@@ -9,28 +9,60 @@ import { toast } from '@/stores/toastStore'
 import { useConfirm } from '@/hooks/useConfirm'
 import type { Workflow } from '@/types/workflow'
 
+// 列表分页大小：滚动到底时按 50 条一页懒加载
+const PAGE_SIZE = 50
+
 export default function WorkflowListPage() {
   const { t } = useTranslation()
   const [workflows, setWorkflows] = useState<Workflow[]>([])
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  // 已加载页码与并发保护用 ref：滚动事件高频触发，state 闭包可能读到旧值
+  const pageRef = useRef(0)
+  const loadingRef = useRef(false)
+  const hasMoreRef = useRef(true)
   const setCurrentWorkflow = useWorkflowStore((s) => s.setCurrentWorkflow)
   const { confirm, dialog } = useConfirm()
 
-  const load = async () => {
-    setLoading(true)
+  const loadPage = useCallback(async (page: number, append: boolean) => {
+    if (loadingRef.current) return
+    loadingRef.current = true
+    if (append) setLoadingMore(true)
+    else setLoading(true)
     try {
-      const res = await getWorkflows({ page: 1, page_size: 100 })
-      setWorkflows(res.data?.items || [])
+      const res = await getWorkflows({ page, page_size: PAGE_SIZE })
+      const items = res.data?.items || []
+      const totalCount = res.data?.total ?? 0
+      pageRef.current = page
+      hasMoreRef.current = page * PAGE_SIZE < totalCount
+      setTotal(totalCount)
+      setWorkflows((prev) => {
+        if (!append) return items
+        const existing = new Set(prev.map((w) => w.id))
+        return [...prev, ...items.filter((w) => !existing.has(w.id))]
+      })
     } catch (err) {
       console.error('Failed to load workflows:', err)
     } finally {
+      loadingRef.current = false
       setLoading(false)
+      setLoadingMore(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
-    load()
-  }, [])
+    loadPage(1, false)
+  }, [loadPage])
+
+  // 滚动到底部附近时懒加载下一页
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget
+    if (!hasMoreRef.current || loadingRef.current) return
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 120) {
+      void loadPage(pageRef.current + 1, true)
+    }
+  }
 
   const handleRun = async (id: string, e: React.MouseEvent) => {
     e.preventDefault()
@@ -56,6 +88,7 @@ export default function WorkflowListPage() {
     try {
       await deleteWorkflow(wf.id)
       setWorkflows((prev) => prev.filter((w) => w.id !== wf.id))
+      setTotal((prev) => Math.max(0, prev - 1))
       toast.success(t('workflow.deleted'))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
@@ -67,6 +100,7 @@ export default function WorkflowListPage() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       className="h-full overflow-auto p-6"
+      onScroll={handleScroll}
     >
       <div className="max-w-5xl mx-auto space-y-6">
         <div>
@@ -120,6 +154,14 @@ export default function WorkflowListPage() {
                 </div>
               </Link>
             ))}
+            {loadingMore && (
+              <div className="text-center py-3 text-white/30 text-sm">{t('common.loading')}</div>
+            )}
+            {!loadingMore && workflows.length < total && (
+              <div className="text-center py-3 text-white/20 text-xs">
+                {t('common.loadedCount', { loaded: workflows.length, total })}
+              </div>
+            )}
           </div>
         )}
       </div>
