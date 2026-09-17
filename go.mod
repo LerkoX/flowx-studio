@@ -3,7 +3,7 @@ module github.com/LerkoX/flowx-studio
 go 1.25.0
 
 require (
-	github.com/LerkoX/flowx v0.1.2
+	github.com/LerkoX/flowx v0.1.3
 	github.com/gin-gonic/gin v1.12.0
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/spf13/cobra v1.10.2
@@ -126,5 +126,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1 // indirect
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
-
-replace github.com/LerkoX/flowx => ../flowx
