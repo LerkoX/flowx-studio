@@ -78,8 +78,6 @@ description: 管理 FlowX Studio 流水线与节点。当用户要求创建/修�
 
 ```yaml
 Name: echo-chain
-Param:
-  first_message: "hello"
 Graph: |
   stateDiagram-v2
     [*] --> FirstEcho
@@ -91,7 +89,7 @@ Nodes:
     config:
       nodeRef: echo@1.1.0
       params:
-        message: "{{ Param.first_message }}"
+        message: "hello"          # 单节点使用的值直接写字面量，不要提升为 workflow Param
   SecondEcho:
     name: 第二个回声
     config:
@@ -104,6 +102,18 @@ Nodes:
 - `Nodes` 的键与 `Graph` 节点名必须是 ASCII；`name`/`description` 可写中文展示名。
 - `config.nodeRef` 用 `node list --json` 查询到的 `name` 或 `name@version`；生产流水线优先精确版本。
 - `config.params` 的值可为常量、`{{ UpstreamNode.output }}` 或 `{{ Param.key }}`；按节点 `parameters[].source` 推荐接线。未绑定的参数回退到同名 workflow 级 `Param`。
+
+#### Workflow 级 `Param` 使用原则（重要）
+
+**默认把值写死在节点自己的 `config.params` 里（字面量），不要放进 workflow 级 `Param`。** 只有同时满足以下条件的值才提升到 `Param`：
+
+1. **被多个节点引用**（如所有节点都需要的 `service_url`/`service_token`、多个节点共用的 `project_dir`）；或
+2. **公共配置类**——用户运行前需要统一调整的全局开关/地址/凭证。
+
+仅被单个节点使用的参数（如某个采样节点的 `steps`/`cfg`、某个编码节点的 prompt）必须直接写为 `config.params` 字面量，不要用 `{{ Param.xxx }}` 绕一层——这只会让 YAML 更散、参数来源更难追踪。判断口诀：**"这个值改的时候是不是希望全流水线一起生效？" 是→`Param`；否→写死在节点里。**
+
+审查/整改既有流水线时同样按此处理：统计每个 `Param` 键被 `Nodes` 引用的节点数，仅 1 个节点引用的内联回该节点并删除 `Param` 条目，无人引用的直接删除；`Param` 清空后移除整个 `Param:` 块。
+
 - 纯 `nodeRef` 流水线通常省略顶层 `Executors` 和节点级 `executor`，运行时按节点包偏好自动选择。需要覆盖时在 `config.executor` 中写已选中的执行器（见下文），不要使用顶层 `Executors` 去覆盖节点包。
 - `config.executor` 支持三种写法：`executor: local` / `executor: docker`（类型级选择）、`executor: docker-gpu`（具体实例简写）、`executor: {type: docker, ref: docker-gpu}`（推荐显式写法）。实例类型必须在节点包 `executor.supportedTypes` 中；同一次编排中所有选择 Docker 的节点通常复用同一个已选实例。
 - 顶层 `Executors` 一旦存在，校验器会要求**内联节点**都有节点级 `executor` 字段；`nodeRef` 节点由展开器补充，因此混合流水线无需给 nodeRef 节点重复声明。nodeRef-only 模板不要添加空 `Executors`。
