@@ -108,14 +108,18 @@ func TestNodeImportService_ImportFromFolder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expand node failed: %v", err)
 	}
-	if !strings.Contains(cfg.Steps[0].Run, "flowx_fetch 'utils.py'") {
-		t.Errorf("expected curl bootstrap for runtime dep, run:\n%s", cfg.Steps[0].Run)
+	// flowx_fetch 两参形式：<完整URL>（路径段插在查询串之前，避免污染 sig）+ 本地相对路径
+	if !strings.Contains(cfg.Steps[0].Run, "flowx_fetch 'http://test.local/api/v1/assets/nodes/test-download@0/utils.py?expires=999&sig=abc' 'utils.py'") {
+		t.Errorf("expected signed-URL bootstrap for runtime dep, run:\n%s", cfg.Steps[0].Run)
 	}
 	if cfg.Executor != node.Name+"-executor" {
 		t.Errorf("unexpected executor name: %s", cfg.Executor)
 	}
-	if !strings.Contains(cfg.Steps[0].Run, "export URL=\"{{ Param.url }}\"") {
-		t.Errorf("unexpected step run: %s", cfg.Steps[0].Run)
+	// env 不再拼接 export 行进脚本：模板原样下发到物化节点 config.env，
+	// 由 dag 渲染后经执行器以真实进程环境变量注入
+	envCfg, ok := cfg.Config["env"].(map[string]string)
+	if !ok || envCfg["URL"] != "{{ Param.url }}" {
+		t.Errorf("unexpected node env config: %+v", cfg.Config["env"])
 	}
 	if cfg.Extract == nil || cfg.Extract.Type != "codec-block" {
 		t.Errorf("unexpected extract config: %+v", cfg.Extract)
