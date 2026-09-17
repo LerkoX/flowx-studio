@@ -33,6 +33,7 @@ func (h *NodeHandler) RegisterRoutes(r *gin.RouterGroup) {
 		nodes.GET("", h.List)
 		nodes.POST("", h.Create)
 		nodes.POST("/import", h.Import)
+		nodes.POST("/resolve", h.ResolveRefs)
 		nodes.GET("/:id", h.Get)
 		nodes.PUT("/:id", h.Update)
 		nodes.DELETE("/:id", h.Delete)
@@ -57,6 +58,61 @@ func (h *NodeHandler) List(c *gin.Context) {
 	}
 
 	Success(c, resp)
+}
+
+// ResolveRefsRequest 批量 resolve 请求
+type ResolveRefsRequest struct {
+	Refs []string `json:"refs"`
+}
+
+// ResolveRefs 批量解析 nodeRef → 节点定义（含 ui 配置）。
+// 供画布按 YAML 中实际引用到的节点精确取数，避免拉全量分页列表。
+// 解析语义与后端裸 nodeRef 一致：name@version 精确匹配；裸 name 解析到
+// 该名称最新版本；锁定版本已删除时回退同名最新版本。未命中的 ref 映射为 null。
+func (h *NodeHandler) ResolveRefs(c *gin.Context) {
+	var req ResolveRefsRequest
+	if !BindJSON(c, &req) {
+		return
+	}
+	if len(req.Refs) > 200 {
+		Error(c, http.StatusBadRequest, "too many refs (max 200)")
+		return
+	}
+
+	// 去重并保持请求原样作为结果 key（画布按 YAML 原字符串索引）
+	seen := make(map[string]bool, len(req.Refs))
+	items := make(map[string]*model.Node, len(req.Refs))
+	for _, ref := range req.Refs {
+		if seen[ref] {
+			continue
+		}
+		seen[ref] = true
+
+		name, version, err := model.ParseNodeRef(ref)
+		if err != nil {
+			items[ref] = nil
+			continue
+		}
+		node, err := h.service.GetByRef(name, version)
+		if err != nil {
+			Error(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if node == nil && version != "" {
+			// 锁定版本已被删除：回退同名最新版本
+			node, err = h.service.GetByRef(name, "")
+			if err != nil {
+				Error(c, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+		if node != nil {
+			node.Package = nil // 与列表接口一致，不回传包配置
+		}
+		items[ref] = node
+	}
+
+	Success(c, gin.H{"items": items})
 }
 
 // Get 获取节点详情

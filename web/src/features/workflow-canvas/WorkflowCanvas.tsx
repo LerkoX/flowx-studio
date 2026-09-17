@@ -19,10 +19,11 @@ import { autoLayout } from './AutoLayout'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import { syncCanvasStatusesFromExecutionNodes } from './executionSelection'
-import { useNodeStore } from '@/stores/nodeStore'
 import { useIsMobile } from '@/hooks/useMediaQuery'
 import { parseWorkflowGraph, parseNodeRefs, parseNodeParams, parseParamSources } from '@/utils/mermaidParser'
 import { updateWorkflow, getWorkflow } from '@/services/workflowService'
+import { resolveNodes } from '@/services/nodeService'
+import type { NodeDefinition } from '@/types/node'
 import { useEventStream } from '@/services/eventService'
 import type { ExecutionLog, ExecutionStatus } from '@/types/execution'
 import { ArrowUpDown, ArrowLeftRight, Eye, LockKeyholeOpen, History } from 'lucide-react'
@@ -45,17 +46,6 @@ const statusMap: Record<string, string> = {
   running: 'running',
   success: 'success',
   failed: 'failed',
-}
-
-// 简单的 semver 比较（1.10.0 > 1.2.0），用于同名节点取最新版本
-function compareVersion(a?: string, b?: string): number {
-  const pa = (a || '0').split('.').map((x) => parseInt(x, 10) || 0)
-  const pb = (b || '0').split('.').map((x) => parseInt(x, 10) || 0)
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const d = (pa[i] || 0) - (pb[i] || 0)
-    if (d !== 0) return d
-  }
-  return 0
 }
 
 // 判断边是否处于活跃（高亮）状态：目标节点 running 时，只有「目标上一轮结束后
@@ -126,8 +116,10 @@ function WorkflowCanvasInner({
   const setNodeStatuses = useWorkflowStore((s) => s.setNodeStatuses)
   const setNodeRuntimeData = useWorkflowStore((s) => s.setNodeRuntimeData)
   const resetNodeRuntimeData = useWorkflowStore((s) => s.resetNodeRuntimeData)
-  const nodeDefs = useNodeStore((s) => s.nodes)
-  const loadNodes = useNodeStore((s) => s.loadNodes)
+  // 画布引用的节点包定义：按 YAML 中的 nodeRef 集合批量 resolve（不拉全量列表），
+  // key 为 YAML 原样 ref 字符串；nodeDefsTick 由节点变更 SSE 触发重取
+  const [resolvedNodeDefs, setResolvedNodeDefs] = useState<Record<string, NodeDefinition | null>>({})
+  const [nodeDefsTick, setNodeDefsTick] = useState(0)
   const selectedExecutionId = useExecutionStore((s) => s.selectedExecutionId)
   const runningExecutionId = useExecutionStore((s) => s.runningExecutionId)
   const selectedExecutionYaml = useExecutionStore((s) => s.selectedExecutionYaml)
@@ -196,12 +188,35 @@ function WorkflowCanvasInner({
     edgesRef.current = edges
   }, [nodes, edges])
 
-  // 节点包列表用于按 nodeRef 匹配 ui 配置；每次进入画布都刷新，
-  // 保证节点重新导入（ui 尺寸/bundle 更新）后能拿到最新定义
+  // 按 YAML 中的 nodeRef 集合批量 resolve 节点包定义（含 ui 配置）；
+  // sourceYaml 变化（切换流水线/快照、参数写回）或节点包变更 SSE 时重取，
+  // 保证重新导入（ui 尺寸/bundle 更新、版本升降）后能拿到最新定义
   useEffect(() => {
-    loadNodes()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    if (!sourceYaml) {
+      setResolvedNodeDefs({})
+      return
+    }
+    const refs = [...new Set(Object.values(parseNodeRefs(sourceYaml)))]
+    if (refs.length === 0) {
+      setResolvedNodeDefs({})
+      return
+    }
+    let cancelled = false
+    resolveNodes(refs)
+      .then((resp) => {
+        if (cancelled || resp.code !== 200 || !resp.data) return
+        const mapped: Record<string, NodeDefinition | null> = {}
+        for (const [ref, def] of Object.entries(resp.data.items)) {
+          // 后端返回的 id 是 number，前端类型是 string
+          mapped[ref] = def ? { ...def, id: String(def.id) } : null
+        }
+        setResolvedNodeDefs(mapped)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [sourceYaml, nodeDefsTick])
 
   // 解析 YAML Graph 并渲染工作流
   useEffect(() => {
@@ -217,24 +232,16 @@ function WorkflowCanvasInner({
     const nodeParams = parseNodeParams(sourceYaml)
     // 节点实例 ID → 参数绑定来源（流水线参数/上游节点/字面值），供 UI 组件渲染来源标注
     const paramSources = parseParamSources(sourceYaml)
+    // 节点实例 ID → 节点包定义（含 ui 配置）：按批量 resolve 结果直接索引，
+    // 后端语义：name@version 精确匹配；裸名解析到最新版本；
+    // 锁定版本已删除时回退同名最新版本。未命中的 ref 为 null
     const matchNodeDef = (instanceId: string) => {
       const ref = nodeRefs[instanceId]
       if (!ref) return undefined
-      // 快照物化后 nodeRef 带版本锁（echo@1.1.0）：按 名称+版本 精确匹配；
-      // 裸名称（模板编写态）或锁定版本已被删除时，回退同名最新版本——
-      // 与后端裸 nodeRef 解析到最新版本的语义一致
-      const at = ref.lastIndexOf('@')
-      const name = at > 0 ? ref.slice(0, at) : ref
-      const version = at > 0 ? ref.slice(at + 1) : ''
-      const candidates = nodeDefs.filter((n) => n.name === name)
-      if (version) {
-        const exact = candidates.find((n) => n.version === version)
-        if (exact) return exact
-      }
-      return candidates.sort((a, b) => compareVersion(b.version, a.version))[0]
+      return resolvedNodeDefs[ref] ?? undefined
     }
 
-    // 过期取消：首次进入时 mermaid 动态加载较慢，若 nodeDefs 在此期间加载完成
+    // 过期取消：首次进入时 mermaid 动态加载较慢，若节点定义在此期间加载完成
     // 触发了新一轮解析，旧的慢解析结果不得覆盖新结果（否则子 UI 首次不显示）
     let cancelled = false
     // 新增节点逐个入场的延迟定时器，effect 清理时一并取消
@@ -420,7 +427,7 @@ function WorkflowCanvasInner({
       staggeringRef.current = false
       staggerTimers.forEach(clearTimeout)
     }
-  }, [sourceYaml, direction, nodeDefs, paramsEditable, handleNodeParamsChange, setNodes, setEdges])
+  }, [sourceYaml, direction, resolvedNodeDefs, paramsEditable, handleNodeParamsChange, setNodes, setEdges])
 
   // 模式切换时只同步节点的 interactive 标记（不重跑图解析/布局，保留手动位置）
   useEffect(() => {
@@ -565,9 +572,9 @@ function WorkflowCanvasInner({
     }
 
     if (type === 'node.created' || type === 'node.updated' || type === 'node.deleted') {
-      // 节点包后台变更（import/update/delete）：刷新节点定义列表，
-      // 画布按 nodeRef 重新匹配 ui 配置与版本
-      loadNodes()
+      // 节点包后台变更（import/update/delete）：重取画布引用到的节点定义，
+      // 按 nodeRef 重新匹配 ui 配置与版本
+      setNodeDefsTick((t) => t + 1)
       return
     }
 

@@ -19,6 +19,19 @@ export async function getNodes(params?: {
 }
 
 /**
+ * 批量解析 nodeRef → 节点定义（含 ui 配置）
+ * POST /api/v1/nodes/resolve
+ * 画布按 YAML 中实际引用到的节点精确取数，避免拉全量分页列表。
+ * 返回以请求原样 ref 为 key 的映射；未命中的 ref 为 null。
+ */
+export async function resolveNodes(
+  refs: string[]
+): Promise<ApiResponse<{ items: Record<string, NodeDefinition | null> }>> {
+  const response = await apiClient.post('/api/v1/nodes/resolve', { refs })
+  return response.data
+}
+
+/**
  * 获取节点详情
  * GET /api/v1/nodes/:id
  */

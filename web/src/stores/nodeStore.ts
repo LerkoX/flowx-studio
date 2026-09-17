@@ -66,15 +66,24 @@ export const useNodeStore = create<NodeState>((set, get) => ({
   loadNodes: async () => {
     set({ isLoading: true })
     try {
-      const response = await getNodes()
-      if (response.code === 200 && response.data) {
-        // 后端返回的 id 是 number，前端类型是 string
-        const nodes = response.data.items.map((item: NodeDefinition) => ({
-          ...item,
-          id: String(item.id),
-        }))
-        set({ nodes, isLoading: false })
+      // 后端默认 page_size=20，节点数超过一页时画布会因匹配不到
+      // 第 2 页及以后的节点包定义而不显示自定义 UI，这里循环拉取全部分页
+      const all: NodeDefinition[] = []
+      let page = 1
+      const pageSize = 100
+      for (;;) {
+        const response = await getNodes({ page, page_size: pageSize })
+        if (response.code !== 200 || !response.data) break
+        all.push(...response.data.items)
+        if (all.length >= response.data.total || response.data.items.length === 0) break
+        page++
       }
+      // 后端返回的 id 是 number，前端类型是 string
+      const nodes = all.map((item: NodeDefinition) => ({
+        ...item,
+        id: String(item.id),
+      }))
+      set({ nodes, isLoading: false })
     } catch (error) {
       set({ isLoading: false, addError: error instanceof Error ? error.message : 'Failed to load nodes' })
     }
