@@ -15,6 +15,7 @@ type Config struct {
 	Retention RetentionConfig `mapstructure:"retention"`
 	Backup    BackupConfig    `mapstructure:"backup"`
 	Assets    AssetsConfig    `mapstructure:"assets"`
+	Media     MediaConfig     `mapstructure:"media"`
 }
 
 // ServerConfig 服务器配置
@@ -43,6 +44,14 @@ type RetentionConfig struct {
 type BackupConfig struct {
 	OnStartup bool `mapstructure:"on_startup"` // server 启动时自动备份
 	Keep      int  `mapstructure:"keep"`       // 保留最近 N 个备份，0 表示不清理
+}
+
+// MediaConfig 本地多媒体文件服务配置
+type MediaConfig struct {
+	// 允许通过 /api/v1/media/file 读取的本地目录白名单（支持 ~），
+	// 默认 [~/flowx-output, ~/flowx-input]（节点默认输出/输入目录）。
+	// 也可通过 FLOWX_STUDIO_MEDIA_ROOTS 环境变量配置（逗号分隔），显式设置时覆盖配置文件。
+	Roots []string `mapstructure:"roots"`
 }
 
 // AssetsConfig 节点资产存储配置
@@ -92,6 +101,26 @@ func Load() (*Config, error) {
 	// 环境变量形同虚设。
 	if cfg.Assets.HTTPBase == "" {
 		cfg.Assets.HTTPBase = viper.GetString("assets.http_base")
+	}
+
+	// media.roots 环境变量覆盖（逗号分隔）；未配置时默认 ~/flowx-output
+	if env := os.Getenv("FLOWX_STUDIO_MEDIA_ROOTS"); env != "" {
+		var roots []string
+		for _, r := range strings.Split(env, ",") {
+			if r = strings.TrimSpace(r); r != "" {
+				roots = append(roots, r)
+			}
+		}
+		cfg.Media.Roots = roots
+	}
+	if len(cfg.Media.Roots) == 0 {
+		cfg.Media.Roots = []string{
+			filepath.Join(home, "flowx-output"), // save-image/save-video 等节点的默认输出目录
+			filepath.Join(home, "flowx-input"),  // load-image 等节点的默认输入目录
+		}
+	}
+	for i, r := range cfg.Media.Roots {
+		cfg.Media.Roots[i] = expandPath(r, home)
 	}
 
 	// 展开 ~
