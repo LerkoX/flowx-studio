@@ -12,13 +12,14 @@
   "icon": "📣",
   "language": "bash",
   "entry": "main.sh",
-  "image": "bash:5",
+  "image": "lerkobba/flowx-studio-nodes:v1.0.0",
   "executor": {
     "supportedTypes": [
       "local",
       "docker"
     ],
-    "preferredType": "docker"
+    "preferredType": "docker",
+    "bundled": true
   },
   "parameters": [
     {

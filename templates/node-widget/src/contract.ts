@@ -47,9 +47,10 @@ export interface NodeWidgetProps {
   /** 全量替换该节点 config.params 并持久化；回放态为 undefined（只读），调用前判空 */
   onParamsChange?: (params: Record<string, string>) => void
   execution: NodeWidgetExecution | null
-  /** 节点实时预览帧（可选）：执行中途经 FLOWX_CALLBACK_URL 推送；
-      瞬态（node_complete 清除、回放态缺省），需判空；预览 UI 由组件自行渲染 */
-  preview?: { image: string; mime: string; progress?: number }
+  /** 节点实时预览帧（可选）：节点经 stdout FLOWX_PREVIEW 标记上报帧地址，
+      Studio 中转拉帧后随 SSE 进度事件下发 url；瞬态（node_complete 清除、
+      回放态缺省），需判空；预览 UI 由组件自行渲染，<img src=url> 直出 */
+  preview?: { url: string; progress?: number }
   theme: 'dark'
   locale: string
 }

@@ -669,23 +669,22 @@ function WorkflowCanvasInner({
     }
 
     if (type === 'node_preview') {
-      // 节点运行中途推送的实时预览帧（瞬态，不落库）：仅应用到当前画布正在
-      // 展示的执行（选中回放或正在运行的），其他执行的帧直接忽略
+      // 节点运行中途上报的预览帧进度（瞬态，不落库；帧本体经 preview-frame
+      // 接口以 HTTP 二进制中转拉取，不经 base64）：仅应用到当前画布正在
+      // 展示的执行（选中回放或正在运行的），其他执行的事件直接忽略
       const payload = data as {
         execution_id?: number
         node_id?: string
-        image?: string
-        mime?: string
         progress?: number
       }
-      if (!payload.execution_id || !payload.node_id || !payload.image) return
+      if (!payload.execution_id || !payload.node_id) return
       const execStore = useExecutionStore.getState()
       const liveId = execStore.selectedExecutionId ?? execStore.runningExecutionId
       if (String(payload.execution_id) !== liveId) return
       setNodeRuntimeData(payload.node_id, {
         preview: {
-          image: payload.image,
-          mime: payload.mime || 'image/jpeg',
+          // 时间戳参数驱使浏览器重新拉取最新帧（接口本身 no-cache）
+          url: `/api/v1/executions/${payload.execution_id}/nodes/${encodeURIComponent(payload.node_id)}/preview-frame?t=${Date.now()}`,
           progress: payload.progress,
         },
       })

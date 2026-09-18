@@ -395,6 +395,35 @@
   }
 }</code></pre>
 
+<h4 id="日志级别标记行首约定">日志级别标记（行首约定）</h4>
+
+<p>节点 stdout/stderr 的输出行默认记为 <code>info</code> 级日志。若某行以以下前缀开头，运行时剥离前缀后按对应级别入库，前端日志面板按级别着色/提示：</p>
+
+<table>
+<thead>
+<tr>
+<th>前缀</th>
+<th>级别</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>[flowx:error]</code></td>
+<td>error（节点异常、失败原因必须用它，否则前端无失败提示）</td>
+</tr>
+<tr>
+<td><code>[flowx:warn]</code></td>
+<td>warn</td>
+</tr>
+<tr>
+<td><code>[flowx:debug]</code></td>
+<td>debug</td>
+</tr>
+</tbody>
+</table>
+
+<p>注意：标记按「行」识别，必须位于行首；多行错误（如堆栈）只有首行能提级，其余行用普通输出即可。</p>
+
 <h4 id="mockconfig">MockConfig</h4>
 
 <pre><code class="language-json">{
@@ -644,8 +673,8 @@ Content-Type: application/json
 <p>展开规则：</p>
 
 <ol>
-<li>生成 <code>export</code> 环境变量注入行（见 <a href="#117-参数注入规则" target="_blank">11.7 节</a>）；若 workflow YAML 的节点 <code>config.params</code> 提供了绑定，先将 env/run 中的 <code>Param.&lt;name&gt;</code> 引用替换为绑定值（保留过滤器）</li>
-<li>追加 <code>run</code> 命令；若未指定 <code>run</code>，则按 <code>language + entry</code> 生成默认命令</li>
+<li>节点包 <code>env</code> 与 workflow 层 <code>config.params</code> 绑定<strong>原样</strong>写入物化节点的 <code>config.env</code> / <code>config.params</code>（模板不求值，见 <a href="#117-参数注入规则" target="_blank">11.7 节</a>）；dag 运行时在节点作用域统一渲染后，由执行器以真实进程环境变量注入（不经 shell 解析）</li>
+<li>追加 <code>run</code> 命令（模板原样保留）；若未指定 <code>run</code>，则按 <code>language + entry</code> 生成默认命令</li>
 <li>将 <code>entry</code> 和 <code>files</code> 写入执行器工作目录</li>
 <li>透传 <code>image</code> 和 <code>executor.config</code></li>
 <li>透传 <code>extract</code> 配置</li>
@@ -655,6 +684,8 @@ Content-Type: application/json
 <h2 id="117-参数注入规则">11.7 参数注入规则</h2>
 
 <p>参数注入优先使用 <code>env</code>，其次使用 <code>run</code> 模板，最后回退到默认 <code>FLOWX_PARAM_*</code> 环境变量。</p>
+
+<p><strong>渲染模型（2026-09 重构）</strong>：模板渲染只发生在 flowx 引擎一处（dag 运行时），studio 展开器不再做任何模板拼接。展开时 env 模板与 params 绑定原样写入物化节点；执行节点时 dag 构建「节点级参数作用域」——<code>{{ Param.&lt;name&gt;</code> 优先解析到该节点的 <code>config.params</code> 绑定（绑定值本身是模板则先在 workflow 上下文求值），未绑定的回退到 workflow 级 <code>Param</code>。渲染后的 env 终值由执行器以真实进程环境变量注入（local/docker 原生支持；kubernetes exec 不支持命令级 env，在命令前拼接单引号转义的 export 行兜底），<strong>不经 shell 解析，值中的引号/换行/特殊字符天然安全</strong>。</p>
 
 <p>*<em>核心约束：flowx.json 中的 <code>env</code>/<code>run</code> 模板只允许引用 <code>{{ Param.</em> }}</code> 或常量字面量，禁止引用上游节点实例 ID**（如 <code>{{ GetWeather.city }}</code>）。原因：</p>
 
@@ -673,11 +704,6 @@ Content-Type: application/json
   "TIMEOUT": "{{ Param.timeout }}"
 }</code></pre>
 
-<p>展开后：</p>
-
-<pre><code class="language-bash">export URL="&lt;求值后的 Param.url&gt;"
-export TIMEOUT="&lt;求值后的 Param.timeout&gt;"</code></pre>
-
 <p><code>env</code> 的值支持的模板表达式：</p>
 
 <ul>
@@ -694,12 +720,14 @@ export TIMEOUT="&lt;求值后的 Param.timeout&gt;"</code></pre>
 
 <pre><code class="language-json">"run": "python3 main.py --url '{{ Param.url }}'"</code></pre>
 
+<p>注意：<code>run</code> 命令本身仍是 shell 文本，模板渲染值会原样拼入——若参数值可能包含引号/空格/特殊字符，应改用 <code>env</code> 传递（真实进程环境变量，无 shell 解析问题），不要在 <code>run</code> 里拼接不可信值。</p>
+
 <h3 id="规则-3默认-env-回退">规则 3：默认 env 回退</h3>
 
 <p>如果 <code>env</code> 未定义，则为每个 <code>parameter</code> 自动生成默认环境变量：</p>
 
-<pre><code class="language-bash">export FLOWX_PARAM_URL="&lt;值&gt;"
-export FLOWX_PARAM_TIMEOUT="&lt;值&gt;"</code></pre>
+<pre><code>FLOWX_PARAM_URL={{ Param.url }}
+FLOWX_PARAM_TIMEOUT={{ Param.timeout }}</code></pre>
 
 <p>注意：<code>NodeService.MockTest</code>（<code>internal/service/node.go</code>）同样以 <code>FLOWX_PARAM_</code> 前缀注入环境变量，并额外保留裸大写参数名（如 <code>URL</code>）作为兼容别名——Mock 与运行时展开的变量名已统一（2026-08-17 修复）。</p>
 
@@ -753,12 +781,12 @@ export FLOWX_PARAM_TIMEOUT="&lt;值&gt;"</code></pre>
         weatherCity: "{{ GetWeather.city }}"          # 引用本 workflow 中的实例 ID
         weatherForecasts: "{{ GetWeather.forecasts }}"</code></pre>
 
-<p>展开规则（<code>internal/runtime/node_expander.go</code> 的 <code>applyParamBindings</code>）：</p>
+<p>展开规则（<code>internal/runtime/node_expander.go</code>）：</p>
 
 <ol>
-<li>绑定值是模板（<code>{{ GetWeather.city }}</code>）时，取其内部表达式替换 env/run 中的 <code>Param.&lt;name&gt;</code> 引用，<strong>保留后续过滤器</strong>：<code>{{ Param.weatherForecasts | toYaml }}</code> → <code>{{ GetWeather.forecasts | toYaml }}</code>；替换后的模板在节点执行时以完整上下文渲染，上游输出正常解析</li>
-<li>绑定值是常量时，替换为字符串字面量：<code>{{ Param.title }}</code> → <code>{{ "每日播报" }}</code></li>
-<li>未在 <code>config.params</code> 中绑定的参数保留 <code>{{ Param.&lt;name&gt; }}</code> 引用，运行时由 workflow 级 <code>Param</code> / <code>workflow run --params</code> 解析</li>
+<li>绑定值<strong>原样</strong>写入物化节点的 <code>config.params</code>，装配期不做任何模板替换；执行该节点时 dag 构建节点级参数作用域：<code>{{ Param.&lt;name&gt;</code> 优先解析到绑定，未绑定的回退 workflow 级 <code>Param</code> / <code>workflow run --params</code></li>
+<li>绑定值本身可以是任意模板——完整引用（<code>{{ GetWeather.city }}</code>）或<strong>嵌入片段</strong>（<code>{{ Param.project_dir }}/backend</code>），先在 workflow 上下文求值再代入；env 模板侧的过滤器（如 <code>{{ Param.weatherForecasts | toYaml }}</code>）在渲染时正常生效</li>
+<li>绑定值模板中的 <code>Param.x</code> 引用一律指向 workflow 级 <code>Param</code>（绑定之间不互相引用，无循环问题）</li>
 <li>绑定未声明的参数名会在展开时报错（<code>config.params references undeclared parameter ...</code>）</li>
 </ol>
 <p>编排者（人或 AI）可依据参数上的 <code>source</code> 提示（<code>nodeRef</code> 节点包名 + <code>output</code> 输出字段）找到 workflow 中对应节点包的实例，生成上述 <code>params</code> 绑定。</p>
@@ -913,7 +941,7 @@ interface NodeWidgetProps {
                                   // 下为 undefined，组件调用前需判空进入只读模式
   execution: {                  // 流水线执行实例实时 metadata（SSE 驱动）；无运行实例时为 null
     id: string
-    status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
+    status: 'pending' | 'running' | 'paused' | 'success' | 'failed' | 'cancelled'
     trigger?: string
     startedAt?: string
     completedAt?: string
@@ -922,6 +950,11 @@ interface NodeWidgetProps {
     errorNodeId?: string
     metadata?: Record&lt;string, unknown&gt;
   } | null
+  preview?: {                   // 节点实时预览帧（可选）：节点经 stdout FLOWX_PREVIEW
+    url: string                 // 标记上报帧地址，Studio 中转拉帧后随 SSE 进度事件
+    progress?: number           // 刷新（见 11.16）。瞬态：node_complete 清除，回放态
+  }                             // 缺省，需判空。预览 UI 由组件自行渲染（&lt;img src=url&gt;
+                                // 直出，媒体不经 base64），画布外壳不渲染预览
   theme: 'dark'                 // 预留
   locale: string                // 预留
 }
@@ -1005,35 +1038,37 @@ interface NodeWidgetParamSource {
 <p>     脚本体积恒定 ~1KB，不受 argv 上限约束；二进制安全；入口代码中的 <code>{{ }}</code></p>
 <p>     不再经模板渲染，根除误伤</p>
 <ul>
-<li><em>HTTP 引导</em>（docker/k8s 执行器 + 已配置资产 HTTP 服务）：导出签名 URL</li>
+<li><em>镜像节点</em>（docker/k8s 执行器 + 节点包声明 <code>executor.bundled: true</code>）：</li>
 </ul>
-<p>     <code>FLOWX_ASSETS_URL</code>，用 <code>curl -fsSL</code>（wget 兜底）拉取。签名方案见下</p>
+<p>     代码/依赖已打进 <code>image</code> 指向的镜像，物化脚本仅 <code>cd /opt/flowx-nodes/&lt;name&gt;</code></p>
+<p>     后直接运行，不从 Studio 拉取任何文件</p>
 <ul>
-<li><em>heredoc 内联</em>（仅纯内联节点的入口代码；带 runtime 依赖的 docker/k8s 节点</li>
+<li><em>heredoc 内联</em>（仅纯内联节点的入口代码；带 runtime 资产的 docker/k8s 节点</li>
 </ul>
-<p>     未配置签名服务时展开直接报错，不再静默缺文件）</p>
+<p>     未声明 bundled 时展开直接报错——资产 HTTP 拉取通道已移除）</p>
 <ol>
 <li><strong>执行命令</strong>（不变）</li>
 </ol>
-<h3 id="签名资产-urlp3">签名资产 URL（P3）</h3>
+<h3 id="镜像节点executorbundled">镜像节点（executor.bundled）</h3>
+
+<p>节点包声明 <code>"executor": {"bundled": true}</code> 且 <code>image</code> 指向包含节点代码的镜像时，</p>
+<p>docker/k8s 执行不再依赖 Studio 资产服务：</p>
 
 <ul>
-<li>端点：<code>GET /api/v1/assets/nodes/&lt;name&gt;@&lt;version&gt;/&lt;path&gt;?expires=&lt;unix&gt;&amp;sig=&lt;hex&gt;</code>，</li>
+<li>镜像内代码目录约定为 <code>/opt/flowx-nodes/&lt;name&gt;/</code>（&lt;name&gt; 为节点包名），</li>
 </ul>
-<p>  <strong>免认证</strong>（签名自校验），供执行器 <code>curl</code> 引导使用</p>
+<p>  包含 <code>entry</code> 与全部 <code>files</code>（runtime 类；ui/ 资产不进镜像，仍由 Studio 服务前端）</p>
 <ul>
-<li>签名：HMAC-SHA256，消息为 <code>&lt;name&gt;@&lt;version&gt;\n&lt;expires&gt;</code>，密钥存于</li>
+<li>展开产物仅一行 <code>cd '/opt/flowx-nodes/&lt;name&gt;' || exit 1</code> + 执行命令；</li>
 </ul>
-<p>  <code>&lt;data.dir&gt;/asset_signing.key</code>（0600，首次启动自动生成）。节点脚本不再携带</p>
-<p>  Studio 长期 auth token</p>
+<p>  env/参数注入、FLOWX_PREVIEW 标记预览通道不受影响</p>
 <ul>
-<li>默认有效期 30 分钟；URL 覆盖节点目录级前缀，其下任意包内文件可拉取</li>
-<li>Studio 的 HTTP base 通过 <code>assets.http_base</code> 配置（env <code>FLOWX_STUDIO_ASSETS_HTTP_BASE</code>）；</li>
+<li>共享镜像推荐：同 repo 结构一致的节点共用一个镜像（如 pixelforge 14 个节点</li>
 </ul>
-<p>  缺省按 <code>server.host:port</code> 推导（<code>0.0.0.0</code> 视为 <code>127.0.0.1</code>）。**跨主机/容器场景</p>
-<p>  必须显式配置为执行器网络可达的地址**，如 <code>http://192.168.1.10:8080</code></p>
+<p>  共用 <code>lerkobba/flowx-pixelforge-nodes:&lt;bundle&gt;</code>），代码变更后 bump bundle tag、</p>
+<p>  重建推送并同步各 flowx.json 的 image 字段</p>
 <ul>
-<li>校验失败/过期/路径穿越一律 403/404；响应带正确 Content-Type</li>
+<li>local 执行器不受影响（继续 cp 物化）；Mock 测试也不受影响（本地沙箱）</li>
 </ul>
 <h3 id="资产-gcp4">资产 GC（P4）</h3>
 
@@ -1048,7 +1083,49 @@ interface NodeWidgetParamSource {
 <li>不符合命名规则的目录（如人工放置的）→ 保留不动</li>
 <li>每次清理写入审计日志（<code>gc_assets</code>）</li>
 </ul>
-<h2 id="1116-参考资料">11.16 参考资料</h2>
+<h2 id="1116-运行时上下文环境变量与实时预览">11.16 运行时上下文环境变量与实时预览</h2>
+
+<p>运行/续跑时，服务端在展开后的工作流 YAML 上为<strong>每个节点</strong>追加注入以下环境变量</p>
+<p>（<code>internal/runtime/inject.go</code> 的 <code>InjectRuntimeContext</code>；同一 execID 下幂等，</p>
+<p>不影响快照比对与续跑）：</p>
+
+<table>
+<thead>
+<tr>
+<th>变量</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>FLOWX_EXECUTION_ID</code></td>
+<td>执行实例 ID</td>
+</tr>
+<tr>
+<td><code>FLOWX_NODE_ID</code></td>
+<td>节点实例 ID（workflow YAML 的 <code>Nodes</code> 键，与执行事件 <code>node_id</code> 一致）</td>
+</tr>
+</tbody>
+</table>
+
+<p><strong>实时预览（stdout 标记 + Studio 中转拉帧）</strong>：节点脚本执行中途把预览帧地址以</p>
+<p>stdout 标记行上报（媒体本体不走 stdout/base64）：</p>
+
+<pre><code>FLOWX_PREVIEW {"url": "http://inference:8100/preview/&lt;job_id&gt;", "progress": 0.4, "token": "&lt;可选&gt;"}</code></pre>
+
+<p>Studio 从日志管道拦截标记行（<strong>不落日志库、不进 execution.log 事件</strong>），在内存中</p>
+<p>记录 <code>(execution, node) → 帧地址</code> 映射，并广播轻量 <code>node_preview</code> SSE 事件</p>
+<p>（只带 <code>progress</code>，不含媒体）；前端收到事件后以 <code>&lt;img&gt;</code> 直读</p>
+<p><code>GET /api/v1/executions/:id/nodes/:nodeId/preview-frame</code>，Studio 按映射向帧源</p>
+<p>中转拉取（1s 短缓存，单帧上限 16MB，标记中的 <code>token</code> 用作 Bearer 认证）。</p>
+<p>帧以 url 形式透传给节点自定义 UI 组件（<code>props.preview.url</code>，见 11.13.2）由其自行</p>
+<p>渲染——画布外壳不渲染预览；<code>node_complete</code> 后前端清除预览帧。</p>
+<p>该机制不要求 Studio 对节点/推理服务开放任何入站接口；方向为 Studio 主动拉取。</p>
+<p>参考实现：<code>flowx-pixelforge/nodes/ksampler/</code>（轮询推理服务 job 时上报标记）+</p>
+<p><code>flowx-pixelforge/inference-server/app/preview.py</code>（帧缓冲）+ <code>flowx_client.py</code></p>
+<p>的 <code>emit_preview()</code>（标记输出）。</p>
+
+<h2 id="1117-参考资料">11.17 参考资料</h2>
 
 <ul>
 <li><code>flowx/core/config.go:113-124</code> — <code>NodeConfig</code> 结构定义</li>

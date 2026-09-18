@@ -717,7 +717,8 @@ POST /api/v1/executions/:id/resume</code></pre>
 Content-Type: application/json
 
 {
-  "yaml": "Name: my-workflow\n..."  // 可选：新的 FlowX YAML
+  "yaml": "Name: my-workflow\n...",  // 可选：新的 FlowX YAML
+  "run": true                         // 可选：false 时仅更新快照不执行（必须同时提供 yaml）
 }</code></pre>
 
 <p>对已结束（success/failed/cancelled）的执行实例增量续跑：</p>
@@ -725,6 +726,7 @@ Content-Type: application/json
 <ul>
 <li>不提供 <code>yaml</code>：直接重新运行，已终结状态（SUCCESS/FAILED/CANCELLED）的节点自动跳过</li>
 <li>提供 <code>yaml</code>：先由 FlowX <code>UpdateConfig</code> 比对差异更新执行实例的图（可追加节点、修改未运行节点；<code>Version</code>/<code>Name</code> 等不可变字段必须与原配置一致，已执行节点不可删除/替换），再继续运行</li>
+<li><code>run: false</code>：仅更新快照（追加/修改未运行节点）并持久化，不触发执行；广播 <code>execution.updated</code> 事件（前端回放态画布增量刷新，新增节点以 idle 入场）。之后可再调本接口（不带 <code>yaml</code>）按需续跑</li>
 <li>续跑沿用同一执行 ID：状态回到 running，节点记录与日志追加到原实例</li>
 <li>仅影响该执行实例，不修改流水线定义（需要时用 <code>PUT /workflows/:id</code>）</li>
 </ul>
@@ -741,13 +743,28 @@ Content-Type: application/json
   "data": { "executionId": 42, "status": "running" }
 }</code></pre>
 
+<h3 id="458-节点实时预览帧中转拉取">4.5.8 节点实时预览帧（中转拉取）</h3>
+
+<pre><code class="language-http">GET /api/v1/executions/:id/nodes/:nodeId/preview-frame</code></pre>
+
+<p>返回该节点当前最新预览帧的 HTTP 二进制（Content-Type 由上游决定，通常为</p>
+<p>image/jpeg），<code>Cache-Control: no-cache</code>；无预览来源时 404。</p>
+
+<p><strong>机制</strong>：运行中的节点脚本轮询推理服务任务时，把帧地址经 stdout 标记行</p>
+<p><code>FLOWX_PREVIEW {"url": "...", "progress": 0.4, "token": "..."}</code> 上报；Studio 从日志</p>
+<p>管道拦截标记（<strong>不落日志库</strong>），在内存中记录 <code>(execution, node) → 帧地址</code> 映射，</p>
+<p>并以 <code>node_preview</code> 事件向全局 SSE 广播轻量进度（不含媒体）。前端收到事件后用</p>
+<p><code>&lt;img src&gt;</code> 直读本接口（同源 <code>flowx_token</code> cookie 认证），Studio 按映射向推理服务</p>
+<p>中转拉帧（1s 短缓存，单帧上限 16MB）。媒体全程 HTTP 二进制，不经 base64；</p>
+<p>Studio 无需对节点/推理服务开放任何入站回调接口。</p>
+
 <h2 id="46-全局事件流-api">4.6 全局事件流 API</h2>
 
 <h3 id="461-订阅全局事件">4.6.1 订阅全局事件</h3>
 
 <pre><code class="language-http">GET /api/v1/events</code></pre>
 
-<p><strong>说明</strong>：全局 SSE 事件流，推送事件总线上的所有事件（事件名为 <code>evt.Type</code>，数据为完整事件对象），客户端断开连接时自动取消订阅。</p>
+<p><strong>说明</strong>：全局 SSE 事件流，推送事件总线上的所有事件（事件名为 <code>evt.Type</code>，数据为完整事件对象），客户端断开连接时自动取消订阅。节点实时预览进度以 <code>node_preview</code> 事件出现在该流中：<code>{"execution_id": 42, "node_id": "Sampler", "progress": 0.4, "timestamp": ...}</code>（不含媒体；帧经 4.5.8 的 preview-frame 接口拉取）。</p>
 
 <h2 id="47-配置管理-api">4.7 配置管理 API</h2>
 
@@ -848,8 +865,8 @@ Content-Type: application/json
 <td><code>GET /executions/:id/logs</code></td>
 </tr>
 <tr>
-<td><code>execution continue --id E [--file wf.yaml] [--follow]</code></td>
-<td>续跑已结束的执行，可追加节点</td>
+<td><code>execution continue --id E [--file wf.yaml] [--follow] [--no-run]</code></td>
+<td>续跑已结束的执行，可追加节点；<code>--no-run</code> 仅更新快照不执行</td>
 <td><code>POST /executions/:id/continue</code></td>
 </tr>
 <tr>
@@ -923,6 +940,11 @@ Content-Type: application/json
 <td><code>PUT /executors/:id/default</code></td>
 </tr>
 <tr>
+<td><code>executor test --id N</code></td>
+<td>测试 docker 执行器与 daemon 的连接状态（Ping + 版本信息，不创建容器；仅 docker 实例支持；连接失败退出码 1）</td>
+<td><code>POST /executors/:id/test</code></td>
+</tr>
+<tr>
 <td><code>backup create</code> / <code>backup list</code> / <code>backup download</code></td>
 <td>备份创建/列表/下载（<code>.db</code> + 配套 <code>.assets.tar.gz</code> 节点资产包）</td>
 <td><code>POST /backups</code>、<code>GET /backups</code>、<code>GET /backups/:name/download</code></td>
@@ -986,10 +1008,8 @@ Content-Type: application/json
 │   ├── GET    /:id       执行器详情
 │   ├── PUT    /:id       更新（name/type 不可变更，仅 description/config）
 │   ├── DELETE /:id       删除（默认执行器禁止删除 → 409）
-│   └── PUT    /:id/default  设为全局默认执行器
-│
-├── /assets                    ※ 免认证（签名 URL 自校验，供 docker/k8s 执行器拉取节点资产）
-│   └── GET    /nodes/:nodeRef/*filepath?expires&amp;sig  签名 URL 拉取节点文件（HMAC-SHA256 + 时效）
+│   ├── PUT    /:id/default  设为全局默认执行器
+│   └── POST   /:id/test     测试 docker daemon 连接（返回 ok/serverVersion/apiVersion/os/arch/latencyMs，失败 ok=false+message）
 │
 └── /config
     ├── GET    /system    获取系统配置

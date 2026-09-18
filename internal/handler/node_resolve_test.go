@@ -70,13 +70,13 @@ func TestResolveRefs(t *testing.T) {
 	r := setupResolveRouter(t)
 
 	items := resolveRefs(t, r,
-		"echo",        // 裸名 → 最新版本
-		"echo@1.0.0",  // 精确版本
-		"echo@9.9.9",  // 锁定版本已删除 → 回退最新
-		"solo@2.0.0",  // 单版本精确
-		"ghost",       // 名称不存在 → null
-		"bad@@ref",    // 非法 ref → null
-		"echo",        // 重复 ref → 去重
+		"echo",       // 裸名 → 最新版本
+		"echo@1.0.0", // 精确版本
+		"echo@9.9.9", // 锁定版本已删除 → 回退最新
+		"solo@2.0.0", // 单版本精确
+		"ghost",      // 名称不存在 → null
+		"bad@@ref",   // 非法 ref → null
+		"echo",       // 重复 ref → 去重
 	)
 
 	if n := items["echo"]; n == nil || n.Version != "1.1.0" {

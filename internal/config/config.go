@@ -14,7 +14,6 @@ type Config struct {
 	Data      DataConfig      `mapstructure:"data"`
 	Retention RetentionConfig `mapstructure:"retention"`
 	Backup    BackupConfig    `mapstructure:"backup"`
-	Assets    AssetsConfig    `mapstructure:"assets"`
 	Media     MediaConfig     `mapstructure:"media"`
 }
 
@@ -54,14 +53,6 @@ type MediaConfig struct {
 	Roots []string `mapstructure:"roots"`
 }
 
-// AssetsConfig 节点资产存储配置
-type AssetsConfig struct {
-	// 远程执行器（docker/k8s）拉取资产用的 HTTP base，需执行器网络可达。
-	// 留空时按 server.host:port 推导（0.0.0.0 等通配地址自动探测局域网 IP）。
-	// 跨主机/容器场景可显式配置覆盖，如 http://192.168.1.10:8080
-	HTTPBase string `mapstructure:"http_base"`
-}
-
 // Load 加载配置
 func Load() (*Config, error) {
 	viper.SetEnvPrefix("FLOWX_STUDIO")
@@ -94,13 +85,6 @@ func Load() (*Config, error) {
 	var cfg Config
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, err
-	}
-
-	// AutomaticEnv 的值不会反映在未注册键（无默认值/配置文件项）的 Unmarshal
-	// 结果中，assets.http_base 需显式回读，否则 FLOWX_STUDIO_ASSETS_HTTP_BASE
-	// 环境变量形同虚设。
-	if cfg.Assets.HTTPBase == "" {
-		cfg.Assets.HTTPBase = viper.GetString("assets.http_base")
 	}
 
 	// media.roots 环境变量覆盖（逗号分隔）；未配置时默认 ~/flowx-output

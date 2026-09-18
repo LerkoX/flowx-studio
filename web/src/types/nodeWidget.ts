@@ -49,12 +49,10 @@ export interface NodeWidgetExecution {
   metadata?: Record<string, unknown>
 }
 
-/** 节点实时预览帧（运行中由节点脚本经 FLOWX_CALLBACK_URL 推送，SSE 下发） */
+/** 节点实时预览帧（节点经 stdout FLOWX_PREVIEW 标记上报帧地址，Studio 中转拉帧，SSE 下发进度） */
 export interface NodeWidgetPreview {
-  /** base64 编码的预览图像帧 */
-  image: string
-  /** 图像媒体类型（image/jpeg、image/png 等） */
-  mime: string
+  /** 预览帧 HTTP 地址（Studio preview-frame 中转接口，媒体不经 base64） */
+  url: string
   /** 可选进度 0~1 */
   progress?: number
 }
@@ -90,9 +88,11 @@ export interface NodeWidgetProps {
   /** 流水线执行实例实时 metadata；无运行实例时为 null */
   execution: NodeWidgetExecution | null
   /**
-   * 节点实时预览帧（可选）：节点脚本执行中途经 FLOWX_CALLBACK_URL 推送，
-   * 随 SSE 下发；瞬态数据——node_complete 时清除，回放态/未执行时缺省，
-   * 组件需判空。节点预览 UI 由组件自行渲染（画布外壳不渲染预览）。
+   * 节点实时预览帧（可选）：节点脚本执行中途经 stdout FLOWX_PREVIEW 标记上报
+   * 帧地址（推理服务 HTTP 端点），Studio 中转拉帧，随 SSE 进度事件刷新；
+   * 瞬态数据——node_complete 时清除，回放态/未执行时缺省，组件需判空。
+   * url 为 Studio preview-frame 中转接口地址（同源 cookie 认证），
+   * 组件以 <img src=url> 直接渲染。节点预览 UI 由组件自行渲染（画布外壳不渲染预览）。
    */
   preview?: NodeWidgetPreview
   /** 当前主题 */

@@ -396,7 +396,7 @@ func ExpandNodeToConfig(node *model.Node) (*core.NodeConfig, error)
 2. `export KEY="{{ Param.xxx }}"` 注入环境变量（默认 `FLOWX_PARAM_{大写参数名}`；`flowx.json` 的 `env` 字段优先）
 3. 文件物化（ui 类资产不进执行链路）：
    - local 执行器：`cp "$FLOWX_ASSETS_DIR/<rel>"` 从资产库拷贝（脚本体积恒定，二进制安全）
-   - docker/k8s：`curl -fsSL "$FLOWX_ASSETS_URL/<rel>"`（签名 URL，见 11.15 节；未配置 `assets.http_base` 且有 runtime 依赖时展开报错）
+   - docker/k8s：镜像节点（`executor.bundled: true`）`cd /opt/flowx-nodes/<name>` 直接运行镜像内代码（见 11.15 节）；带 runtime 资产但未声明 bundled 时展开报错（资产 HTTP 拉取通道已移除）
    - 纯内联节点：`cat > {entry} << 'FLOWX_FILE_EOF'` heredoc 写入入口代码
 4. 追加运行命令（`flowx.json` 的 `run` 字段；缺省时按语言推断，如 `python3 main.py`）
 
@@ -410,7 +410,7 @@ func ExpandNodeToConfig(node *model.Node) (*core.NodeConfig, error)
 
 多 Docker 实例时，节点包只声明 `supportedTypes: ["docker"]`，不绑定实例名；具体实例由 workflow 的 `config.executor.ref` 选择。未显式选择时按类型解析：优先类型匹配的全局默认实例，否则按名称稳定选择该类型第一个实例。
 
-执行器实例由 `ExecutorService`（`internal/service/executor.go`）管理：`local` 全局限一个、docker 可多个、全局唯一默认（迁移 010）；API 见 4.9 节 `/executors` 路由组，CLI 为 `flowx-studio executor` 命令组。解析结果同时决定资产引导方式：实例类型为 `local` 时走 `cp` 物化，`docker` 时走签名 URL 拉取。
+执行器实例由 `ExecutorService`（`internal/service/executor.go`）管理：`local` 全局限一个、docker 可多个、全局唯一默认（迁移 010）；API 见 4.9 节 `/executors` 路由组，CLI 为 `flowx-studio executor` 命令组。解析结果同时决定资产引导方式：实例类型为 `local` 时走 `cp` 物化，`docker`/`k8s` 时要求镜像节点（`executor.bundled`）直接运行镜像内代码。
 
 同时以解析出的执行器名为键向 `cfg.Executors` 写入执行器配置。未声明 `extract` 时默认 `codec-block`。
 

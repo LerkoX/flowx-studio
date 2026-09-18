@@ -57,9 +57,12 @@ type NodeExtractConfig struct {
 type NodeExecutorConfig struct {
 	SupportedTypes []string               `json:"supportedTypes,omitempty" db:"-"`
 	PreferredType  string                 `json:"preferredType,omitempty" db:"-"`
-	Ref            string                 `json:"ref,omitempty" db:"ref"`
-	Type           string                 `json:"type,omitempty" db:"type"`
-	Config         map[string]interface{} `json:"config,omitempty" db:"config"`
+	// Bundled 声明节点代码/依赖已打进 image（镜像节点）：docker/k8s 执行时
+	// 直接从镜像内 /opt/flowx-nodes/<name>/ 运行，不再从 Studio 拉取资产
+	Bundled bool                     `json:"bundled,omitempty" db:"-"`
+	Ref     string                  `json:"ref,omitempty" db:"ref"`
+	Type    string                  `json:"type,omitempty" db:"type"`
+	Config  map[string]interface{} `json:"config,omitempty" db:"config"`
 }
 
 // NodeUIConfig 节点自定义 UI 组件配置（module 模式）。
@@ -115,7 +118,7 @@ func (n *Node) DeriveExecutor() {
 		return
 	}
 	e := n.PackageConfig.Executor
-	if len(e.SupportedTypes) == 0 && e.PreferredType == "" && e.Ref == "" && e.Type == "" && e.Config == nil {
+	if len(e.SupportedTypes) == 0 && e.PreferredType == "" && !e.Bundled && e.Ref == "" && e.Type == "" && e.Config == nil {
 		return
 	}
 	n.Executor = &e
@@ -152,9 +155,6 @@ type Node struct {
 
 	// 资产目录绝对路径（运行时由 PrepareAssets 填充，不入库、不出 API）
 	AssetDir string `json:"-" db:"-"`
-
-	// 资产签名拉取 URL 前缀（docker/k8s 执行器用，PrepareAssets 填充）
-	AssetURL string `json:"-" db:"-"`
 
 	// 完整的 flowx.json 包配置（运行时展开使用）
 	PackageConfig *NodePackage `json:"-" db:"package_config"`

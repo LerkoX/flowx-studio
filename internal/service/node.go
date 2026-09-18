@@ -55,8 +55,9 @@ func (s *NodeService) Assets() *assets.Store {
 	return s.assets
 }
 
-// PrepareAssets 填充 node.AssetDir / node.AssetURL，供展开器生成 cp/curl 引导脚本。
+// PrepareAssets 填充 node.AssetDir，供展开器生成 cp 引导脚本（local 执行器）。
 // 节点文件内容一律不落内存/DB，运行时直接从资产目录物化。
+// docker/k8s 执行器不走资产拉取：镜像节点（executor.bundled）代码打进镜像。
 func (s *NodeService) PrepareAssets(node *model.Node) {
 	if len(node.FileAssets) == 0 || s.assets == nil {
 		return
@@ -64,8 +65,6 @@ func (s *NodeService) PrepareAssets(node *model.Node) {
 	if dir, err := s.assets.NodeDir(node.Name, node.Version); err == nil {
 		node.AssetDir = dir
 	}
-	// 签名 URL（docker/k8s 执行器通过 HTTP 拉资产用；未配置 HTTPBase 时为空）
-	node.AssetURL = s.assets.SignedURL(node.Name, node.Version, assets.DefaultSignTTL)
 }
 
 // LoadRuntimeFiles 从资产目录读取 runtime 类文件内容（Mock 沙箱物化用）。

@@ -3,7 +3,7 @@ module github.com/LerkoX/flowx-studio
 go 1.25.0
 
 require (
-	github.com/LerkoX/flowx v0.1.3
+	github.com/LerkoX/flowx v0.1.4
 	github.com/gin-gonic/gin v1.12.0
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/spf13/cobra v1.10.2

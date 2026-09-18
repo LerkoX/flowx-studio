@@ -582,26 +582,22 @@ Content-Type: application/json
 }
 ```
 
-### 4.5.8 节点实时预览回调
+### 4.5.8 节点实时预览帧（中转拉取）
 
 ```http
-POST /api/v1/executions/:id/nodes/:nodeId/preview
-Content-Type: application/json
-
-{
-  "image": "<base64 图像帧>",
-  "mime": "image/jpeg",          // 可选，缺省 image/jpeg；支持 jpeg/png/webp/gif
-  "progress": 0.4                 // 可选，0~1
-}
+GET /api/v1/executions/:id/nodes/:nodeId/preview-frame
 ```
 
-运行中的节点脚本经 `FLOWX_CALLBACK_URL` 环境变量回调该端点，推送执行中途的实时预览帧
-（如 ComfyUI 采样每一步的 latent 预览图）。服务端将帧以 `node_preview` 事件广播到全局
-SSE 事件流（**瞬态数据，不落库**），前端画布节点实时展示。body 上限 8MB。
+返回该节点当前最新预览帧的 HTTP 二进制（Content-Type 由上游决定，通常为
+image/jpeg），`Cache-Control: no-cache`；无预览来源时 404。
 
-节点脚本侧所需环境变量由服务端在运行/续跑展开时自动注入（见 11.16 节）：
-`FLOWX_CALLBACK_URL`（本端点完整地址）、`FLOWX_AUTH_TOKEN`（Bearer 认证 token）。
-未注入时节点应静默跳过预览推送。
+**机制**：运行中的节点脚本轮询推理服务任务时，把帧地址经 stdout 标记行
+`FLOWX_PREVIEW {"url": "...", "progress": 0.4, "token": "..."}` 上报；Studio 从日志
+管道拦截标记（**不落日志库**），在内存中记录 `(execution, node) → 帧地址` 映射，
+并以 `node_preview` 事件向全局 SSE 广播轻量进度（不含媒体）。前端收到事件后用
+`<img src>` 直读本接口（同源 `flowx_token` cookie 认证），Studio 按映射向推理服务
+中转拉帧（1s 短缓存，单帧上限 16MB）。媒体全程 HTTP 二进制，不经 base64；
+Studio 无需对节点/推理服务开放任何入站回调接口。
 
 ## 4.6 全局事件流 API
 
@@ -611,7 +607,7 @@ SSE 事件流（**瞬态数据，不落库**），前端画布节点实时展示
 GET /api/v1/events
 ```
 
-**说明**：全局 SSE 事件流，推送事件总线上的所有事件（事件名为 `evt.Type`，数据为完整事件对象），客户端断开连接时自动取消订阅。节点实时预览帧以 `node_preview` 事件出现在该流中：`{"execution_id": 42, "node_id": "Sampler", "image": "<base64>", "mime": "image/jpeg", "progress": 0.4, "timestamp": ...}`。
+**说明**：全局 SSE 事件流，推送事件总线上的所有事件（事件名为 `evt.Type`，数据为完整事件对象），客户端断开连接时自动取消订阅。节点实时预览进度以 `node_preview` 事件出现在该流中：`{"execution_id": 42, "node_id": "Sampler", "progress": 0.4, "timestamp": ...}`（不含媒体；帧经 4.5.8 的 preview-frame 接口拉取）。
 
 ## 4.7 配置管理 API
 
@@ -747,9 +743,6 @@ PUT /api/v1/config/system
 │   ├── DELETE /:id       删除（默认执行器禁止删除 → 409）
 │   ├── PUT    /:id/default  设为全局默认执行器
 │   └── POST   /:id/test     测试 docker daemon 连接（返回 ok/serverVersion/apiVersion/os/arch/latencyMs，失败 ok=false+message）
-│
-├── /assets                    ※ 免认证（签名 URL 自校验，供 docker/k8s 执行器拉取节点资产）
-│   └── GET    /nodes/:nodeRef/*filepath?expires&sig  签名 URL 拉取节点文件（HMAC-SHA256 + 时效）
 │
 └── /config
     ├── GET    /system    获取系统配置

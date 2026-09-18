@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -95,11 +94,11 @@ func main() {
 	rootCmd.AddCommand(versionCmd)
 
 	// 客户端子命令（HTTP client，实现见 internal/cli）
-	rootCmd.AddCommand(cli.NewWorkflowCmd()) // workflow list/create/update/delete/run
-	rootCmd.AddCommand(cli.NewNodeCmd())     // node list/create/delete/import/mock
-	rootCmd.AddCommand(cli.NewAuditCmd())    // audit list（审计日志查询）
-	rootCmd.AddCommand(cli.NewBackupCmd())   // backup create/list/download/restore
-	rootCmd.AddCommand(cli.NewExecutorCmd()) // executor list/create/update/delete/set-default
+	rootCmd.AddCommand(cli.NewWorkflowCmd())  // workflow list/create/update/delete/run
+	rootCmd.AddCommand(cli.NewNodeCmd())      // node list/create/delete/import/mock
+	rootCmd.AddCommand(cli.NewAuditCmd())     // audit list（审计日志查询）
+	rootCmd.AddCommand(cli.NewBackupCmd())    // backup create/list/download/restore
+	rootCmd.AddCommand(cli.NewExecutorCmd())  // executor list/create/update/delete/set-default
 	rootCmd.AddCommand(cli.NewExecutionCmd()) // execution list/get/nodes/logs/continue
 	rootCmd.AddCommand(cli.NewYAMLCmd())      // yaml graph/nodes/get/add-node/add-edge/remove-edge（本地结构化编辑）
 
@@ -119,61 +118,7 @@ type usageError struct{ err error }
 func (e *usageError) Error() string { return e.err.Error() }
 func (e *usageError) Unwrap() error { return e.err }
 
-// resolveHTTPBase 推导执行器可达的 server HTTP 地址（资产签名 URL / 节点预览回调共用）：
-// 1. assets.http_base 显式配置（含 FLOWX_STUDIO_ASSETS_HTTP_BASE）时优先使用；
-// 2. 否则按 server.host:port 推导；host 为 0.0.0.0/::/空（监听所有网卡）时
-//    自动探测本机局域网 IP，探测失败兜底 127.0.0.1。
-func resolveHTTPBase(cfg *config.Config) string {
-	if cfg.Assets.HTTPBase != "" {
-		return cfg.Assets.HTTPBase
-	}
-	host := cfg.Server.Host
-	if host == "0.0.0.0" || host == "::" || host == "" {
-		if ip := detectLANIP(); ip != "" {
-			log.Printf("assets http base auto-detected: http://%s:%d", ip, cfg.Server.Port)
-			host = ip
-		} else {
-			host = "127.0.0.1"
-		}
-	}
-	return fmt.Sprintf("http://%s:%d", host, cfg.Server.Port)
-}
-
-// detectLANIP 探测本机对外可达的局域网 IPv4：
-// 优先用 UDP dial 让内核选出默认出口地址（不产生真实流量）；
-// 失败时遍历网卡取第一个非回环的私有网段（RFC1918）IPv4；都没有返回空串。
-func detectLANIP() string {
-	if conn, err := net.Dial("udp", "8.8.8.8:80"); err == nil {
-		defer conn.Close()
-		if addr, ok := conn.LocalAddr().(*net.UDPAddr); ok && addr.IP != nil && !addr.IP.IsLoopback() {
-			if ip4 := addr.IP.To4(); ip4 != nil {
-				return ip4.String()
-			}
-		}
-	}
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return ""
-	}
-	for _, addr := range addrs {
-		var ip net.IP
-		switch a := addr.(type) {
-		case *net.IPNet:
-			ip = a.IP
-		case *net.IPAddr:
-			ip = a.IP
-		}
-		if ip == nil || ip.IsLoopback() {
-			continue
-		}
-		if ip4 := ip.To4(); ip4 != nil && ip.IsPrivate() {
-			return ip4.String()
-		}
-	}
-	return ""
-}
-
-func newAppServices(cfg *config.Config, httpBase string) (*appServices, func(), error) {
+func newAppServices(cfg *config.Config) (*appServices, func(), error) {
 	database, err := db.New(cfg.Data.DBPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open database: %w", err)
@@ -182,13 +127,6 @@ func newAppServices(cfg *config.Config, httpBase string) (*appServices, func(), 
 	bus := event.NewBus()
 	rt := runtime.NewAdapter()
 	assetStore := assets.NewStore(cfg.Data.Dir)
-	// P3：远程执行器资产拉取；同一 base 复用于节点预览回调地址注入
-	assetStore.HTTPBase = httpBase
-	if key, err := assets.LoadOrCreateSignKey(cfg.Data.Dir); err != nil {
-		log.Printf("asset signing key init failed (remote asset pull disabled): %v", err)
-	} else {
-		assetStore.SignKey = key
-	}
 	nodeSvc := service.NewNodeService(database, bus)
 	nodeSvc.SetAssetStore(assetStore)
 	sysCfgSvc := service.NewSystemConfigService(database)
@@ -266,9 +204,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	defer os.Remove(statePath)
 
 	// 执行器可达的 server 地址（资产拉取 / 预览回调共用），整个进程只推导一次
-	httpBase := resolveHTTPBase(cfg)
-
-	svcs, cleanup, err := newAppServices(cfg, httpBase)
+	svcs, cleanup, err := newAppServices(cfg)
 	if err != nil {
 		return err
 	}
@@ -294,12 +230,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to init auth token: %w", err)
 	}
 
-	// 节点运行时回调（实时预览推送）：运行/续跑时向节点环境变量注入
-	// FLOWX_CALLBACK_URL / FLOWX_AUTH_TOKEN，节点脚本 curl 回调即可上送预览帧。
-	// local 执行器与 server 同机，走回环地址（http_base 可能配为局域网 IP）
-	loopbackBase := fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)
-	svcs.workflowSvc.SetRuntimeCallback(httpBase, loopbackBase, token)
-
 	srv := server.New()
 	srv.SetPort(cfg.Server.Port)
 	srv.SetHost(cfg.Server.Host)
@@ -311,8 +241,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	// 健康检查免认证（监控探针 / server status 探测用），不含敏感数据
 	handler.NewHealthHandler(svcs.database, cfg.Data.DBPath, version).RegisterRoutes(srv.Router())
-	// 节点资产拉取免认证（签名 URL 自校验，供 docker/k8s 执行器 curl 引导）
-	handler.NewAssetHandler(svcs.assetStore).RegisterRoutes(srv.Router())
 	configHandler := handler.NewConfigHandler(svcs.sysCfgSvc)
 	configHandler.SetAudit(svcs.auditSvc)
 	configHandler.RegisterRoutes(api)
@@ -362,4 +290,3 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 	return nil
 }
-

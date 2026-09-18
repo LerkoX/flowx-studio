@@ -102,15 +102,21 @@ func TestNodeImportService_ImportFromFolder(t *testing.T) {
 		t.Errorf("unexpected docker config: %+v", node.DockerConfig)
 	}
 
-	// docker 执行器 + runtime 依赖（utils.py）→ 需要签名 URL 引导（P3）
-	node.AssetURL = "http://test.local/api/v1/assets/nodes/test-download@0?expires=999&sig=abc"
+	// docker 执行器 + runtime 依赖（utils.py）+ 未声明 bundled → 展开报错
+	//（资产 HTTP 拉取通道已移除，docker 节点必须打进镜像）
+	if _, err := runtime.ExpandNodeToConfig(node); err == nil ||
+		!strings.Contains(err.Error(), "bundled image node") {
+		t.Errorf("expected bundled-image error, got %v", err)
+	}
+	// 声明 bundled（镜像节点）→ cd 到镜像内节点目录直接运行，不拉取资产
+	node.PackageConfig.Executor.Bundled = true
+	node.PackageConfig.Image = "lerkobba/flowx-pixelforge-nodes:v1.0.0"
 	cfg, err := runtime.ExpandNodeToConfig(node)
 	if err != nil {
 		t.Fatalf("expand node failed: %v", err)
 	}
-	// flowx_fetch 两参形式：<完整URL>（路径段插在查询串之前，避免污染 sig）+ 本地相对路径
-	if !strings.Contains(cfg.Steps[0].Run, "flowx_fetch 'http://test.local/api/v1/assets/nodes/test-download@0/utils.py?expires=999&sig=abc' 'utils.py'") {
-		t.Errorf("expected signed-URL bootstrap for runtime dep, run:\n%s", cfg.Steps[0].Run)
+	if !strings.Contains(cfg.Steps[0].Run, "cd '/opt/flowx-nodes/test-download' || exit 1") {
+		t.Errorf("expected bundled image cd bootstrap, run:\n%s", cfg.Steps[0].Run)
 	}
 	if cfg.Executor != node.Name+"-executor" {
 		t.Errorf("unexpected executor name: %s", cfg.Executor)

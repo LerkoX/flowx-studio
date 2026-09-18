@@ -10,7 +10,7 @@
 ### 执行器实例化（Executor Registry，已落地）
 - 新增 `executors` 表（迁移 010）：命名执行器实例（`name/type/description/config/is_default`）；**local 全局限一个**（部分唯一索引）、**docker 可多实例**、全局唯一默认执行器（迁移时自动播种 `local`）。
 - `ExecutorService` + `ExecutorHandler`：`GET/POST /api/v1/executors`、`GET/PUT/DELETE /executors/:id`、`PUT /executors/:id/default`；name/type 不可变更、默认执行器禁删；config 按类型做键白名单与类型校验；写操作接审计与事件总线。
-- **portable 执行器声明**：flowx.json 推荐用 `executor.supportedTypes` + `executor.preferredType` 声明支持类型与偏好，不绑定用户环境中的实例名；workflow YAML 可用 `config.executor` 按类型或具体实例覆盖。旧版 `executor.ref`/`executor.type` 继续兼容。运行时解析：workflow 显式选择 → 旧版 `ref` → 旧版 `type+config` → portable 偏好/降级 → 有 `image` 归 docker / 无 `image` 用全局默认执行器。解析结果同时决定资产引导方式（local→cp，docker→签名 URL）。
+- **portable 执行器声明**：flowx.json 推荐用 `executor.supportedTypes` + `executor.preferredType` 声明支持类型与偏好，不绑定用户环境中的实例名；workflow YAML 可用 `config.executor` 按类型或具体实例覆盖。旧版 `executor.ref`/`executor.type` 继续兼容。运行时解析：workflow 显式选择 → 旧版 `ref` → 旧版 `type+config` → portable 偏好/降级 → 有 `image` 归 docker / 无 `image` 用全局默认执行器。解析结果同时决定资产引导方式（local→cp，docker→镜像节点 bundled 直接运行）。
 - **k8s 暂不支持**：`executor.type: k8s/kubernetes` 导入拒绝；前端 `/executors` 移除 K8s 卡片。
 - **远程 Docker**（FlowX 核心同步增强）：docker adapter 新增 `host`/`tlsVerify`/`certPath` 配置（`tcp://…`、`ssh://user@host`），client 惰性创建，未配置 `host` 时回退 `DOCKER_HOST` 环境变量（原行为不变）；每个 docker 实例可连不同 daemon。
 - 前端 `/executors` 重写为实例管理页（真实 API 落地 + SSE 实时刷新 + 设为默认/删除），假监控面板移除；CLI 新增 `executor list/create/update/delete/set-default`（含 `--schema`）。
@@ -20,9 +20,9 @@
 
 ### 节点文件资产库（Node Asset Store，已落地）
 - 节点文件内容**不再存数据库**（迁移 009 删除 `nodes.files` 列，无 legacy 兼容），统一落盘 `<data.dir>/assets/nodes/<name>@<version>/`；DB 仅存索引 `nodes.file_assets`（迁移 008：`sha256/size/contentType/kind`，kind = runtime | ui）。
-- 新包 `internal/assets`：`Store`（原子 Put/Open/Read/Remove，防路径穿越，二进制安全）、`TarGz`/`UntarGz`（纯 Go）、签名 URL（HMAC-SHA256，密钥 `<data.dir>/asset_signing.key`）。
+- 新包 `internal/assets`：`Store`（原子 Put/Open/Read/Remove，防路径穿越，二进制安全）、`TarGz`/`UntarGz`（纯 Go）。签名 URL 拉取通道（P3）已随镜像节点改造移除——docker/k8s 节点代码一律打进镜像（`executor.bundled`），Studio 不再对执行器开放资产接口。
 - 导入：文件（含入口）全部入资产库；UI serving `/api/v1/nodes/:id/ui/*` 从磁盘流式返回 + ETag，前端 URL 契约不变。
-- 运行时展开（`node_expander.go`）：`mktemp` 独立工作目录 + trap 清理；local 走 `cp "$FLOWX_ASSETS_DIR/..."`，docker/k8s 走签名 URL `curl`（免认证端点 `GET /api/v1/assets/nodes/<name>@<version>/<path>?expires&sig`，配置项 `assets.http_base` / `FLOWX_STUDIO_ASSETS_HTTP_BASE`）；纯内联节点入口 heredoc；docker 带 runtime 依赖但无签名服务时展开报错。
+- 运行时展开（`node_expander.go`）：local 走 `cp "$FLOWX_ASSETS_DIR/..."`（`mktemp` 独立工作目录 + trap 清理）；docker/k8s 镜像节点（`executor.bundled`）`cd /opt/flowx-nodes/<name>` 直接运行镜像内代码；纯内联节点入口 heredoc；docker 带 runtime 资产但未声明 bundled 时展开报错。
 - Mock：`LoadRuntimeFiles` 从资产库读取 runtime 文件物化到沙箱。
 - 备份：`backup create` 配套生成 `<name>.assets.tar.gz`；`restore` 自动成对恢复并留 `.pre-restore` 回滚副本。
 - GC：启动时清理无节点引用的资产目录与 Put 崩溃遗留 tmp 目录（审计记录 `gc_assets`）。

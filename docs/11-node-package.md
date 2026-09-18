@@ -604,11 +604,11 @@ interface NodeWidgetProps {
     errorNodeId?: string
     metadata?: Record<string, unknown>
   } | null
-  preview?: {                   // 节点实时预览帧（可选）：节点脚本执行中途经
-    image: string               // FLOWX_CALLBACK_URL 推送，随 SSE 下发（见 11.16）。
-    mime: string                // 瞬态：node_complete 清除，回放态缺省，需判空。
-    progress?: number           // 预览 UI 由组件自行渲染，画布外壳不渲染预览
-  }
+  preview?: {                   // 节点实时预览帧（可选）：节点经 stdout FLOWX_PREVIEW
+    url: string                 // 标记上报帧地址，Studio 中转拉帧后随 SSE 进度事件
+    progress?: number           // 刷新（见 11.16）。瞬态：node_complete 清除，回放态
+  }                             // 缺省，需判空。预览 UI 由组件自行渲染（<img src=url>
+                                // 直出，媒体不经 base64），画布外壳不渲染预览
   theme: 'dark'                 // 预留
   locale: string                // 预留
 }
@@ -679,24 +679,26 @@ localStorage、auth token、Studio 内部状态），**只应导入可信来源�
      用 `cp "$FLOWX_ASSETS_DIR/<rel>" <rel>` 物化入口与 runtime 资产（子目录自动 mkdir）。
      脚本体积恒定 ~1KB，不受 argv 上限约束；二进制安全；入口代码中的 `{{ }}`
      不再经模板渲染，根除误伤
-   - *HTTP 引导*（docker/k8s 执行器 + 已配置资产 HTTP 服务）：导出签名 URL
-     `FLOWX_ASSETS_URL`，用 `curl -fsSL`（wget 兜底）拉取。签名方案见下
-   - *heredoc 内联*（仅纯内联节点的入口代码；带 runtime 依赖的 docker/k8s 节点
-     未配置签名服务时展开直接报错，不再静默缺文件）
+   - *镜像节点*（docker/k8s 执行器 + 节点包声明 `executor.bundled: true`）：
+     代码/依赖已打进 `image` 指向的镜像，物化脚本仅 `cd /opt/flowx-nodes/<name>`
+     后直接运行，不从 Studio 拉取任何文件
+   - *heredoc 内联*（仅纯内联节点的入口代码；带 runtime 资产的 docker/k8s 节点
+     未声明 bundled 时展开直接报错——资产 HTTP 拉取通道已移除）
 4. **执行命令**（不变）
 
-### 签名资产 URL（P3）
+### 镜像节点（executor.bundled）
 
-- 端点：`GET /api/v1/assets/nodes/<name>@<version>/<path>?expires=<unix>&sig=<hex>`，
-  **免认证**（签名自校验），供执行器 `curl` 引导使用
-- 签名：HMAC-SHA256，消息为 `<name>@<version>\n<expires>`，密钥存于
-  `<data.dir>/asset_signing.key`（0600，首次启动自动生成）。节点脚本不再携带
-  Studio 长期 auth token
-- 默认有效期 30 分钟；URL 覆盖节点目录级前缀，其下任意包内文件可拉取
-- Studio 的 HTTP base 通过 `assets.http_base` 配置（env `FLOWX_STUDIO_ASSETS_HTTP_BASE`）；
-  缺省按 `server.host:port` 推导（`0.0.0.0` 视为 `127.0.0.1`）。**跨主机/容器场景
-  必须显式配置为执行器网络可达的地址**，如 `http://192.168.1.10:8080`
-- 校验失败/过期/路径穿越一律 403/404；响应带正确 Content-Type
+节点包声明 `"executor": {"bundled": true}` 且 `image` 指向包含节点代码的镜像时，
+docker/k8s 执行不再依赖 Studio 资产服务：
+
+- 镜像内代码目录约定为 `/opt/flowx-nodes/<name>/`（<name> 为节点包名），
+  包含 `entry` 与全部 `files`（runtime 类；ui/ 资产不进镜像，仍由 Studio 服务前端）
+- 展开产物仅一行 `cd '/opt/flowx-nodes/<name>' || exit 1` + 执行命令；
+  env/参数注入、FLOWX_PREVIEW 标记预览通道不受影响
+- 共享镜像推荐：同 repo 结构一致的节点共用一个镜像（如 pixelforge 14 个节点
+  共用 `lerkobba/flowx-pixelforge-nodes:<bundle>`），代码变更后 bump bundle tag、
+  重建推送并同步各 flowx.json 的 image 字段
+- local 执行器不受影响（继续 cp 物化）；Mock 测试也不受影响（本地沙箱）
 
 ### 资产 GC（P4）
 
@@ -708,7 +710,7 @@ localStorage、auth token、Studio 内部状态），**只应导入可信来源�
 - 不符合命名规则的目录（如人工放置的）→ 保留不动
 - 每次清理写入审计日志（`gc_assets`）
 
-## 11.16 运行时上下文环境变量与实时预览推送
+## 11.16 运行时上下文环境变量与实时预览
 
 运行/续跑时，服务端在展开后的工作流 YAML 上为**每个节点**追加注入以下环境变量
 （`internal/runtime/inject.go` 的 `InjectRuntimeContext`；同一 execID 下幂等，
@@ -718,23 +720,25 @@ localStorage、auth token、Studio 内部状态），**只应导入可信来源�
 |------|------|
 | `FLOWX_EXECUTION_ID` | 执行实例 ID |
 | `FLOWX_NODE_ID` | 节点实例 ID（workflow YAML 的 `Nodes` 键，与执行事件 `node_id` 一致） |
-| `FLOWX_CALLBACK_URL` | 实时预览回调地址（按执行器类型选择，见下；节点自己推送预览时用它） |
-| `FLOWX_CALLBACK_URL_PUBLIC` | 预览回调的 LAN/公网可达地址（恒为 `assets.http_base` 推导值）；节点不自己推送、需把回调地址转发给远程服务（如 ksampler 透传给推理服务）时用它 |
-| `FLOWX_AUTH_TOKEN` | 回调所需的 Bearer 认证 token |
 
-回调地址按执行器类型选择：**local 执行器与 server 同机，走回环地址**
-`http://127.0.0.1:<port>`（`assets.http_base` 可能配为局域网 IP 供 docker 拉资产，
-该地址本机不一定可达）；docker/k8s 容器执行器走 `assets.http_base`（缺省按
-`server.host:port` 推导；跨主机场景需配置为执行器可达地址）。
+**实时预览（stdout 标记 + Studio 中转拉帧）**：节点脚本执行中途把预览帧地址以
+stdout 标记行上报（媒体本体不走 stdout/base64）：
 
-**实时预览推送**：节点脚本在执行中途可向 `FLOWX_CALLBACK_URL` POST
-`{"image": "<base64>", "mime": "image/jpeg", "progress": 0.4}`，服务端广播
-`node_preview` SSE 事件（不落库），前端将预览帧透传给节点自定义 UI 组件
-（`props.preview`，见 11.13.2）由其自行渲染——画布外壳不渲染预览；
-`node_complete` 后前端清除预览帧。未注入 `FLOWX_CALLBACK_URL`
-（如 Mock 测试）时脚本应静默跳过。参考实现：`flowx-pixelforge/nodes/ksampler/`
-（KSampler 采样逐步预览：节点透传回调地址给推理服务，服务端 sample 算子在
-采样循环中逐步 POST latent 预览帧）。
+```
+FLOWX_PREVIEW {"url": "http://inference:8100/preview/<job_id>", "progress": 0.4, "token": "<可选>"}
+```
+
+Studio 从日志管道拦截标记行（**不落日志库、不进 execution.log 事件**），在内存中
+记录 `(execution, node) → 帧地址` 映射，并广播轻量 `node_preview` SSE 事件
+（只带 `progress`，不含媒体）；前端收到事件后以 `<img>` 直读
+`GET /api/v1/executions/:id/nodes/:nodeId/preview-frame`，Studio 按映射向帧源
+中转拉取（1s 短缓存，单帧上限 16MB，标记中的 `token` 用作 Bearer 认证）。
+帧以 url 形式透传给节点自定义 UI 组件（`props.preview.url`，见 11.13.2）由其自行
+渲染——画布外壳不渲染预览；`node_complete` 后前端清除预览帧。
+该机制不要求 Studio 对节点/推理服务开放任何入站接口；方向为 Studio 主动拉取。
+参考实现：`flowx-pixelforge/nodes/ksampler/`（轮询推理服务 job 时上报标记）+
+`flowx-pixelforge/inference-server/app/preview.py`（帧缓冲）+ `flowx_client.py`
+的 `emit_preview()`（标记输出）。
 
 ## 11.17 参考资料
 

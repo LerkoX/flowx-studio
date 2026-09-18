@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"fmt"
-	"net/url"
 	"strconv"
 
 	"github.com/LerkoX/flowx/core"
@@ -13,36 +12,19 @@ import (
 //
 //	FLOWX_EXECUTION_ID  执行实例 ID
 //	FLOWX_NODE_ID       节点实例 ID（YAML Nodes 键，与执行事件的 node_id 一致）
-//	FLOWX_CALLBACK_URL        节点实时预览回调地址（按执行器类型选择，见下）
-//	FLOWX_CALLBACK_URL_PUBLIC 预览回调的公网/LAN 可达地址（恒为 callbackBase）：
-//	                          节点自身不推送、需把回调地址转发给远程服务
-//	                          （如 ksampler 透传给推理服务）时使用
-//	FLOWX_AUTH_TOKEN          回调认证 token（server 启用本地 token 认证时需要）
 //
-// 节点脚本可借此在执行中途向 Studio 推送实时预览（如 KSampler 采样逐帧图像）。
 // 对同一 execID 幂等：续跑重展开时注入相同值，不改变已物化节点（快照比对无 diff）。
-// callbackBase 为空时原样返回（无 server 的纯展开场景，如 Mock 校验）。
 //
-// FLOWX_CALLBACK_URL 按执行器类型选择：local 执行器与 server 同机，用 loopbackBase
-//（127.0.0.1:port，避免 http_base 配为局域网 IP 时本机不可达导致回调卡死）；
-// docker/k8s 等容器执行器用 callbackBase（执行器网络可达地址，同资产签名 URL）。
-func InjectRuntimeContext(configYAML string, execID int64, callbackBase, loopbackBase, token string) (string, error) {
-	if callbackBase == "" {
-		return configYAML, nil
-	}
-
+// 注：实时预览不走 env 注入回调——节点经 stdout 的 FLOWX_PREVIEW 标记上报
+// 预览帧地址（推理服务 HTTP 端点），Studio 从日志管道拦截后中转拉帧给画布，
+// 媒体全程 HTTP 二进制，不经 base64，Studio 也无需对节点开放回调接口。
+func InjectRuntimeContext(configYAML string, execID int64) (string, error) {
 	var cfg core.WorkflowConfig
 	if err := yaml.Unmarshal([]byte(configYAML), &cfg); err != nil {
 		return "", fmt.Errorf("failed to parse workflow yaml: %w", err)
 	}
 
 	for nodeName, nodeCfg := range cfg.Nodes {
-		base := callbackBase
-		if loopbackBase != "" {
-			if execCfg, ok := cfg.Executors[nodeCfg.Executor]; ok && execCfg.Type == "local" {
-				base = loopbackBase
-			}
-		}
 		config := nodeCfg.Config
 		if config == nil {
 			config = make(map[string]interface{})
@@ -53,19 +35,12 @@ func InjectRuntimeContext(configYAML string, execID int64, callbackBase, loopbac
 		}
 		env["FLOWX_EXECUTION_ID"] = strconv.FormatInt(execID, 10)
 		env["FLOWX_NODE_ID"] = nodeName
-		env["FLOWX_CALLBACK_URL"] = fmt.Sprintf("%s/api/v1/executions/%d/nodes/%s/preview",
-			base, execID, url.PathEscape(nodeName))
-		env["FLOWX_CALLBACK_URL_PUBLIC"] = fmt.Sprintf("%s/api/v1/executions/%d/nodes/%s/preview",
-			callbackBase, execID, url.PathEscape(nodeName))
-		if token != "" {
-			env["FLOWX_AUTH_TOKEN"] = token
-		}
 		config["env"] = env
 		nodeCfg.Config = config
 		cfg.Nodes[nodeName] = nodeCfg
 	}
 
-	out, err := yaml.Marshal(cfg)
+	out, err := yaml.Marshal(&cfg)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal workflow yaml: %w", err)
 	}

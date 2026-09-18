@@ -456,7 +456,7 @@ func ExpandNodeToConfig(node *model.Node) (*core.NodeConfig, error)</code></pre>
 <li><code>export KEY="{{ Param.xxx }}"</code> 注入环境变量（默认 <code>FLOWX_PARAM_{大写参数名}</code>；<code>flowx.json</code> 的 <code>env</code> 字段优先）</li>
 <li>文件物化（ui 类资产不进执行链路）：</li>
 <li>local 执行器：<code>cp "$FLOWX_ASSETS_DIR/&lt;rel&gt;"</code> 从资产库拷贝（脚本体积恒定，二进制安全）</li>
-<li>docker/k8s：<code>curl -fsSL "$FLOWX_ASSETS_URL/&lt;rel&gt;"</code>（签名 URL，见 11.15 节；未配置 <code>assets.http_base</code> 且有 runtime 依赖时展开报错）</li>
+<li>docker/k8s：镜像节点（<code>executor.bundled: true</code>）<code>cd /opt/flowx-nodes/&lt;name&gt;</code> 直接运行镜像内代码（见 11.15 节）；带 runtime 资产但未声明 bundled 时展开报错（资产 HTTP 拉取通道已移除）</li>
 <li>纯内联节点：<code>cat &gt; {entry} &lt;&lt; 'FLOWX_FILE_EOF'</code> heredoc 写入入口代码</li>
 <li>追加运行命令（<code>flowx.json</code> 的 <code>run</code> 字段；缺省时按语言推断，如 <code>python3 main.py</code>）</li>
 </ol>
@@ -471,7 +471,7 @@ func ExpandNodeToConfig(node *model.Node) (*core.NodeConfig, error)</code></pre>
 </ol>
 <p>多 Docker 实例时，节点包只声明 <code>supportedTypes: ["docker"]</code>，不绑定实例名；具体实例由 workflow 的 <code>config.executor.ref</code> 选择。未显式选择时按类型解析：优先类型匹配的全局默认实例，否则按名称稳定选择该类型第一个实例。</p>
 
-<p>执行器实例由 <code>ExecutorService</code>（<code>internal/service/executor.go</code>）管理：<code>local</code> 全局限一个、docker 可多个、全局唯一默认（迁移 010）；API 见 4.9 节 <code>/executors</code> 路由组，CLI 为 <code>flowx-studio executor</code> 命令组。解析结果同时决定资产引导方式：实例类型为 <code>local</code> 时走 <code>cp</code> 物化，<code>docker</code> 时走签名 URL 拉取。</p>
+<p>执行器实例由 <code>ExecutorService</code>（<code>internal/service/executor.go</code>）管理：<code>local</code> 全局限一个、docker 可多个、全局唯一默认（迁移 010）；API 见 4.9 节 <code>/executors</code> 路由组，CLI 为 <code>flowx-studio executor</code> 命令组。解析结果同时决定资产引导方式：实例类型为 <code>local</code> 时走 <code>cp</code> 物化，<code>docker</code>/<code>k8s</code> 时要求镜像节点（<code>executor.bundled</code>）直接运行镜像内代码。</p>
 
 <p>同时以解析出的执行器名为键向 <code>cfg.Executors</code> 写入执行器配置。未声明 <code>extract</code> 时默认 <code>codec-block</code>。</p>
 

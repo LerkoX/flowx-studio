@@ -179,46 +179,18 @@ func TestExpandNodeToConfig_AssetBackedBootstrap(t *testing.T) {
 	}
 }
 
-func TestExpandNodeToConfig_DockerFallsBackToHeredoc(t *testing.T) {
+func TestExpandNodeToConfig_DockerBundledImageNode(t *testing.T) {
+	// 镜像节点（executor.bundled）：代码打进镜像，docker 执行时 cd 到镜像内
+	// 节点目录直接运行——不 cp、不拉取、不 heredoc，ui 资产不进执行链路
 	pkg := &model.NodePackage{
 		Name:     "docker-node",
 		Language: "bash",
 		Entry:    "main.sh",
-		Image:    "bash:5",
-		Executor: model.NodeExecutorConfig{Type: "docker"},
-	}
-	node := newTestNode(pkg)
-	node.Code = "echo docker\n"
-	node.AssetDir = "/data/assets/nodes/docker-node@1"
-	node.FileAssets = map[string]model.NodeFileAsset{
-		"main.sh": {SHA256: "a", Size: 10, Kind: "runtime"},
-	}
-
-	cfg, err := ExpandNodeToConfig(node)
-	if err != nil {
-		t.Fatalf("expand failed: %v", err)
-	}
-	run := cfg.Steps[0].Run
-	// docker 容器内看不到宿主机资产目录，回退 heredoc
-	if !strings.Contains(run, "cat > main.sh << 'FLOWX_FILE_EOF'") || !strings.Contains(run, "echo docker") {
-		t.Errorf("expected heredoc fallback for docker executor, run:\n%s", run)
-	}
-	if strings.Contains(run, "FLOWX_ASSETS_DIR") {
-		t.Errorf("docker executor must not reference host asset dir, run:\n%s", run)
-	}
-}
-
-func TestExpandNodeToConfig_DockerHTTPBootstrap(t *testing.T) {
-	pkg := &model.NodePackage{
-		Name:     "docker-node",
-		Language: "bash",
-		Entry:    "main.sh",
-		Image:    "bash:5",
-		Executor: model.NodeExecutorConfig{Type: "docker"},
+		Image:    "lerkobba/flowx-nodes:v1.0.0",
+		Executor: model.NodeExecutorConfig{Type: "docker", Bundled: true},
 	}
 	node := newTestNode(pkg)
 	node.AssetDir = "/data/assets/nodes/docker-node@1" // 容器内不可用，不得引用
-	node.AssetURL = "http://192.168.1.10:8080/api/v1/assets/nodes/docker-node@1?expires=999&sig=abc"
 	node.FileAssets = map[string]model.NodeFileAsset{
 		"main.sh":           {SHA256: "a", Size: 10, Kind: "runtime"},
 		"lib/helper.sh":     {SHA256: "b", Size: 10, Kind: "runtime"},
@@ -231,41 +203,21 @@ func TestExpandNodeToConfig_DockerHTTPBootstrap(t *testing.T) {
 	}
 	run := cfg.Steps[0].Run
 
-	if !strings.Contains(run, "flowx_fetch 'http://192.168.1.10:8080/api/v1/assets/nodes/docker-node@1/main.sh?expires=999&sig=abc' 'main.sh'") {
-		t.Errorf("expected signed per-file url with path before query, run:\n%s", run)
+	if !strings.Contains(run, "cd '/opt/flowx-nodes/docker-node' || exit 1") {
+		t.Errorf("expected cd to bundled image node dir, run:\n%s", run)
 	}
-	if !strings.Contains(run, "flowx_fetch 'http://192.168.1.10:8080/api/v1/assets/nodes/docker-node@1/lib/helper.sh?expires=999&sig=abc' 'lib/helper.sh'") {
-		t.Errorf("expected curl/wget/python3 fetch for runtime deps, run:\n%s", run)
+	if strings.Contains(run, "FLOWX_ASSETS_DIR") || strings.Contains(run, "flowx_fetch") ||
+		strings.Contains(run, "FLOWX_FILE_EOF") || strings.Contains(run, "node-widget.js") {
+		t.Errorf("bundled image node must not reference assets/fetch/heredoc/ui, run:\n%s", run)
 	}
-	if strings.Contains(run, "FLOWX_ASSETS_DIR") || strings.Contains(run, "FLOWX_FILE_EOF") || strings.Contains(run, "node-widget.js") {
-		t.Errorf("http bootstrap must not reference host dir / inline contents / ui files, run:\n%s", run)
-	}
-}
-
-func TestExpandNodeToConfig_DockerRuntimeDepsRequireSignedURL(t *testing.T) {
-	// docker/k8s + runtime 依赖 + 无签名 URL → 展开报错（而不是静默缺文件）
-	pkg := &model.NodePackage{
-		Name:     "docker-node",
-		Language: "bash",
-		Entry:    "main.sh",
-		Image:    "bash:5",
-		Executor: model.NodeExecutorConfig{Type: "docker"},
-	}
-	node := newTestNode(pkg)
-	node.Code = "echo docker\n"
-	node.FileAssets = map[string]model.NodeFileAsset{
-		"main.sh":       {SHA256: "a", Size: 10, Kind: "runtime"},
-		"lib/helper.sh": {SHA256: "b", Size: 10, Kind: "runtime"},
-	}
-
-	_, err := ExpandNodeToConfig(node)
-	if err == nil || !strings.Contains(err.Error(), "assets.http_base") {
-		t.Errorf("expected signed-url error, got %v", err)
+	if cfg.Image != "lerkobba/flowx-nodes:v1.0.0" {
+		t.Errorf("image = %v, want bundle image", cfg.Image)
 	}
 }
 
-func TestExpandNodeToConfig_DockerEntryOnlyNoURL(t *testing.T) {
-	// docker + 仅入口资产（无额外 runtime 依赖）→ heredoc 入口即可运行
+func TestExpandNodeToConfig_DockerNonBundledAssetsError(t *testing.T) {
+	// docker/k8s + runtime 资产（含入口）+ 未声明 bundled → 展开报错：
+	// 资产 HTTP 拉取通道已移除，docker 节点必须打进镜像（或用 local 执行器）
 	pkg := &model.NodePackage{
 		Name:     "docker-node",
 		Language: "bash",
@@ -278,6 +230,24 @@ func TestExpandNodeToConfig_DockerEntryOnlyNoURL(t *testing.T) {
 	node.FileAssets = map[string]model.NodeFileAsset{
 		"main.sh": {SHA256: "a", Size: 10, Kind: "runtime"},
 	}
+
+	_, err := ExpandNodeToConfig(node)
+	if err == nil || !strings.Contains(err.Error(), "bundled image node") {
+		t.Errorf("expected bundled-image error, got %v", err)
+	}
+}
+
+func TestExpandNodeToConfig_DockerInlineCodeHeredoc(t *testing.T) {
+	// docker + 纯内联代码（无资产索引）→ heredoc 入口即可运行（内联节点场景）
+	pkg := &model.NodePackage{
+		Name:     "docker-node",
+		Language: "bash",
+		Entry:    "main.sh",
+		Image:    "bash:5",
+		Executor: model.NodeExecutorConfig{Type: "docker"},
+	}
+	node := newTestNode(pkg)
+	node.Code = "echo docker\n"
 
 	cfg, err := ExpandNodeToConfig(node)
 	if err != nil {
@@ -337,4 +307,3 @@ func TestExpandNodeToConfig_MaterializedConfigPreservesBindings(t *testing.T) {
 		t.Errorf("config.params should be absent without bindings, got %v", cfg2.Config["params"])
 	}
 }
-

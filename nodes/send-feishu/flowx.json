@@ -11,13 +11,14 @@
   "icon": "💬",
   "language": "python",
   "entry": "main.py",
-  "image": "python:3.11-slim",
+  "image": "lerkobba/flowx-studio-nodes:v1.0.0",
   "executor": {
     "supportedTypes": [
       "local",
       "docker"
     ],
-    "preferredType": "docker"
+    "preferredType": "docker",
+    "bundled": true
   },
   "requirements": [
     "requests"

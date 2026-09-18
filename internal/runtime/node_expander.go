@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"fmt"
-	"net/url"
 	"path"
 	"reflect"
 	"sort"
@@ -16,7 +15,7 @@ import (
 // ExpandNodeToConfig 将 model.Node 展开为 flowx 核心的 NodeConfig
 // paramBindings 为 workflow YAML 中 config.params 提供的参数绑定（接线）：
 // 值可以是常量，也可以是引用 workflow 级 Param / 上游节点输出的模板
-//（如 {{ Param.project_dir }}/backend、{{ GetWeather.city }}）。
+// （如 {{ Param.project_dir }}/backend、{{ GetWeather.city }}）。
 // 绑定与节点包 env 模板原样写入物化节点的 params/env，由 dag 运行时统一渲染。
 func ExpandNodeToConfig(node *model.Node, paramBindings ...map[string]string) (*core.NodeConfig, error) {
 	return expandNodeWithExecutorType(node, "", paramBindings...)
@@ -24,7 +23,7 @@ func ExpandNodeToConfig(node *model.Node, paramBindings ...map[string]string) (*
 
 // expandNodeWithExecutorType 同 ExpandNodeToConfig，但允许调用方覆盖执行器类型。
 // 覆盖值来自执行器实例解析（executor.ref / 默认执行器），影响资产引导路径的选择
-// （local → cp 物化；docker → 签名 URL 拉取）。空字符串表示按节点包自身声明推断。
+// （local → cp 物化；docker/k8s → 镜像节点直接运行镜像内代码）。空字符串表示按节点包自身声明推断。
 func expandNodeWithExecutorType(node *model.Node, executorTypeOverride string, paramBindings ...map[string]string) (*core.NodeConfig, error) {
 	pkg := node.PackageConfig
 	if pkg == nil {
@@ -61,12 +60,6 @@ func expandNodeWithExecutorType(node *model.Node, executorTypeOverride string, p
 
 	var runScript strings.Builder
 
-	// 独立工作目录：每次执行创建临时目录，跑完自动清理，
-	// 不再往执行器（server 进程）的 cwd 里散落文件
-	runScript.WriteString("FLOWX_WORK_DIR=$(mktemp -d \"${TMPDIR:-/tmp}/flowx-node-XXXXXX\") || exit 1\n")
-	runScript.WriteString("trap 'rm -rf \"$FLOWX_WORK_DIR\"' EXIT\n")
-	runScript.WriteString("cd \"$FLOWX_WORK_DIR\" || exit 1\n")
-
 	// 环境变量不再拼接 export 行进脚本：模板原样写入物化节点的 env，
 	// 由 dag 在节点作用域（params 绑定优先）渲染后，经执行器以真实进程
 	// 环境变量注入——不经 shell 解析，值中的引号/换行/特殊字符天然安全
@@ -74,21 +67,27 @@ func expandNodeWithExecutorType(node *model.Node, executorTypeOverride string, p
 
 	// 资产引导三条路径：
 	//  1. local 执行器 + 资产库：cp 物化（脚本体积恒定，二进制安全）
-	//  2. docker/k8s + 签名 URL：curl/wget HTTP 拉取（容器内看不到宿主机路径）
+	//  2. docker/k8s + 镜像节点（executor.bundled）：代码/依赖已打进 image，
+	//     直接 cd 到镜像内节点目录运行，不从 Studio 拉取任何文件
 	//  3. legacy 节点：heredoc 内联（跳过 ui/ 文件）
 	hasAssets := len(node.FileAssets) > 0
 	cpBacked := node.AssetDir != "" && hasAssets &&
 		(executorType == "" || executorType == "local")
-	httpBacked := node.AssetURL != "" && hasAssets &&
+	imageBundled := pkg.Executor.Bundled &&
 		(executorType == "docker" || executorType == "k8s")
-	// 容器执行器拿不到宿主机文件系统：带 runtime 依赖却没有签名 URL 时直接报错，
-	// 避免静默产出缺文件的工作目录
-	if !httpBacked && (executorType == "docker" || executorType == "k8s") && hasRuntimeAssets(node, pkg) {
-		return nil, fmt.Errorf("node %s has runtime asset files but no signed asset URL; "+
-			"configure assets.http_base (FLOWX_STUDIO_ASSETS_HTTP_BASE) to an executor-reachable address", node.Name)
+	// 容器执行器拿不到宿主机文件系统：带 runtime 资产的非镜像节点无法物化，
+	// 直接报错（资产 HTTP 拉取通道已移除，docker 节点必须打进镜像）
+	if !imageBundled && (executorType == "docker" || executorType == "k8s") && hasRuntimeAssets(node, pkg) {
+		return nil, fmt.Errorf("node %s has runtime asset files but is not a bundled image node; "+
+			"set executor.bundled=true with an image containing the node code, or use a local executor", node.Name)
 	}
 	switch {
 	case cpBacked:
+		// 独立工作目录：每次执行创建临时目录，跑完自动清理，
+		// 不再往执行器（server 进程）的 cwd 里散落文件
+		runScript.WriteString("FLOWX_WORK_DIR=$(mktemp -d \"${TMPDIR:-/tmp}/flowx-node-XXXXXX\") || exit 1\n")
+		runScript.WriteString("trap 'rm -rf \"$FLOWX_WORK_DIR\"' EXIT\n")
+		runScript.WriteString("cd \"$FLOWX_WORK_DIR\" || exit 1\n")
 		fmt.Fprintf(&runScript, "FLOWX_ASSETS_DIR=%s\n", shellQuote(node.AssetDir))
 		writeAssetFetch := func(rel string) {
 			if dir := path.Dir(rel); dir != "." {
@@ -97,24 +96,15 @@ func expandNodeWithExecutorType(node *model.Node, executorTypeOverride string, p
 			fmt.Fprintf(&runScript, "cp \"$FLOWX_ASSETS_DIR/%s\" %s\n", rel, shellQuote(rel))
 		}
 		writeAssetFiles(&runScript, node, pkg, writeAssetFetch)
-	case httpBacked:
-		// AssetURL 形如 http://host/api/v1/assets/nodes/<name>@<ver>?expires=..&sig=..
-		// 文件路径必须插在查询串之前（路由 /:nodeRef/*filepath），
-		// 直接往末尾追加会污染 sig 参数导致验签 403。
-		// flowx_fetch <完整URL> <本地相对路径>；curl 优先，wget 次之，python3(urllib) 兑底
-		//（python:*-slim 镜像 curl/wget 都没有，但 python3 必然存在）
-		runScript.WriteString("flowx_fetch() { curl -fsSL \"$1\" -o \"$2\" 2>/dev/null || wget -qO \"$2\" \"$1\" 2>/dev/null || python3 -c 'import sys,urllib.request;urllib.request.urlretrieve(sys.argv[1],sys.argv[2])' \"$1\" \"$2\"; }\n")
-		writeAssetFetch := func(rel string) {
-			if dir := path.Dir(rel); dir != "." {
-				fmt.Fprintf(&runScript, "mkdir -p %s\n", shellQuote(dir))
-			}
-			fmt.Fprintf(&runScript, "flowx_fetch %s %s\n", shellQuote(assetFileURL(node.AssetURL, rel)), shellQuote(rel))
-		}
-		writeAssetFiles(&runScript, node, pkg, writeAssetFetch)
+	case imageBundled:
+		// 镜像节点：代码已在镜像内固定目录，直接以该目录为 cwd 运行
+		fmt.Fprintf(&runScript, "cd %s || exit 1\n", shellQuote(BundledNodeDir(node.Name)))
 	default:
 		// 无资产库内容：仅 heredoc 写入入口代码（纯内联节点）。
-		// 注意：带 runtime 依赖的 docker/k8s 节点必须在上方走 HTTP 引导，
-		// 未配置 assets.http_base 时已在前面报错。
+		// 带 runtime 资产的 docker/k8s 非镜像节点已在上方报错。
+		runScript.WriteString("FLOWX_WORK_DIR=$(mktemp -d \"${TMPDIR:-/tmp}/flowx-node-XXXXXX\") || exit 1\n")
+		runScript.WriteString("trap 'rm -rf \"$FLOWX_WORK_DIR\"' EXIT\n")
+		runScript.WriteString("cd \"$FLOWX_WORK_DIR\" || exit 1\n")
 		writeFileHeredoc(&runScript, pkg.Entry, node.Code)
 	}
 
@@ -620,10 +610,11 @@ func defaultRunCommand(language, entry string) string {
 
 // parseParamBindings 从 workflow YAML 的节点 config.params 中提取参数绑定。
 // 值为标量或模板字符串（如 {{ GetWeather.city }}），统一转为 string。
-// hasRuntimeAssets 节点是否有 runtime 类资产（不含入口与 ui 资产）
+// hasRuntimeAssets 节点是否有 runtime 类资产（含入口，不含 ui 资产）
 func hasRuntimeAssets(node *model.Node, pkg *model.NodePackage) bool {
 	for rel, asset := range node.FileAssets {
-		if rel != pkg.Entry && asset.Kind != "ui" {
+		if asset.Kind != "ui" {
+			_ = rel
 			return true
 		}
 	}
@@ -656,24 +647,17 @@ func writeFileHeredoc(sb *strings.Builder, name, content string) {
 	sb.WriteString("FLOWX_FILE_EOF\n")
 }
 
+// bundledRoot 镜像节点代码在镜像内的根目录（与节点镜像 Dockerfile 约定一致）
+const bundledRoot = "/opt/flowx-nodes"
+
+// BundledNodeDir 镜像节点（executor.bundled）在容器内的代码目录
+func BundledNodeDir(nodeName string) string {
+	return bundledRoot + "/" + nodeName
+}
+
 // shellQuote 单引号包裹，内部单引号转义为 '\”
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
-}
-
-// assetFileURL 把包内相对路径插入签名资产 URL 的查询串之前：
-// <base>/<name>@<ver>/<rel>?expires=..&sig=..（路径段逐段转义）。
-// 路由为 /api/v1/assets/nodes/:nodeRef/*filepath，路径必须在 ? 之前。
-func assetFileURL(assetURL, rel string) string {
-	escaped := make([]string, 0, 4)
-	for _, seg := range strings.Split(rel, "/") {
-		escaped = append(escaped, url.PathEscape(seg))
-	}
-	p := strings.Join(escaped, "/")
-	if i := strings.IndexByte(assetURL, '?'); i >= 0 {
-		return assetURL[:i] + "/" + p + assetURL[i:]
-	}
-	return assetURL + "/" + p
 }
 
 // sortedKeys 返回 map 的有序键（保证展开输出确定，便于测试与 diff）
@@ -731,5 +715,3 @@ func validateBindings(pkg *model.NodePackage, bindings map[string]string) error 
 	}
 	return nil
 }
-
-
