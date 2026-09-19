@@ -177,6 +177,24 @@ Executors:
 
 节点包 = 一个目录：`flowx.json`（清单，必需）+ 入口代码 + 可选 `ui/`（自定义画布组件）。完整规范见仓库 `docs/11-node-package.md`，以下为速查：
 
+### 自包含节点（服务端算子自注册，flowx-inference-server）
+
+推理服务（flowx-pixelforge）支持**节点包自带服务端算子**：节点目录放一个
+`server_op.py`，节点运行时经 `flowx_client.ensure_plugin()` 自动上传注册到推理服务，
+服务端无需手动部署——加能力 = 只写一个节点包。
+
+- **插件契约**：`server_op.py` 定义模块级 `register(registry)`，内部用
+  `@registry.register("op.name", inputs={...}, outputs={...}, description=...)` 声明算子；
+  可 `from app import ops` 复用服务端核心原语（sample / vae_encode / resolve_pipe 等）
+- **节点侧**：`main.py` 在 `call_op` 前调 `ensure_plugin(url, "op.name", tok=tok)`；
+  `flowx.json` 的 `files` 加上 `server_op.py`。版本比对走内容 sha256，节点更新后自动重传覆盖
+- **服务端**：插件落盘 `PLUGINS_DIR`（默认 `/models/plugins.d`，bind-mount 持久化），
+  启动自动扫描；`POST /admin/plugins`（上传热加载）/ `GET /admin/plugins` / `DELETE`；
+  `/ops` 中插件算子带 `plugin_hash` 字段
+- **⚠️ 安全闸门**：`INFERENCE_TOKEN` 为空时 `/admin/*` 一律 404（上传接口=远程代码执行，
+  公网隧道必须配 token）；配了 token 后流水线 `service_token` Param 必须填同一值，
+  否则所有节点 401。参考实现：`nodes/detail-refine/`（server_op.py + ensure_plugin 调用）
+
 ### flowx.json 规范
 
 - 必填：`name`（字母开头，snake_case/kebab-case）、`language`、`entry`（文件必须存在）、`parameters`（可为空数组）
