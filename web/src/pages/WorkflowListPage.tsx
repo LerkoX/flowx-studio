@@ -22,6 +22,7 @@ export default function WorkflowListPage() {
   const pageRef = useRef(0)
   const loadingRef = useRef(false)
   const hasMoreRef = useRef(true)
+  const [expandedDescId, setExpandedDescId] = useState<string | null>(null)
   const setCurrentWorkflow = useWorkflowStore((s) => s.setCurrentWorkflow)
   const { confirm, dialog } = useConfirm()
 
@@ -124,17 +125,30 @@ export default function WorkflowListPage() {
                 className="glass-panel p-4 rounded-xl flex items-center justify-between
                            hover:bg-white/5 transition-colors group"
               >
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center text-white/70">
+                <div className="flex items-center gap-4 min-w-0 flex-1">
+                  <div className="w-10 h-10 shrink-0 rounded-lg bg-white/5 flex items-center justify-center text-white/70">
                     <GitBranch size={20} />
                   </div>
-                  <div>
-                    <h3 className="text-white/90 font-medium">{wf.name}</h3>
-                    <p className="text-white/40 text-sm">{wf.description || t('workflow.noDescription')}</p>
+                  <div className="min-w-0">
+                    <h3 className="text-white/90 font-medium truncate">{wf.name}</h3>
+                    <p
+                      className={`text-white/40 text-sm ${
+                        expandedDescId === wf.id ? '' : 'truncate'
+                      }`}
+                      title={wf.description || undefined}
+                      onClick={(e) => {
+                        if (!wf.description) return
+                        e.preventDefault()
+                        e.stopPropagation()
+                        setExpandedDescId((prev) => (prev === wf.id ? null : wf.id))
+                      }}
+                    >
+                      {wf.description || t('workflow.noDescription')}
+                    </p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                   <button
                     onClick={(e) => handleRun(wf.id, e)}
                     className="p-2 rounded-lg text-white/60 hover:text-white hover:bg-white/10
