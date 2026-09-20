@@ -700,8 +700,10 @@ function WorkflowCanvasInner({
       }
       if (payload.node_id) {
         updateNodeStatus(payload.node_id, statusMap[payload.status || ''] || 'idle')
-        // 节点终结：清除实时预览帧，画布回退展示最终输出
-        setNodeRuntimeData(payload.node_id, { preview: undefined })
+        // 节点终结后保留最后一帧预览：帧源（推理服务帧缓冲 1h TTL）与 Studio
+        // 来源映射（2h TTL）在执行结束后仍可拉取，最后一次上报的 url 保持有效，
+        // 画布继续展示该帧（进度条由组件在终态自行隐藏）；帧过期后由组件的
+        // img onerror 回退占位。新一轮 node_preview/切换执行会覆盖或清空
         // 节点输出随 node_complete 实时下发：驱动画布节点 UI 即时展示输出，
         // 不必等执行结束后 metadata 的一次性同步（循环中跳过节点重发的事件
         // 携带相同输出，重复设置幂等无副作用）

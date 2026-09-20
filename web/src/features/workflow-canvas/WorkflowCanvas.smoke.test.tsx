@@ -87,6 +87,11 @@ vi.mock('@/services/workflowService', () => ({
 }))
 vi.mock('@/services/nodeService', () => ({
   getNodes: vi.fn(async () => ({ code: 200, data: { items: [] } })),
+  // 画布按 nodeRef 批量 resolve 节点定义：测试不涉及自定义 UI，全部未命中
+  resolveNodes: vi.fn(async (refs) => ({
+    code: 200,
+    data: { items: Object.fromEntries(refs.map((r) => [r, null])) },
+  })),
 }))
 vi.mock('@/utils/mermaidParser', async (importOriginal) => {
   const mod = await importOriginal()

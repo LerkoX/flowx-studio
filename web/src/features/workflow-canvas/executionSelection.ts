@@ -25,11 +25,14 @@ export function syncCanvasStatusesFromExecutionNodes(): void {
 }
 
 export async function selectExecutionAndSync(id: string | null): Promise<void> {
-  await useExecutionStore.getState().selectExecution(id)
   const workflow = useWorkflowStore.getState()
+  // 切换/清除执行前先清空上一执行的节点运行时数据：metadata 播种与实时事件
+  // 都是只增不减的合并，不重置会让上一执行的输出/预览残留到新视图
+  // （如切到未产出图片的执行，上一个执行的 save-image 图片仍挂着）
+  workflow.resetNodeRuntimeData()
+  await useExecutionStore.getState().selectExecution(id)
   if (!id) {
     workflow.setNodeStatuses({})
-    workflow.resetNodeRuntimeData()
     // 节点过滤属于某次执行的日志视图，退出回放态时一并清除
     useExecutionStore.getState().setLogFilter({ nodeFilter: null })
     return

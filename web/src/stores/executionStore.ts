@@ -193,6 +193,10 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         get().loadExecutionNodes(id),
         isLiveExecution ? Promise.resolve() : get().loadLatestLogs(id),
       ])
+      // 过期守卫：等待响应期间用户已取消选中或改选其他执行，丢弃本次结果。
+      // 否则迟到的 selectedExecution 会触发画布 metadata 播种，把旧执行的
+      // 节点输出（如 save-image 的图片）重新写回已退出的画布
+      if (get().selectedExecutionId !== id) return
       if (execResp.code === 200 && execResp.data) {
         set({ selectedExecution: normalizeExecution(execResp.data) })
       }
@@ -202,7 +206,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
     } catch (error) {
       console.error('Failed to select execution', error)
     } finally {
-      set({ loadingSelected: false })
+      // 仅当前选中仍是本次 id 时才收尾 loading，避免清掉新一次选择的加载态
+      if (get().selectedExecutionId === id) set({ loadingSelected: false })
     }
   },
 

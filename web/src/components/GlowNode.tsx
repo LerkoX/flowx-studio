@@ -47,7 +47,8 @@ interface GlowNodeData {
   /** 离场标记：节点被外部删除后先播缩小淡出动画，再由画布移除 */
   leaving?: boolean
   /** 节点运行中推送的实时预览帧（如采样逐帧图像）：透传给自定义 UI 组件
-      （props.preview）由其自行渲染；外壳不渲染预览。node_complete 时清除 */
+      （props.preview）由其自行渲染；外壳不渲染预览。node_complete 后保留最后一帧
+      （帧源有 TTL，过期由组件 onerror 回退），切换/取消选中执行时随运行时数据清除 */
   preview?: NodePreview
 }
 

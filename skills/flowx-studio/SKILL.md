@@ -175,6 +175,18 @@ Executors:
 
 ## 节点编写指南（创建/修改节点包时必读）
 
+### 设计前置：动手前必须与用户确认两件事
+
+1. **是否带自定义 UI**（ui/ widget）：纯参数面板够用，还是需要画布内嵌组件？
+   有实时数据（预览帧/进度）或结果可视化需求时推荐带；不带 UI 的节点至少把
+   关键中间信息写进 outputs（节点返回区可见）。
+2. **节点粒度**：单体节点（少接线、上手快）还是细分节点链（每步可观察、
+   中间产物可复用/可替换，ComfyUI 风格）？默认建议：
+   - 用户明确要操作空间/需要观察中间细节 → **细分**（参照 ComfyUI 对应节点拆分：
+     加载→编码→latent→采样→解码分离，中间产物用对象引用接线）
+   - 细分链稳定后，可再补一个聚合节点封装常用路径（两者并存，互不冲突）
+   - 拿不准就直接问用户，不要擅自做粒度决策
+
 节点包 = 一个目录：`flowx.json`（清单，必需）+ 入口代码 + 可选 `ui/`（自定义画布组件）。完整规范见仓库 `docs/11-node-package.md`，以下为速查：
 
 ### 自包含节点（服务端算子自注册，flowx-inference-server）
@@ -254,7 +266,7 @@ config:
 - **节点 UI 一律在节点自己的 ui bundle 中实现，禁止改 flowx-studio 前端来实现节点级 UI**：参数控件、实时预览、进度条、结果展示等所有节点特有 UI 都属于节点包；GlowNode/WorkflowCanvas 等画布外壳只保留所有节点通用的基础元素（图标/名称/状态徽章/连接点/入参返回区）。Studio 侧的合法改动仅限通用数据管道（如把数据透传进 `props`）
 - `entry`：包内预编译单文件 `.js` bundle（≤10MB），格式不限——ESM 默认导出 `mount`，或 IIFE 调用 `window.FlowXNodeWidget.define(mount)`
 - 契约：`mount(el, props) => { update(props), unmount() }`；`props` 含 `status`/`inputs`/`outputs`/`execution`（流水线实时 metadata，无运行实例为 null）与 `params`（该节点实例当前的 `config.params` 绑定值，常量或 `{{ 上游.输出 }}` 模板原样下发）
-- **实时预览（`props.preview`，可选）**：节点脚本执行中途把预览帧地址以 stdout 标记行 `FLOWX_PREVIEW {"url": "...", "progress": 0~1, "token": "..."}` 上报（媒体本体不走 stdout/base64）；Studio 拦截标记（不落日志）记录帧来源，广播轻量 `node_preview` SSE（只带进度），前端以 `<img>` 直读 `GET /api/v1/executions/:id/nodes/:nodeId/preview-frame`（Studio 向帧源中转拉取）。帧以 `props.preview.url` 透传给组件（瞬态：node_complete 清除、回放态缺省，必须判空）。参考实现：flowx-pixelforge `nodes/ksampler/ui/node-widget.js` 预览面板 + `flowx_client.py` 的 `emit_preview()` + `inference-server/app/preview.py` 帧缓冲
+- **实时预览（`props.preview`，可选）**：节点脚本执行中途把预览帧地址以 stdout 标记行 `FLOWX_PREVIEW {"url": "...", "progress": 0~1, "token": "..."}` 上报（媒体本体不走 stdout/base64）；Studio 拦截标记（不落日志）记录帧来源，广播轻量 `node_preview` SSE（只带进度），前端以 `<img>` 直读 `GET /api/v1/executions/:id/nodes/:nodeId/preview-frame`（Studio 向帧源中转拉取）。帧以 `props.preview.url` 透传给组件（节点完成后保留最后一帧——帧源与 Studio 来源映射均有 TTL，组件需处理 img onerror 回退；回放态缺省，必须判空）。参考实现：flowx-pixelforge `nodes/ksampler/ui/node-widget.js` 预览面板 + `flowx_client.py` 的 `emit_preview()` + `inference-server/app/preview.py` 帧缓冲
 - **参数来源标注（必做）**：渲染参数时不要直接展示 `{{ Param.xxx }}` 原始绑定串，优先用 `props.paramSources[key]` 渲染来源说明——`workflow` → `⚡ 流水线参数 · 参数名 = 当前值`（附 paramValue）；`node` → `🔗 上游节点显示名 · 字段`（执行中/回放时用 runtimeValue 补实时值）；`literal` → `✏️ 自定义值`。`paramSources` 缺省时（旧版 Studio）才回退展示原始绑定串。参考实现：flowx-txt2img 各节点 widget 的 `sourceCaptionOf`
 - **参数调整控件**：组件渲染滑杆/下拉等控件后调用 `props.onParamsChange(params)` 把**完整参数表**写回该节点的 `config.params`（全量替换，传 `{}` 清空），Studio 自动写回 workflow YAML 并持久化；回放态（查看历史执行快照）下 `onParamsChange` 为 undefined，调用前必须判空进入只读模式
 - 参考实现：免构建原生 JS 示例 `tests/e2e/testdata/ui-demo-node/ui/node-widget.js`；React+Vite 工程模板 `templates/node-widget/`

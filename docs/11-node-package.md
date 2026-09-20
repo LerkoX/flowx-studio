@@ -606,8 +606,9 @@ interface NodeWidgetProps {
   } | null
   preview?: {                   // 节点实时预览帧（可选）：节点经 stdout FLOWX_PREVIEW
     url: string                 // 标记上报帧地址，Studio 中转拉帧后随 SSE 进度事件
-    progress?: number           // 刷新（见 11.16）。瞬态：node_complete 清除，回放态
-  }                             // 缺省，需判空。预览 UI 由组件自行渲染（<img src=url>
+    progress?: number           // 刷新（见 11.16）。节点完成后保留最后一帧（帧源有
+  }                             // TTL，过期需 img onerror 回退占位）；回放态缺省，需判空。
+                                // 预览 UI 由组件自行渲染（<img src=url>
                                 // 直出，媒体不经 base64），画布外壳不渲染预览
   theme: 'dark'                 // 预留
   locale: string                // 预留
