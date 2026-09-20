@@ -411,7 +411,7 @@ function WorkflowCanvasInner({
             if (cancelled) return
             staggeringRef.current = false
             layoutKeyRef.current = ''
-            fitView({ padding: 0.2, duration: 500 })
+            fitView({ padding: 0.08, duration: 500 })
           }, Math.max(lastAddDelay + 500, lastRemoveDone > 0 ? lastRemoveDone + 400 : 0)),
         )
       })
@@ -805,7 +805,7 @@ function WorkflowCanvasInner({
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         fitView
-        fitViewOptions={{ padding: isMobile ? 0.1 : 0.2 }}
+        fitViewOptions={{ padding: isMobile ? 0.05 : 0.08 }}
         minZoom={0.1}
         maxZoom={2}
         nodesDraggable={mode === 'edit'}
