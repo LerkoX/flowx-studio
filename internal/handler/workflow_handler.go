@@ -51,9 +51,12 @@ func (h *WorkflowHandler) RegisterRoutes(r *gin.RouterGroup) {
 		executions.POST("/:id/resume", h.ResumeExecution)
 		executions.POST("/:id/cancel", h.CancelExecution)
 		executions.GET("/:id/nodes/:nodeId/preview-frame", h.GetNodePreviewFrame)
+		executions.GET("/:id/nodes/:nodeId/input-image", h.GetNodeInputImage)
 		executions.POST("/:id/nodes/:nodeId/interrupt-inference", h.InterruptInferenceNode)
 		executions.POST("/:id/nodes/:nodeId/op-replay", h.ReplayNodeOp)
 	}
+
+	r.POST("/inference/models-files", h.ListInferenceModelFiles)
 }
 
 // List 获取工作流列表
@@ -402,6 +405,48 @@ func (h *WorkflowHandler) ReplayNodeOp(c *gin.Context) {
 		return
 	}
 	Success(c, gin.H{"outputs": outputs})
+}
+
+// ListInferenceModelFiles 代理推理服务的磁盘模型文件清单（节点 widget 模型下拉）。
+// POST /inference/models-files  body: {"service_url": "...", "service_token": "..."}
+func (h *WorkflowHandler) ListInferenceModelFiles(c *gin.Context) {
+	var req struct {
+		ServiceURL   string `json:"service_url"`
+		ServiceToken string `json:"service_token"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.ServiceURL == "" {
+		Error(c, http.StatusBadRequest, "service_url is required")
+		return
+	}
+	out, err := h.service.ListModelFiles(req.ServiceURL, req.ServiceToken)
+	if err != nil {
+		Error(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	Success(c, out)
+}
+
+// GetNodeInputImage 代理节点某输入键的推理侧图像对象（前后对比滑块的"原图"侧）。
+// GET /executions/:id/nodes/:nodeId/input-image?key=image
+func (h *WorkflowHandler) GetNodeInputImage(c *gin.Context) {
+	execID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		Error(c, http.StatusBadRequest, "invalid execution id")
+		return
+	}
+	nodeID := c.Param("nodeId")
+	key := c.DefaultQuery("key", "image")
+	data, mime, err := h.service.NodeInputImage(execID, nodeID, key)
+	if err != nil {
+		if errors.Is(err, service.ErrNoInferenceSource) || errors.Is(err, service.ErrNoInputImage) {
+			Error(c, http.StatusConflict, err.Error())
+			return
+		}
+		Error(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	c.Header("Cache-Control", "private, max-age=120")
+	c.Data(http.StatusOK, mime, data)
 }
 
 // GetExecutionYAML 获取执行实例的运行时快照 YAML（剥离 runtime 状态段）

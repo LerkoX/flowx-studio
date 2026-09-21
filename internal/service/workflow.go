@@ -1056,6 +1056,108 @@ var ErrNoInferenceSource = fmt.Errorf("no inference source recorded for node")
 // emit 会带 __op_name/__inputs_resolved）
 var ErrNoReplayMetadata = fmt.Errorf("node has no replay metadata (re-run with current inference-op first)")
 
+// ErrNoInputImage 节点输入里没有可代理的图像对象（未执行过 / 该键不是对象引用）
+var ErrNoInputImage = fmt.Errorf("node input has no image object (re-run the node first)")
+
+// getInferenceJSON 向推理服务发 GET 并解析 JSON 响应（带 Bearer token）。
+func getInferenceJSON(base, path, tok string, timeout time.Duration) (map[string]interface{}, error) {
+	req, err := http.NewRequest(http.MethodGet, base+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("inference request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode/100 != 2 {
+		return nil, fmt.Errorf("inference returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw))[:200])
+	}
+	var out map[string]interface{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return nil, fmt.Errorf("invalid inference response: %w", err)
+		}
+	}
+	return out, nil
+}
+
+// ListModelFiles 拉推理服务的磁盘模型文件清单（GET /models/files），
+// 节点 widget 模型名下拉数据源（POST /inference/models-files 代理）。
+func (s *WorkflowService) ListModelFiles(base, tok string) (map[string]interface{}, error) {
+	base = strings.TrimRight(base, "/")
+	if base == "" {
+		return nil, fmt.Errorf("service_url is required")
+	}
+	return getInferenceJSON(base, "/models/files", tok, 30*time.Second)
+}
+
+// NodeInputImage 取节点某输入键对应的推理侧图像对象字节流（前后对比滑块的"原图"侧）。
+// 对象 id 从执行 metadata 的 __inputs_resolved[key].$id 读（节点需用异步版执行器
+// 跑过一次）；base/token 经 inferenceSourceOf 解析。
+func (s *WorkflowService) NodeInputImage(execID int64, nodeID, key string) ([]byte, string, error) {
+	exec, err := s.GetExecution(execID)
+	if err != nil {
+		return nil, "", err
+	}
+	meta := s.executionMetadataValues(exec)
+	inputsRaw, _ := meta[nodeID+".__inputs_resolved"].(string)
+	if inputsRaw == "" {
+		return nil, "", ErrNoInputImage
+	}
+	var inputs map[string]interface{}
+	if err := json.Unmarshal([]byte(inputsRaw), &inputs); err != nil {
+		return nil, "", fmt.Errorf("corrupt replay metadata: %w", err)
+	}
+	var imageID string
+	switch v := inputs[key].(type) {
+	case map[string]interface{}:
+		imageID, _ = v["$id"].(string)
+	case string:
+		imageID = v // 兼容直接以字符串形式存的 id
+	}
+	if imageID == "" {
+		return nil, "", ErrNoInputImage
+	}
+	base, tok, _ := s.inferenceSourceOf(execID, nodeID)
+	if base == "" {
+		return nil, "", ErrNoInferenceSource
+	}
+	req, err := http.NewRequest(http.MethodGet, base+"/images/"+imageID, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	if tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("inference request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return nil, "", fmt.Errorf("inference returned HTTP %d for image %s", resp.StatusCode, imageID)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	if err != nil {
+		return nil, "", err
+	}
+	mime := resp.Header.Get("Content-Type")
+	if mime == "" {
+		mime = "image/png"
+	}
+	return data, mime, nil
+}
+
 // inferenceSourceOf 查节点的推理服务来源（base/token/jobID）：preview 标记优先，
 // base 缺失时从执行 metadata 的 params.service_url/service_token 兜底（节点未上报过
 // preview 标记时 op-replay 仍可用——只要它执行过并留下了 __op_name/__inputs_resolved）。

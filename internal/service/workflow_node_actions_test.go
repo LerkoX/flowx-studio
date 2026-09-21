@@ -154,3 +154,87 @@ func TestPreviewMarker_BaseJobID(t *testing.T) {
 		t.Fatalf("base/jobID not recorded: %+v", src)
 	}
 }
+
+// ---------- ListModelFiles（模型下拉数据源代理） ----------
+
+func TestListModelFiles(t *testing.T) {
+	svc := newPreviewTestService(t)
+
+	var gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models/files" || r.Method != http.MethodGet {
+			w.WriteHeader(404)
+			return
+		}
+		gotAuth = r.Header.Get("Authorization")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"files": []map[string]string{{"name": "RealESRGAN_x4plus", "kind": "upscale"}},
+		})
+	}))
+	defer upstream.Close()
+
+	// service_url 空 → 直接报错（不打上游）
+	if _, err := svc.ListModelFiles("", "tok"); err == nil {
+		t.Fatal("expect error for empty service_url")
+	}
+
+	out, err := svc.ListModelFiles(upstream.URL+"/", "sek")
+	if err != nil {
+		t.Fatalf("ListModelFiles: %v", err)
+	}
+	if gotAuth != "Bearer sek" {
+		t.Fatalf("token not forwarded: %q", gotAuth)
+	}
+	files, _ := out["files"].([]interface{})
+	if len(files) != 1 {
+		t.Fatalf("files not proxied: %v", out)
+	}
+}
+
+// ---------- NodeInputImage（前后对比原图代理） ----------
+
+func TestNodeInputImage(t *testing.T) {
+	svc := newPreviewTestService(t)
+
+	var gotPath, gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("PNGDATA"))
+	}))
+	defer upstream.Close()
+
+	// 无 __inputs_resolved → ErrNoInputImage
+	if _, _, err := svc.NodeInputImage(42, "Up", "image"); !errors.Is(err, ErrNoInputImage) {
+		t.Fatalf("expect ErrNoInputImage, got %v", err)
+	}
+
+	// 执行 metadata 有解析后入参（image 为对象引用）+ preview 标记提供来源
+	_, _ = svc.db.Exec(`UPDATE executions SET metadata_json = ? WHERE id = 42`,
+		`{"metadata":{"Up.__inputs_resolved":"{\"image\":{\"$id\":\"imgIN1\"},\"tile\":0}"}}`)
+	svc.handlePreviewMarker(42, "Up", previewMarkerPayload{
+		URL: upstream.URL + "/images/imgOUT", Token: "sek", Base: upstream.URL,
+	})
+
+	data, mime, err := svc.NodeInputImage(42, "Up", "image")
+	if err != nil {
+		t.Fatalf("NodeInputImage: %v", err)
+	}
+	if string(data) != "PNGDATA" || mime != "image/png" {
+		t.Fatalf("unexpected payload: %q %s", data, mime)
+	}
+	if gotPath != "/images/imgIN1" {
+		t.Fatalf("input image id not resolved: %q", gotPath)
+	}
+	if gotAuth != "Bearer sek" {
+		t.Fatalf("token not forwarded: %q", gotAuth)
+	}
+
+	// 键不是对象引用（标量）→ ErrNoInputImage
+	_, _ = svc.db.Exec(`UPDATE executions SET metadata_json = ? WHERE id = 42`,
+		`{"metadata":{"Up.__inputs_resolved":"{\"tile\":0}"}}`)
+	if _, _, err := svc.NodeInputImage(42, "Up", "image"); !errors.Is(err, ErrNoInputImage) {
+		t.Fatalf("expect ErrNoInputImage for missing key, got %v", err)
+	}
+}
