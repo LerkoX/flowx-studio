@@ -51,6 +51,8 @@ func (h *WorkflowHandler) RegisterRoutes(r *gin.RouterGroup) {
 		executions.POST("/:id/resume", h.ResumeExecution)
 		executions.POST("/:id/cancel", h.CancelExecution)
 		executions.GET("/:id/nodes/:nodeId/preview-frame", h.GetNodePreviewFrame)
+		executions.POST("/:id/nodes/:nodeId/interrupt-inference", h.InterruptInferenceNode)
+		executions.POST("/:id/nodes/:nodeId/op-replay", h.ReplayNodeOp)
 	}
 }
 
@@ -343,6 +345,63 @@ func (h *WorkflowHandler) GetNodePreviewFrame(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-cache")
 	c.Data(http.StatusOK, mime, frame)
+}
+
+// InterruptInferenceNode 中断节点对应的推理 job（画布节点级中断按钮）。
+// POST /executions/:id/nodes/:nodeId/interrupt-inference
+func (h *WorkflowHandler) InterruptInferenceNode(c *gin.Context) {
+	execID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		Error(c, http.StatusBadRequest, "invalid execution id")
+		return
+	}
+	nodeID := c.Param("nodeId")
+	if nodeID == "" {
+		Error(c, http.StatusBadRequest, "node id is required")
+		return
+	}
+	if err := h.service.InterruptInferenceNode(execID, nodeID); err != nil {
+		if errors.Is(err, service.ErrNoInferenceSource) {
+			Error(c, http.StatusConflict, err.Error())
+			return
+		}
+		Error(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	Success(c, gin.H{"interrupted": true})
+}
+
+// ReplayNodeOp 用节点上次执行的解析后入参合并 overrides 重放算子
+// （预处理调参即时预览）；结果图经 node_preview 事件推回画布。
+// POST /executions/:id/nodes/:nodeId/op-replay  body: {"overrides": {...}}
+func (h *WorkflowHandler) ReplayNodeOp(c *gin.Context) {
+	execID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		Error(c, http.StatusBadRequest, "invalid execution id")
+		return
+	}
+	nodeID := c.Param("nodeId")
+	if nodeID == "" {
+		Error(c, http.StatusBadRequest, "node id is required")
+		return
+	}
+	var req struct {
+		Overrides map[string]interface{} `json:"overrides"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Error(c, http.StatusBadRequest, "invalid body: "+err.Error())
+		return
+	}
+	outputs, err := h.service.ReplayNodeOp(execID, nodeID, req.Overrides)
+	if err != nil {
+		if errors.Is(err, service.ErrNoInferenceSource) || errors.Is(err, service.ErrNoReplayMetadata) {
+			Error(c, http.StatusConflict, err.Error())
+			return
+		}
+		Error(c, http.StatusBadGateway, err.Error())
+		return
+	}
+	Success(c, gin.H{"outputs": outputs})
 }
 
 // GetExecutionYAML 获取执行实例的运行时快照 YAML（剥离 runtime 状态段）
