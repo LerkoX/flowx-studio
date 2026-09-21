@@ -55,6 +55,8 @@ export interface NodeWidgetPreview {
   url: string
   /** 可选进度 0~1 */
   progress?: number
+  /** 节点上报的不透明任务标识（语义由节点生态自定；widget 可用于构造第三方服务动作路径，如中断） */
+  jobId?: string
 }
 
 export interface NodeWidgetProps {

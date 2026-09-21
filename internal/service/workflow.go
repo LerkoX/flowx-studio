@@ -919,7 +919,7 @@ type previewSource struct {
 	url       string
 	token     string
 	base      string // 推理服务基地址（marker 显式上报；供 interrupt / op-replay 用）
-	jobID     string // 推理服务 job id（marker 显式上报；供 interrupt 用）
+	jobID     string // 节点上报的不透明任务标识（FLOWX_PREVIEW marker 显式上报；语义由节点生态自定，widget 可用于构造第三方服务动作路径）
 	progress  float64
 	updatedAt time.Time
 	frame     []byte
@@ -979,12 +979,14 @@ func (s *WorkflowService) handlePreviewMarker(execID int64, nodeID string, paylo
 		}
 	}
 	progress := src.progress
+	jobID := src.jobID
 	s.previewMu.Unlock()
 
 	s.eventBus.Publish(event.Event{Type: "node_preview", Data: map[string]interface{}{
 		"execution_id": execID,
 		"node_id":      nodeID,
 		"progress":     progress,
+		"job_id":       jobID, // 节点上报的不透明任务标识（语义由节点生态自定），透传给 widget
 		"timestamp":    now,
 	}})
 }
@@ -1046,24 +1048,46 @@ func (s *WorkflowService) UnsubscribeEvents(ch chan event.Event) {
 	s.eventBus.Unsubscribe(ch)
 }
 
-// ---------- 节点级推理交互（interrupt / op-replay，画布 widget 用） ----------
+// ---------- 通用第三方服务代理（节点生态无关） ----------
+//
+// 设计原则：Studio 不认识任何具体节点生态的 API（不知道什么是 job/op/image/model）。
+// 第三方服务的 API 路径与语义由节点包的 widget 自持；Studio 只提供两种转发通道：
+//   1. ServiceProxy    设计期：base 由调用方显式给定（需 Studio 认证）
+//   2. NodeServiceProxy 运行期：base 只允许取节点执行时记录的连接值（防 SSRF）
 
-// ErrNoInferenceSource 节点无可用的推理服务来源（未执行过 / 未上报过 preview 标记
-// 且执行 metadata 里也没有 service_url）
-var ErrNoInferenceSource = fmt.Errorf("no inference source recorded for node")
+// ErrNoNodeConnection 节点无记录的第三方服务连接（未执行过 / 未上报过 preview 标记
+// 且执行 metadata 里也没有 service_url 参数）
+var ErrNoNodeConnection = fmt.Errorf("no service connection recorded for node")
 
-// ErrNoReplayMetadata 节点无重放元数据（需 inference-op 异步版执行过一次，
-// emit 会带 __op_name/__inputs_resolved）
-var ErrNoReplayMetadata = fmt.Errorf("node has no replay metadata (re-run with current inference-op first)")
+// ErrProxyBadRequest 代理请求参数非法（path 带 scheme/相对路径/方法白名单外/
+// service_url 缺失）——调用方输入问题，映射 HTTP 400 而非 502
+var ErrProxyBadRequest = fmt.Errorf("invalid proxy request")
 
-// ErrNoInputImage 节点输入里没有可代理的图像对象（未执行过 / 该键不是对象引用）
-var ErrNoInputImage = fmt.Errorf("node input has no image object (re-run the node first)")
-
-// getInferenceJSON 向推理服务发 GET 并解析 JSON 响应（带 Bearer token）。
-func getInferenceJSON(base, path, tok string, timeout time.Duration) (map[string]interface{}, error) {
-	req, err := http.NewRequest(http.MethodGet, base+path, nil)
+// proxyRequest 向第三方服务转发一个请求并透传响应（字节流 + Content-Type + 状态码）。
+// path 必须以 / 开头且不得含 scheme（禁止借 path 覆盖 base 逃逸到任意地址）。
+func proxyRequest(base, tok, method, path string, body []byte, timeout time.Duration) ([]byte, string, int, error) {
+	base = strings.TrimRight(base, "/")
+	if base == "" {
+		return nil, "", 0, fmt.Errorf("%w: service_url is required", ErrProxyBadRequest)
+	}
+	if !strings.HasPrefix(path, "/") || strings.Contains(path, "://") {
+		return nil, "", 0, fmt.Errorf("%w: path must be an absolute path on the service (no scheme)", ErrProxyBadRequest)
+	}
+	switch method {
+	case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch:
+	default:
+		return nil, "", 0, fmt.Errorf("%w: unsupported method %q", ErrProxyBadRequest, method)
+	}
+	var rdr io.Reader
+	if len(body) > 0 {
+		rdr = strings.NewReader(string(body))
+	}
+	req, err := http.NewRequest(method, base+path, rdr)
 	if err != nil {
-		return nil, err
+		return nil, "", 0, err
+	}
+	if len(body) > 0 {
+		req.Header.Set("Content-Type", "application/json")
 	}
 	if tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
@@ -1071,97 +1095,43 @@ func getInferenceJSON(base, path, tok string, timeout time.Duration) (map[string
 	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("inference request failed: %w", err)
+		return nil, "", 0, fmt.Errorf("service request failed: %w", err)
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode/100 != 2 {
-		return nil, fmt.Errorf("inference returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw))[:200])
-	}
-	var out map[string]interface{}
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &out); err != nil {
-			return nil, fmt.Errorf("invalid inference response: %w", err)
-		}
-	}
-	return out, nil
-}
-
-// ListModelFiles 拉推理服务的磁盘模型文件清单（GET /models/files），
-// 节点 widget 模型名下拉数据源（POST /inference/models-files 代理）。
-func (s *WorkflowService) ListModelFiles(base, tok string) (map[string]interface{}, error) {
-	base = strings.TrimRight(base, "/")
-	if base == "" {
-		return nil, fmt.Errorf("service_url is required")
-	}
-	return getInferenceJSON(base, "/models/files", tok, 30*time.Second)
-}
-
-// NodeInputImage 取节点某输入键对应的推理侧图像对象字节流（前后对比滑块的"原图"侧）。
-// 对象 id 从执行 metadata 的 __inputs_resolved[key].$id 读（节点需用异步版执行器
-// 跑过一次）；base/token 经 inferenceSourceOf 解析。
-func (s *WorkflowService) NodeInputImage(execID int64, nodeID, key string) ([]byte, string, error) {
-	exec, err := s.GetExecution(execID)
-	if err != nil {
-		return nil, "", err
-	}
-	meta := s.executionMetadataValues(exec)
-	inputsRaw, _ := meta[nodeID+".__inputs_resolved"].(string)
-	if inputsRaw == "" {
-		return nil, "", ErrNoInputImage
-	}
-	var inputs map[string]interface{}
-	if err := json.Unmarshal([]byte(inputsRaw), &inputs); err != nil {
-		return nil, "", fmt.Errorf("corrupt replay metadata: %w", err)
-	}
-	var imageID string
-	switch v := inputs[key].(type) {
-	case map[string]interface{}:
-		imageID, _ = v["$id"].(string)
-	case string:
-		imageID = v // 兼容直接以字符串形式存的 id
-	}
-	if imageID == "" {
-		return nil, "", ErrNoInputImage
-	}
-	base, tok, _ := s.inferenceSourceOf(execID, nodeID)
-	if base == "" {
-		return nil, "", ErrNoInferenceSource
-	}
-	req, err := http.NewRequest(http.MethodGet, base+"/images/"+imageID, nil)
-	if err != nil {
-		return nil, "", err
-	}
-	if tok != "" {
-		req.Header.Set("Authorization", "Bearer "+tok)
-	}
-	client := &http.Client{Timeout: 120 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, "", fmt.Errorf("inference request failed: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode/100 != 2 {
-		return nil, "", fmt.Errorf("inference returned HTTP %d for image %s", resp.StatusCode, imageID)
-	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
 	mime := resp.Header.Get("Content-Type")
-	if mime == "" {
-		mime = "image/png"
-	}
-	return data, mime, nil
+	return data, mime, resp.StatusCode, nil
 }
 
-// inferenceSourceOf 查节点的推理服务来源（base/token/jobID）：preview 标记优先，
-// base 缺失时从执行 metadata 的 params.service_url/service_token 兜底（节点未上报过
-// preview 标记时 op-replay 仍可用——只要它执行过并留下了 __op_name/__inputs_resolved）。
-func (s *WorkflowService) inferenceSourceOf(execID int64, nodeID string) (base, tok, jobID string) {
+// ServiceProxy 设计期通用代理：转发到调用方显式指定的第三方服务
+// （POST /service-proxy）。Studio 认证后的开放转发，信任级别同管理端本身。
+func (s *WorkflowService) ServiceProxy(base, tok, method, path string, body []byte, timeout time.Duration) ([]byte, string, int, error) {
+	if timeout <= 0 || timeout > 300*time.Second {
+		timeout = 120 * time.Second
+	}
+	return proxyRequest(base, tok, method, path, body, timeout)
+}
+
+// NodeServiceProxy 运行期节点级代理：base/token 只允许取该节点执行时记录的连接值
+// （preview 标记上报的 base/token，或执行 metadata 的 params.service_url/service_token
+// 约定），调用方只能自由选择 path/method/body——不可借此访问任意地址（防 SSRF）。
+// 供节点 widget 运行期调用其第三方服务（取资源、发动作等），路径语义由 widget 自持。
+func (s *WorkflowService) NodeServiceProxy(execID int64, nodeID, method, path string, body []byte) ([]byte, string, int, error) {
+	base, tok, _ := s.nodeConnectionOf(execID, nodeID)
+	if base == "" {
+		return nil, "", 0, ErrNoNodeConnection
+	}
+	return proxyRequest(base, tok, method, path, body, 120*time.Second)
+}
+
+// nodeConnectionOf 查节点执行时记录的第三方服务连接（base/token/jobID）：
+// preview 标记上报值优先，base 缺失时从执行 metadata 的
+// params.service_url/service_token 参数约定兜底（节点未上报过 preview 标记时
+// 节点级代理仍可用——只要它执行时带着这两个参数跑过）。
+func (s *WorkflowService) nodeConnectionOf(execID int64, nodeID string) (base, tok, jobID string) {
 	key := fmt.Sprintf("%d/%s", execID, nodeID)
 	s.previewMu.Lock()
 	if src := s.previewSrcs[key]; src != nil {
@@ -1189,142 +1159,6 @@ func (s *WorkflowService) inferenceSourceOf(execID int64, nodeID string) (base, 
 		}
 	}
 	return
-}
-
-// postInferenceJSON 向推理服务发 POST JSON 并解析响应（带 Bearer token）。
-func postInferenceJSON(base, path string, payload interface{}, tok string, timeout time.Duration) (map[string]interface{}, error) {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequest(http.MethodPost, base+path, strings.NewReader(string(body)))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if tok != "" {
-		req.Header.Set("Authorization", "Bearer "+tok)
-	}
-	client := &http.Client{Timeout: timeout}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("inference request failed: %w", err)
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode/100 != 2 {
-		return nil, fmt.Errorf("inference returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw))[:200])
-	}
-	var out map[string]interface{}
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &out); err != nil {
-			return nil, fmt.Errorf("invalid inference response: %w", err)
-		}
-	}
-	return out, nil
-}
-
-// InterruptInferenceNode 中断节点对应的推理 job（画布节点级中断按钮）。
-// jobID 取 preview 标记上报值；旧节点包未上报时从 /preview/{job_id} 形式的 url 推导。
-func (s *WorkflowService) InterruptInferenceNode(execID int64, nodeID string) error {
-	base, tok, jobID := s.inferenceSourceOf(execID, nodeID)
-	if base == "" {
-		return ErrNoInferenceSource
-	}
-	if jobID == "" {
-		key := fmt.Sprintf("%d/%s", execID, nodeID)
-		s.previewMu.Lock()
-		var u string
-		if src := s.previewSrcs[key]; src != nil {
-			u = src.url
-		}
-		s.previewMu.Unlock()
-		if i := strings.Index(u, "/preview/"); i >= 0 {
-			jobID = u[i+len("/preview/"):]
-		}
-	}
-	if jobID == "" {
-		return fmt.Errorf("job id unknown for node (节点未上报 job_id)")
-	}
-	_, err := postInferenceJSON(base, "/interrupt", map[string]interface{}{"job_id": jobID}, tok, 15*time.Second)
-	return err
-}
-
-// ReplayNodeOp 用节点上次执行的解析后入参（execution metadata 的
-// __op_name/__inputs_resolved）合并 overrides 重放该算子（同步 /op，预处理类秒级），
-// 结果 IMAGE 写回 preview 来源并广播 node_preview 事件——画布 widget 图像自动刷新。
-// 供预处理算子（canny 阈值、openpose 开关）调参即时预览用。
-func (s *WorkflowService) ReplayNodeOp(execID int64, nodeID string, overrides map[string]interface{}) (map[string]interface{}, error) {
-	exec, err := s.GetExecution(execID)
-	if err != nil {
-		return nil, err
-	}
-	meta := s.executionMetadataValues(exec)
-	opName, _ := meta[nodeID+".__op_name"].(string)
-	inputsRaw, _ := meta[nodeID+".__inputs_resolved"].(string)
-	if opName == "" || inputsRaw == "" {
-		return nil, ErrNoReplayMetadata
-	}
-	var inputs map[string]interface{}
-	if err := json.Unmarshal([]byte(inputsRaw), &inputs); err != nil {
-		return nil, fmt.Errorf("corrupt replay metadata: %w", err)
-	}
-	for k, v := range overrides {
-		inputs[k] = v
-	}
-	base, tok, _ := s.inferenceSourceOf(execID, nodeID)
-	if base == "" {
-		return nil, ErrNoInferenceSource
-	}
-	resp, err := postInferenceJSON(base, "/op", map[string]interface{}{
-		"name": opName, "inputs": inputs,
-	}, tok, 120*time.Second)
-	if err != nil {
-		return nil, err
-	}
-	outputs, _ := resp["outputs"].(map[string]interface{})
-	flat := map[string]interface{}{}
-	var imageURL string
-	for port, m := range outputs {
-		mm, _ := m.(map[string]interface{})
-		if mm == nil {
-			continue
-		}
-		if v, ok := mm["id"]; ok {
-			flat[port] = v
-		} else {
-			flat[port] = mm["value"]
-		}
-		if mm["type"] == "IMAGE" {
-			if id, ok := mm["id"].(string); ok && id != "" {
-				imageURL = base + "/images/" + id
-			}
-		}
-	}
-	if imageURL != "" {
-		key := fmt.Sprintf("%d/%s", execID, nodeID)
-		now := time.Now()
-		s.previewMu.Lock()
-		src := s.previewSrcs[key]
-		if src == nil {
-			src = &previewSource{}
-			s.previewSrcs[key] = src
-		}
-		src.url, src.base, src.token = imageURL, base, tok
-		src.progress, src.updatedAt = 1.0, now
-		src.frame, src.frameMIME = nil, "" // 清帧缓存，下次拉取命中新图
-		s.previewMu.Unlock()
-		s.eventBus.Publish(event.Event{Type: "node_preview", Data: map[string]interface{}{
-			"execution_id": execID,
-			"node_id":      nodeID,
-			"progress":     1.0,
-			"timestamp":    now,
-		}})
-	}
-	return flat, nil
 }
 
 // GetExecutionNodes 获取执行节点状态

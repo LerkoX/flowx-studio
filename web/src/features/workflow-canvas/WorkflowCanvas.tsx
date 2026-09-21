@@ -676,6 +676,7 @@ function WorkflowCanvasInner({
         execution_id?: number
         node_id?: string
         progress?: number
+        job_id?: string
       }
       if (!payload.execution_id || !payload.node_id) return
       const execStore = useExecutionStore.getState()
@@ -686,6 +687,7 @@ function WorkflowCanvasInner({
           // 时间戳参数驱使浏览器重新拉取最新帧（接口本身 no-cache）
           url: `/api/v1/executions/${payload.execution_id}/nodes/${encodeURIComponent(payload.node_id)}/preview-frame?t=${Date.now()}`,
           progress: payload.progress,
+          jobId: payload.job_id || undefined,
         },
       })
       return

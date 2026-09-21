@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -51,12 +52,13 @@ func (h *WorkflowHandler) RegisterRoutes(r *gin.RouterGroup) {
 		executions.POST("/:id/resume", h.ResumeExecution)
 		executions.POST("/:id/cancel", h.CancelExecution)
 		executions.GET("/:id/nodes/:nodeId/preview-frame", h.GetNodePreviewFrame)
-		executions.GET("/:id/nodes/:nodeId/input-image", h.GetNodeInputImage)
-		executions.POST("/:id/nodes/:nodeId/interrupt-inference", h.InterruptInferenceNode)
-		executions.POST("/:id/nodes/:nodeId/op-replay", h.ReplayNodeOp)
+		// 节点级通用服务代理：widget 运行期调用其第三方服务（取资源/发动作），
+		// base 由服务端按节点执行记录解析（防 SSRF），path/method/body 由 widget 自持
+		executions.Any("/:id/nodes/:nodeId/service-proxy", h.NodeServiceProxy)
 	}
 
-	r.POST("/inference/models-files", h.ListInferenceModelFiles)
+	// 设计期通用服务代理：base 由调用方显式给定（需 Studio 认证）
+	r.POST("/service-proxy", h.ServiceProxy)
 }
 
 // List 获取工作流列表
@@ -326,7 +328,7 @@ func (h *WorkflowHandler) CancelExecution(c *gin.Context) {
 }
 
 // GetNodePreviewFrame 中转返回节点实时预览帧（HTTP 二进制，不经 base64）。
-// 帧来源由节点 stdout 的 FLOWX_PREVIEW 标记上报（推理服务 HTTP 端点），
+// 帧来源由节点 stdout 的 FLOWX_PREVIEW 标记上报（第三方服务 HTTP 端点），
 // Studio 据此中转拉帧；前端 <img> 直读本接口（flowx_token cookie 认证）。
 // GET /executions/:id/nodes/:nodeId/preview-frame
 func (h *WorkflowHandler) GetNodePreviewFrame(c *gin.Context) {
@@ -350,103 +352,81 @@ func (h *WorkflowHandler) GetNodePreviewFrame(c *gin.Context) {
 	c.Data(http.StatusOK, mime, frame)
 }
 
-// InterruptInferenceNode 中断节点对应的推理 job（画布节点级中断按钮）。
-// POST /executions/:id/nodes/:nodeId/interrupt-inference
-func (h *WorkflowHandler) InterruptInferenceNode(c *gin.Context) {
+// NodeServiceProxy 节点级通用第三方服务代理（运行期）。
+// base/token 由服务端按该节点执行时记录的连接值解析（preview 标记上报或
+// params.service_url/service_token 约定），请求方只能指定 path/method/body——
+// 不可借此访问任意地址（防 SSRF）。第三方 API 路径语义由节点 widget 自持。
+// ANY /executions/:id/nodes/:nodeId/service-proxy?path=/xxx&method=GET
+func (h *WorkflowHandler) NodeServiceProxy(c *gin.Context) {
 	execID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		Error(c, http.StatusBadRequest, "invalid execution id")
 		return
 	}
 	nodeID := c.Param("nodeId")
-	if nodeID == "" {
-		Error(c, http.StatusBadRequest, "node id is required")
-		return
+	path := c.Query("path")
+	method := strings.ToUpper(c.DefaultQuery("method", c.Request.Method))
+	var body []byte
+	if c.Request.Body != nil && (method == http.MethodPost || method == http.MethodPut || method == http.MethodPatch) {
+		body, _ = io.ReadAll(io.LimitReader(c.Request.Body, 4<<20))
 	}
-	if err := h.service.InterruptInferenceNode(execID, nodeID); err != nil {
-		if errors.Is(err, service.ErrNoInferenceSource) {
+	data, mime, status, err := h.service.NodeServiceProxy(execID, nodeID, method, path, body)
+	if err != nil {
+		if errors.Is(err, service.ErrNoNodeConnection) {
 			Error(c, http.StatusConflict, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrProxyBadRequest) {
+			Error(c, http.StatusBadRequest, err.Error())
 			return
 		}
 		Error(c, http.StatusBadGateway, err.Error())
 		return
 	}
-	Success(c, gin.H{"interrupted": true})
+	if mime != "" {
+		c.Header("Content-Type", mime)
+	}
+	c.Header("Cache-Control", "no-cache")
+	c.Data(status, mime, data)
 }
 
-// ReplayNodeOp 用节点上次执行的解析后入参合并 overrides 重放算子
-// （预处理调参即时预览）；结果图经 node_preview 事件推回画布。
-// POST /executions/:id/nodes/:nodeId/op-replay  body: {"overrides": {...}}
-func (h *WorkflowHandler) ReplayNodeOp(c *gin.Context) {
-	execID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		Error(c, http.StatusBadRequest, "invalid execution id")
-		return
-	}
-	nodeID := c.Param("nodeId")
-	if nodeID == "" {
-		Error(c, http.StatusBadRequest, "node id is required")
-		return
-	}
+// ServiceProxy 设计期通用第三方服务代理：base 由调用方显式给定。
+// 供节点 widget 设计期拉取第三方服务的选项/元数据（如清单类下拉数据源）。
+// Studio 认证后的开放转发，信任级别同管理端本身；Studio 不假设对端 API 形态。
+// POST /service-proxy
+// body: {"service_url":"...","service_token":"...","method":"GET","path":"/xxx","body":{...},"timeout_sec":30}
+func (h *WorkflowHandler) ServiceProxy(c *gin.Context) {
 	var req struct {
-		Overrides map[string]interface{} `json:"overrides"`
+		ServiceURL   string          `json:"service_url"`
+		ServiceToken string          `json:"service_token"`
+		Method       string          `json:"method"`
+		Path         string          `json:"path"`
+		Body         json.RawMessage `json:"body"`
+		TimeoutSec   int             `json:"timeout_sec"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		Error(c, http.StatusBadRequest, "invalid body: "+err.Error())
+	if err := c.ShouldBindJSON(&req); err != nil || req.ServiceURL == "" || req.Path == "" {
+		Error(c, http.StatusBadRequest, "service_url and path are required")
 		return
 	}
-	outputs, err := h.service.ReplayNodeOp(execID, nodeID, req.Overrides)
+	method := strings.ToUpper(req.Method)
+	if method == "" {
+		method = http.MethodGet
+	}
+	timeout := time.Duration(req.TimeoutSec) * time.Second
+	data, mime, status, err := h.service.ServiceProxy(req.ServiceURL, req.ServiceToken, method, req.Path, req.Body, timeout)
 	if err != nil {
-		if errors.Is(err, service.ErrNoInferenceSource) || errors.Is(err, service.ErrNoReplayMetadata) {
-			Error(c, http.StatusConflict, err.Error())
+		if errors.Is(err, service.ErrProxyBadRequest) {
+			Error(c, http.StatusBadRequest, err.Error())
 			return
 		}
 		Error(c, http.StatusBadGateway, err.Error())
 		return
 	}
-	Success(c, gin.H{"outputs": outputs})
-}
-
-// ListInferenceModelFiles 代理推理服务的磁盘模型文件清单（节点 widget 模型下拉）。
-// POST /inference/models-files  body: {"service_url": "...", "service_token": "..."}
-func (h *WorkflowHandler) ListInferenceModelFiles(c *gin.Context) {
-	var req struct {
-		ServiceURL   string `json:"service_url"`
-		ServiceToken string `json:"service_token"`
+	if mime != "" {
+		c.Header("Content-Type", mime)
 	}
-	if err := c.ShouldBindJSON(&req); err != nil || req.ServiceURL == "" {
-		Error(c, http.StatusBadRequest, "service_url is required")
-		return
-	}
-	out, err := h.service.ListModelFiles(req.ServiceURL, req.ServiceToken)
-	if err != nil {
-		Error(c, http.StatusBadGateway, err.Error())
-		return
-	}
-	Success(c, out)
-}
-
-// GetNodeInputImage 代理节点某输入键的推理侧图像对象（前后对比滑块的"原图"侧）。
-// GET /executions/:id/nodes/:nodeId/input-image?key=image
-func (h *WorkflowHandler) GetNodeInputImage(c *gin.Context) {
-	execID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		Error(c, http.StatusBadRequest, "invalid execution id")
-		return
-	}
-	nodeID := c.Param("nodeId")
-	key := c.DefaultQuery("key", "image")
-	data, mime, err := h.service.NodeInputImage(execID, nodeID, key)
-	if err != nil {
-		if errors.Is(err, service.ErrNoInferenceSource) || errors.Is(err, service.ErrNoInputImage) {
-			Error(c, http.StatusConflict, err.Error())
-			return
-		}
-		Error(c, http.StatusBadGateway, err.Error())
-		return
-	}
-	c.Header("Cache-Control", "private, max-age=120")
-	c.Data(http.StatusOK, mime, data)
+	c.Header("Cache-Control", "no-cache")
+	c.Data(status, mime, data)
 }
 
 // GetExecutionYAML 获取执行实例的运行时快照 YAML（剥离 runtime 状态段）
