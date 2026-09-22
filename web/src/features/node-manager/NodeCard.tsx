@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { GitBranch, Container, Code, Trash2, Eye, Play } from 'lucide-react'
+import { GitBranch, Container, Code, Trash2, Eye, Play, AlertTriangle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import Select from '@/components/Select'
 import type { NodeDefinition } from '@/types/node'
@@ -44,6 +44,9 @@ export default function NodeCard({ versions, onView, onTest, onDelete }: NodeCar
   const node = sortedVersions.find((n) => n.id === selectedId) ?? sortedVersions[0]
   const isImageNode = node.nodeType === 'image'
   const hasMultipleVersions = sortedVersions.length > 1
+  // 执行器声明与一致性（后端 executorCheck）：列表接口即回传，无需额外请求
+  const check = node.executorCheck
+  const issues = check?.issues ?? []
 
   return (
     <motion.div
@@ -105,6 +108,45 @@ export default function NodeCard({ versions, onView, onTest, onDelete }: NodeCar
           </span>
         )}
       </div>
+
+      {/* 执行器声明：支持类型 + 偏好；声明不一致（如选 docker 却未打包进镜像）直接提示 */}
+      {check && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {check.types.map((execType) => (
+            <span
+              key={execType}
+              className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border ${
+                execType === 'docker'
+                  ? 'bg-sky-500/10 text-sky-300 border-sky-500/20'
+                  : 'bg-white/5 text-white/50 border-white/10'
+              }`}
+              title={
+                execType === 'docker' && check.dockerOk
+                  ? t('canvas.executorDeclDockerOk')
+                  : undefined
+              }
+            >
+              {execType === 'docker' ? <Container size={10} /> : null}
+              {execType === 'docker'
+                ? 'docker'
+                : execType === 'local'
+                  ? t('canvas.executorDeclLocalOnly')
+                  : execType}
+              {check.preferred === execType ? ` · ${t('canvas.executorDeclPreferred')}` : ''}
+            </span>
+          ))}
+          {issues.length > 0 && (
+            <span
+              className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full
+                         bg-amber-400/10 text-amber-300 border border-amber-400/30"
+              title={issues.join('\n')}
+            >
+              <AlertTriangle size={10} />
+              {t('canvas.executorDeclIssues')}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* 镜像地址（仅镜像节点） */}
       {isImageNode && node.image && (

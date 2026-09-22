@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"sort"
 	"strings"
 	"testing"
 
@@ -206,16 +207,17 @@ func TestExpandWorkflow_ImageNodeInheritsDockerDefault(t *testing.T) {
 		Entry:    "main.py",
 		Image:    "python:3.11-slim",
 	})
-	// 默认执行器是远程 docker 且未配置镜像 → 继承 host 合成节点专属条目
+	// 默认执行器是远程 docker 且未配置镜像 → 继承 host 合成"实例+镜像"条目
 	//（executor 按名单例，镜像必须落在条目 config 上，不能改共享实例）
 	def := &model.Executor{Name: "docker-remote", Type: "docker", IsDefault: true,
 		Config: map[string]interface{}{"host": "tcp://192.168.1.10:2375"}}
 	cfg := expandWorkflow(t, node, staticResolver(nil, def))
 
-	if cfg.Nodes["A"].Executor != "compress-executor" {
-		t.Errorf("node executor = %q, want compress-executor", cfg.Nodes["A"].Executor)
+	wantName := "docker-remote+python-3.11-slim"
+	if cfg.Nodes["A"].Executor != wantName {
+		t.Errorf("node executor = %q, want %q", cfg.Nodes["A"].Executor, wantName)
 	}
-	ec := cfg.Executors["compress-executor"]
+	ec := cfg.Executors[wantName]
 	if ec.Config["host"] != "tcp://192.168.1.10:2375" {
 		t.Errorf("docker default host not inherited: %+v", ec.Config)
 	}
@@ -255,15 +257,16 @@ func TestExpandWorkflow_RefInstanceImageOverride(t *testing.T) {
 		Image:    "pytorch:2.1-cuda",
 		Executor: model.NodeExecutorConfig{Ref: "docker-gpu"},
 	})
-	// ref 实例未配置镜像、节点自带镜像 → 复制实例配置（host）合成节点专属条目
+	// ref 实例未配置镜像、节点自带镜像 → 复制实例配置（host）合成"实例+镜像"条目
 	inst := &model.Executor{Name: "docker-gpu", Type: "docker",
 		Config: map[string]interface{}{"host": "tcp://10.0.0.8:2375"}}
 	cfg := expandWorkflow(t, node, staticResolver(map[string]*model.Executor{"docker-gpu": inst}, nil))
 
-	if cfg.Nodes["A"].Executor != "train-executor" {
-		t.Errorf("node executor = %q, want train-executor", cfg.Nodes["A"].Executor)
+	wantName := "docker-gpu+pytorch-2.1-cuda"
+	if cfg.Nodes["A"].Executor != wantName {
+		t.Errorf("node executor = %q, want %q", cfg.Nodes["A"].Executor, wantName)
 	}
-	ec := cfg.Executors["train-executor"]
+	ec := cfg.Executors[wantName]
 	if ec.Config["host"] != "tcp://10.0.0.8:2375" {
 		t.Errorf("ref instance host not inherited: %+v", ec.Config)
 	}
@@ -562,5 +565,61 @@ Nodes:
 	}
 	if _, leaked := ec.Config["pty"]; leaked {
 		t.Errorf("registry instance config leaked into existing entry: %+v", ec.Config)
+	}
+}
+
+// 合成条目名必须与"哪个节点先被处理"无关：同一流水线反复展开结果一致。
+// （旧实现用 node.Name+"-executor"，名字取决于 Go map 遍历顺序，同一图两次展开
+//
+//	会得到 clip-text-encode-executor / empty-latent-executor 这类不同条目名。）
+func TestExpandWorkflow_SynthesizedExecutorNameIsStable(t *testing.T) {
+	inst := &model.Executor{Name: "docker-remote", Type: "docker",
+		Config: map[string]interface{}{"host": "tcp://10.0.0.8:2375"}}
+	nodes := map[string]*model.Node{}
+	refs := []string{}
+	for _, name := range []string{"alpha", "beta", "gamma", "delta", "epsilon"} {
+		n := newTestNode(&model.NodePackage{
+			Name: name, Language: "python", Entry: "main.py",
+			Image:    "lerkobba/flowx-pixelforge-nodes:v1.6.0",
+			Executor: model.NodeExecutorConfig{Ref: "docker-remote"},
+		})
+		nodes[name] = n
+		refs = append(refs, name)
+	}
+	wfYAML := "Name: stable\nGraph: |\n  stateDiagram-v2\n    [*] --> alpha\nNodes:\n"
+	for _, name := range refs {
+		wfYAML += "  " + name + ":\n    config:\n      nodeRef: " + name + "\n"
+	}
+	resolve := staticResolver(map[string]*model.Executor{"docker-remote": inst}, nil)
+
+	var first string
+	var firstKeys []string
+	for i := 0; i < 8; i++ {
+		out, err := ExpandWorkflowConfigWithTypeResolver(wfYAML,
+			func(name string) (*model.Node, error) { return nodes[name], nil }, resolve, nil)
+		if err != nil {
+			t.Fatalf("expand #%d: %v", i, err)
+		}
+		var cfg core.WorkflowConfig
+		if err := yaml.Unmarshal([]byte(out), &cfg); err != nil {
+			t.Fatalf("unmarshal #%d: %v", i, err)
+		}
+		keys := make([]string, 0, len(cfg.Executors))
+		for k := range cfg.Executors {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, name := range refs {
+			if cfg.Nodes[name].Executor != "docker-remote+flowx-pixelforge-nodes-v1.6.0" {
+				t.Fatalf("node %s executor = %q（合成名应稳定）", name, cfg.Nodes[name].Executor)
+			}
+		}
+		if i == 0 {
+			first, firstKeys = cfg.Nodes["alpha"].Executor, keys
+			continue
+		}
+		if cfg.Nodes["alpha"].Executor != first || strings.Join(keys, ",") != strings.Join(firstKeys, ",") {
+			t.Fatalf("第 %d 次展开结果不同：%q/%v vs %q/%v", i, cfg.Nodes["alpha"].Executor, keys, first, firstKeys)
+		}
 	}
 }

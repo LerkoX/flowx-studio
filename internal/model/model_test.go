@@ -1,6 +1,9 @@
 package model
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDeriveExecutor(t *testing.T) {
 	tests := []struct {
@@ -81,5 +84,116 @@ func TestDeriveExecutorPortableDeclaration(t *testing.T) {
 	}
 	if n.Executor.PreferredType != "docker" || len(n.Executor.SupportedTypes) != 2 {
 		t.Errorf("Executor = %+v, want supportedTypes/local,docker preferred docker", n.Executor)
+	}
+}
+
+// 执行器声明一致性护栏：与仓库侧 check-bundle.py 同源（那边以 Dockerfile 为准，
+// 这里只能做声明自洽检查）。三类真实事故都要能被指出来。
+func TestNodeCheckExecutorContract(t *testing.T) {
+	cases := []struct {
+		name       string
+		pkg        *NodePackage
+		wantNil    bool
+		wantDockOK bool
+		wantIssue  string // 期望 issues 里包含的子串（空=无 issue）
+	}{
+		{
+			name: "声明 docker 且 image+bundled 齐备 → dockerOk",
+			pkg: &NodePackage{
+				Image: "repo/nodes:v1.6.0",
+				Executor: NodeExecutorConfig{
+					SupportedTypes: []string{"local", "docker"},
+					PreferredType:  "docker",
+					Bundled:        true,
+				},
+			},
+			wantDockOK: true,
+		},
+		{
+			name: "声明 docker 但无 image 无 bundled（exec 363 事故）",
+			pkg: &NodePackage{
+				Executor: NodeExecutorConfig{
+					SupportedTypes: []string{"local", "docker"},
+					PreferredType:  "local",
+				},
+			},
+			wantIssue: "既未声明 image 也未声明 executor.bundled",
+		},
+		{
+			name: "声明 docker 且 bundled 但没有 image",
+			pkg: &NodePackage{
+				Executor: NodeExecutorConfig{
+					SupportedTypes: []string{"docker"},
+					Bundled:        true,
+				},
+			},
+			wantIssue: "未声明 image",
+		},
+		{
+			name: "声明 docker 有 image 但没声明 bundled（镜像里可能没有该节点）",
+			pkg: &NodePackage{
+				Image:    "repo/nodes:v1.6.0",
+				Executor: NodeExecutorConfig{SupportedTypes: []string{"docker"}},
+			},
+			wantIssue: "未声明 executor.bundled",
+		},
+		{
+			name: "bundled 但 supportedTypes 不含 docker → 自相矛盾",
+			pkg: &NodePackage{
+				Image:    "repo/nodes:v1.6.0",
+				Executor: NodeExecutorConfig{SupportedTypes: []string{"local"}, Bundled: true},
+			},
+			wantIssue: "supportedTypes 不含 docker",
+		},
+		{
+			name: "preferredType 不在 supportedTypes 内",
+			pkg: &NodePackage{
+				Image: "repo/nodes:v1.6.0",
+				Executor: NodeExecutorConfig{
+					SupportedTypes: []string{"docker"}, PreferredType: "local", Bundled: true,
+				},
+			},
+			wantDockOK: true,
+			wantIssue:  "偏好不会生效",
+		},
+		{
+			// 只声明 local：仍然回传检查结果（UI 可显示"仅本机"），但没有 issues
+			name: "纯本地节点（无 image 无 bundled）→ 无 issues",
+			pkg:  &NodePackage{Executor: NodeExecutorConfig{SupportedTypes: []string{"local"}, PreferredType: "local"}},
+		},
+		{
+			name:    "完全未声明执行器 → 不产生检查结果",
+			pkg:     &NodePackage{},
+			wantNil: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			n := &Node{Name: tc.pkg.Name, PackageConfig: tc.pkg}
+			n.DeriveExecutor()
+			if tc.wantNil {
+				if n.ExecutorCheck != nil {
+					t.Fatalf("ExecutorCheck = %+v, want nil", n.ExecutorCheck)
+				}
+				return
+			}
+			if n.ExecutorCheck == nil {
+				t.Fatal("ExecutorCheck = nil, want non-nil")
+			}
+			if n.ExecutorCheck.DockerOK != tc.wantDockOK {
+				t.Errorf("DockerOK = %v, want %v", n.ExecutorCheck.DockerOK, tc.wantDockOK)
+			}
+			if tc.wantIssue == "" {
+				if len(n.ExecutorCheck.Issues) != 0 {
+					t.Errorf("Issues = %v, want empty", n.ExecutorCheck.Issues)
+				}
+				return
+			}
+			joined := strings.Join(n.ExecutorCheck.Issues, "; ")
+			if !strings.Contains(joined, tc.wantIssue) {
+				t.Errorf("Issues = %q, want contains %q", joined, tc.wantIssue)
+			}
+		})
 	}
 }

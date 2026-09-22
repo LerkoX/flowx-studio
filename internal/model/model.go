@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // ParamSource 参数数据来源建议
 // 指向推荐的上游节点包（nodeRef 为节点包名，非流水线中的节点实例 ID）及其输出字段，
@@ -55,13 +58,13 @@ type NodeExtractConfig struct {
 // type+config 为内联匿名实例；两者都缺省时按 supportedTypes/preferredType、image、
 // 全局默认执行器的顺序解析。
 type NodeExecutorConfig struct {
-	SupportedTypes []string               `json:"supportedTypes,omitempty" db:"-"`
-	PreferredType  string                 `json:"preferredType,omitempty" db:"-"`
+	SupportedTypes []string `json:"supportedTypes,omitempty" db:"-"`
+	PreferredType  string   `json:"preferredType,omitempty" db:"-"`
 	// Bundled 声明节点代码/依赖已打进 image（镜像节点）：docker/k8s 执行时
 	// 直接从镜像内 /opt/flowx-nodes/<name>/ 运行，不再从 Studio 拉取资产
-	Bundled bool                     `json:"bundled,omitempty" db:"-"`
-	Ref     string                  `json:"ref,omitempty" db:"ref"`
-	Type    string                  `json:"type,omitempty" db:"type"`
+	Bundled bool                   `json:"bundled,omitempty" db:"-"`
+	Ref     string                 `json:"ref,omitempty" db:"ref"`
+	Type    string                 `json:"type,omitempty" db:"type"`
 	Config  map[string]interface{} `json:"config,omitempty" db:"config"`
 }
 
@@ -114,6 +117,7 @@ type NodeFileAsset struct {
 // 包未声明 executor（支持类型/偏好/ref/type/config 全空）时保持 nil，交由展开规则兜底。
 func (n *Node) DeriveExecutor() {
 	n.Executor = nil
+	n.ExecutorCheck = nil
 	if n.PackageConfig == nil {
 		return
 	}
@@ -122,6 +126,89 @@ func (n *Node) DeriveExecutor() {
 		return
 	}
 	n.Executor = &e
+	n.ExecutorCheck = n.checkExecutorContract()
+}
+
+// NodeExecutorCheck 执行器声明一致性（只读，API 透出供节点管理列表提示"能不能真跑 docker"）。
+//
+// 仓库侧 nodes/check-bundle.py 以 Dockerfile COPY 清单为准做发布前硬门槛；
+// 这里只能基于节点包自身声明做**自洽**检查（不能撒谎说镜像里有）：
+//   - 声明 docker 却没声明 image / 没声明 bundled ⇒ docker 执行必挂
+//     （No such file 或跑到无名镜像上，exec 363 事故）
+//   - preferredType 不在 supportedTypes 内 ⇒ 偏好永远不生效
+//
+// 声明自洽 ≠ 真在镜像里，两者结合才可信（见计划 §23.3/§24.6）。
+type NodeExecutorCheck struct {
+	Types     []string `json:"types"`               // 声明允许的执行器类型
+	Preferred string   `json:"preferred,omitempty"` // 偏好类型
+	Image     string   `json:"image,omitempty"`     // 节点包声明的镜像
+	Bundled   bool     `json:"bundled"`             // 是否声明代码已打进镜像
+	DockerOK  bool     `json:"dockerOk"`            // docker 声明是否齐备（可供画布/编排快速判断）
+	Issues    []string `json:"issues,omitempty"`    // 不一致项（人类可读）
+}
+
+// checkExecutorContract 计算执行器声明一致性；未声明执行器时返回 nil。
+func (n *Node) checkExecutorContract() *NodeExecutorCheck {
+	pkg := n.PackageConfig
+	if pkg == nil {
+		return nil
+	}
+	types := append([]string(nil), pkg.Executor.SupportedTypes...)
+	if len(types) == 0 && pkg.Executor.Type != "" {
+		// 旧版 executor.type：等价于只允许该类型
+		types = []string{pkg.Executor.Type}
+	}
+	image := pkg.Image
+	if image == "" {
+		image = n.Image
+	}
+	if len(types) == 0 && image == "" && !pkg.Executor.Bundled {
+		return nil
+	}
+
+	check := &NodeExecutorCheck{
+		Types:     types,
+		Preferred: pkg.Executor.PreferredType,
+		Image:     image,
+		Bundled:   pkg.Executor.Bundled,
+	}
+	hasDocker := false
+	for _, t := range types {
+		if t == "docker" || t == "k8s" {
+			hasDocker = true
+		}
+	}
+	if hasDocker {
+		switch {
+		case image == "" && !pkg.Executor.Bundled:
+			check.Issues = append(check.Issues,
+				"声明支持 docker 但既未声明 image 也未声明 executor.bundled：docker 执行会挂（镜像内没有该节点）")
+		case image == "":
+			check.Issues = append(check.Issues,
+				"声明支持 docker 但未声明 image：会跑到无名镜像上")
+		case !pkg.Executor.Bundled:
+			check.Issues = append(check.Issues,
+				"声明支持 docker 但未声明 executor.bundled：镜像内可能没有该节点（请确认已进镜像 COPY 清单）")
+		default:
+			check.DockerOK = true
+		}
+	} else if pkg.Executor.Bundled {
+		check.Issues = append(check.Issues,
+			"声明 executor.bundled 但 supportedTypes 不含 docker：声明互相矛盾")
+	}
+	if pkg.Executor.PreferredType != "" {
+		found := false
+		for _, t := range types {
+			if t == pkg.Executor.PreferredType {
+				found = true
+			}
+		}
+		if !found {
+			check.Issues = append(check.Issues,
+				"preferredType "+pkg.Executor.PreferredType+" 不在 supportedTypes "+strings.Join(types, ",")+" 内：偏好不会生效")
+		}
+	}
+	return check
 }
 
 // Node 节点定义
@@ -162,6 +249,8 @@ type Node struct {
 	// 节点包声明的执行器能力/偏好（来自 PackageConfig.Executor，API 只读透出）。
 	// 编排时据此判断节点支持的执行器类型与默认偏好；workflow 可通过 config.executor 覆盖。
 	Executor *NodeExecutorConfig `json:"executor,omitempty" db:"-"`
+	// ExecutorCheck 执行器声明的自洽性检查结果（只读，节点管理列表提示用）。
+	ExecutorCheck *NodeExecutorCheck `json:"executorCheck,omitempty" db:"-"`
 	// Package 是 PackageConfig 的 API 只读副本（节点详情展示 flowx.json 用）。
 	// 用独立字段而非直接序列化 PackageConfig，是为了保持包配置无法通过
 	// Create/Update API 写入（防止绕过导入校验）。

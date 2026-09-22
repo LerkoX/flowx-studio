@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"path"
 	"reflect"
@@ -312,7 +314,56 @@ func expandWorkflowConfig(configYAML string, lookup func(name string) (*model.No
 	return string(out), nil
 }
 
-// resolveNodeExecutor 为 nodeRef 节点解析执行器，返回 (执行器名, 执行器类型)。
+// synthesizedExecutorName 为「注册实例 + 节点镜像」合成**确定性**的条目名：
+// `<实例名>+<镜像最后一段>`（如 docker-remote-211+nodes-v1.6.0）。
+//
+// 之前用 `node.Name + "-executor"`：名字取决于 Go map 遍历顺序 —— 同一条流水线
+// 两次展开会得到不同条目名（实测同一工作流先得 clip-text-encode-executor、
+// 后得 empty-latent-executor），画布展示、快照对比、续跑校验都会无意义抖动。
+// 该条目语义上是「某个 docker 实例跑某个镜像」，与哪个节点先被处理无关。
+func synthesizedExecutorName(instName string, cfg map[string]interface{}) string {
+	tag := ""
+	if img := configImage(cfg); img != "" {
+		last := img
+		if i := strings.LastIndex(img, "/"); i >= 0 {
+			last = img[i+1:]
+		}
+		tag = sanitizeNamePart(last)
+	}
+	base := sanitizeNamePart(instName)
+	if base == "" {
+		base = "executor"
+	}
+	if tag == "" {
+		return base + "+image"
+	}
+	return base + "+" + tag
+}
+
+// sanitizeNamePart 保留字母/数字/._-，其余替换为空字符串外的 '-'，并限长
+func sanitizeNamePart(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+		if b.Len() >= 48 {
+			break
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+// shortConfigHash 配置的短确定性哈希（归一化后的 key 顺序稳定）
+func shortConfigHash(cfg map[string]interface{}) string {
+	sum := sha1.Sum([]byte(fmt.Sprintf("%v", normalizeConfigMap(cfg))))
+	return hex.EncodeToString(sum[:])[:6]
+}
+
+// resolveNodeExecutor 为 nodeRef 节点解析执行器，返回解析结果（含名称/类型/来源）。
 // 命名实例会就地写入 executors map（多节点共享同一条目）；匿名实例合成 <node名>-executor。
 //
 // 镜像注入：节点声明的 image 会写入其 docker/k8s 执行器条目的 Config["image"]
@@ -583,7 +634,12 @@ func addRegisteredExecutor(node *model.Node, image string, inst *model.Executor,
 		if name := findCompatibleExecutor(executors, inst.Type, cfg); name != "" {
 			return name
 		}
-		name := node.Name + "-executor"
+		name := synthesizedExecutorName(inst.Name, cfg)
+		// 同名但配置不同（镜像相同、其余 config 不同）：补确定性后缀，避免互相覆盖
+		if existing, ok := executors[name]; ok &&
+			!reflect.DeepEqual(normalizeConfigMap(existing.Config), normalizeConfigMap(cfg)) {
+			name = name + "-" + shortConfigHash(cfg)
+		}
 		executors[name] = core.ExecutorConfig{Type: inst.Type, Description: inst.Description, Config: cfg}
 		return name
 	}

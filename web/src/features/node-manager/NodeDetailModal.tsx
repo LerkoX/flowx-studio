@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, GitBranch, Container, Code, Tag, FileCode, FileJson, Box, Clock, User, Copy, Check } from 'lucide-react'
+import { X, GitBranch, Container, Code, Tag, FileCode, FileJson, Box, Clock, User, Copy, Check, AlertTriangle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { NodeDefinition } from '@/types/node'
 import GlassPanel from '@/components/GlassPanel'
@@ -138,6 +138,62 @@ export default function NodeDetailModal({ node, isOpen, loading, onClose }: Node
                         )}
                       </div>
                     </GlassPanel>
+
+                    {/* 执行器声明与一致性：声明可 docker ≠ 真在镜像里，不一致必须显式提示 */}
+                    {node.executorCheck && (
+                      <GlassPanel className="p-4">
+                        <h3 className="text-white/70 font-medium text-sm mb-3">
+                          {t('canvas.executorDecl')}
+                        </h3>
+                        <div className="flex flex-col gap-2 text-xs">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-white/40">{t('canvas.executorDeclTypes')}</span>
+                            {(node.executorCheck.types || []).map((execType) => (
+                              <span
+                                key={execType}
+                                className={`px-2 py-0.5 rounded-full border font-mono ${
+                                  execType === 'docker'
+                                    ? 'bg-sky-500/10 text-sky-300 border-sky-500/20'
+                                    : 'bg-white/5 text-white/50 border-white/10'
+                                }`}
+                              >
+                                {execType}
+                              </span>
+                            ))}
+                            {node.executorCheck.preferred && (
+                              <span className="text-white/40">
+                                · {t('canvas.executorDeclPreferred')}: {node.executorCheck.preferred}
+                              </span>
+                            )}
+                          </div>
+                          {node.executorCheck.image && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-white/40">{t('canvas.executorDeclImage')}</span>
+                              <span className="font-mono text-blue-300/80 truncate">{node.executorCheck.image}</span>
+                            </div>
+                          )}
+                          <div className="flex items-center gap-2">
+                            <span className="text-white/40">{t('canvas.executorDeclBundled')}</span>
+                            <span className={node.executorCheck.bundled ? 'text-emerald-400' : 'text-white/40'}>
+                              {node.executorCheck.bundled ? '✓' : '—'}
+                            </span>
+                            {node.executorCheck.dockerOk && (
+                              <span className="text-emerald-400">· {t('canvas.executorDeclDockerOk')}</span>
+                            )}
+                          </div>
+                          {(node.executorCheck.issues || []).length > 0 && (
+                            <ul className="mt-1 flex flex-col gap-1">
+                              {(node.executorCheck.issues || []).map((issue) => (
+                                <li key={issue} className="flex items-start gap-1.5 text-amber-300">
+                                  <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" />
+                                  <span>{issue}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      </GlassPanel>
+                    )}
 
                     {/* 镜像/代码信息 */}
                     {isImageNode ? (
