@@ -721,15 +721,20 @@ func normalizeConfigMap(m map[string]interface{}) map[string]interface{} {
 	return m
 }
 
+// buildEnvMap 组装物化节点的进程环境变量（模板原样写入，由 dag 运行时渲染）：
+//  1. 为每个声明的参数生成 `FLOWX_PARAM_<NAME>`（规范写法，见 docs/11-node-package.md 11.7 规则 3）
+//  2. 节点包显式声明的 `env` 覆盖同名键（规则 1：env 优先，可用自定义变量名/别名）
+//
+// 历史行为是「声明了 env 就完全丢弃自动注入」，导致没写进 env 的参数在运行时
+// 静默取默认值（checkpoint-loader 的 dtype/offload/use_t5、ksampler 的
+// preview_every 都被吞掉）——参数声明即应可注入，env 只做覆盖。
 func buildEnvMap(node *model.Node, pkg *model.NodePackage) map[string]string {
-	if len(pkg.Env) > 0 {
-		return pkg.Env
-	}
-
-	env := make(map[string]string)
+	env := make(map[string]string, len(node.Parameters)+len(pkg.Env))
 	for _, param := range node.Parameters {
-		key := fmt.Sprintf("FLOWX_PARAM_%s", strings.ToUpper(param.Name))
-		env[key] = fmt.Sprintf("{{ Param.%s }}", param.Name)
+		env[fmt.Sprintf("FLOWX_PARAM_%s", strings.ToUpper(param.Name))] = fmt.Sprintf("{{ Param.%s }}", param.Name)
+	}
+	for k, v := range pkg.Env {
+		env[k] = v
 	}
 	return env
 }

@@ -307,3 +307,62 @@ func TestExpandNodeToConfig_MaterializedConfigPreservesBindings(t *testing.T) {
 		t.Errorf("config.params should be absent without bindings, got %v", cfg2.Config["params"])
 	}
 }
+
+// buildEnvMap：声明的参数全部以 FLOWX_PARAM_* 注入，env 只做覆盖/别名。
+// 回归：此前「声明了 env 就只注入 env 里的键」，未列出的参数（如
+// checkpoint-loader 的 dtype/offload/use_t5）在运行时静默取默认值。
+func TestBuildEnvMap_MergesAutoParamsWithPackageEnv(t *testing.T) {
+	pkg := &model.NodePackage{
+		Name:     "checkpoint-loader",
+		Language: "python",
+		Entry:    "main.py",
+		Parameters: []model.NodeParameter{
+			{Name: "service_url", Type: "string", Required: true},
+			{Name: "ckpt_name", Type: "string", Required: true},
+			{Name: "offload", Type: "string", Default: "auto"},
+		},
+		Env: map[string]string{
+			"SERVICE_URL": "{{ Param.service_url }}",
+			"CKPT_NAME":   "{{ Param.ckpt_name }}",
+		},
+	}
+	env := buildEnvMap(newTestNode(pkg), pkg)
+
+	// env 显式键保留（覆盖 auto 同名键，此处两者一致）
+	for k, want := range pkg.Env {
+		if env[k] != want {
+			t.Errorf("env[%s] = %q, want %q", k, env[k], want)
+		}
+	}
+	// 未写进 env 的参数也要注入 → 节点代码 param("offload") 才拿得到绑定值
+	if got := env["FLOWX_PARAM_OFFLOAD"]; got != "{{ Param.offload }}" {
+		t.Errorf("FLOWX_PARAM_OFFLOAD = %q, want template binding", got)
+	}
+	if got := env["FLOWX_PARAM_SERVICE_URL"]; got != "{{ Param.service_url }}" {
+		t.Errorf("FLOWX_PARAM_SERVICE_URL = %q, want template binding", got)
+	}
+	if got := env["FLOWX_PARAM_CKPT_NAME"]; got != "{{ Param.ckpt_name }}" {
+		t.Errorf("FLOWX_PARAM_CKPT_NAME = %q, want template binding", got)
+	}
+}
+
+// env 覆盖同名 auto 键：节点包可用自定义变量名（含裸大写）
+func TestBuildEnvMap_PackageEnvOverridesAuto(t *testing.T) {
+	pkg := &model.NodePackage{
+		Name:       "custom",
+		Language:   "python",
+		Entry:      "main.py",
+		Parameters: []model.NodeParameter{{Name: "url", Type: "string"}},
+		Env: map[string]string{
+			"FLOWX_PARAM_URL": "https://fixed.example.com",
+			"MY_URL":          "{{ Param.url }}",
+		},
+	}
+	env := buildEnvMap(newTestNode(pkg), pkg)
+	if env["FLOWX_PARAM_URL"] != "https://fixed.example.com" {
+		t.Errorf("FLOWX_PARAM_URL = %q, want env override", env["FLOWX_PARAM_URL"])
+	}
+	if env["MY_URL"] != "{{ Param.url }}" {
+		t.Errorf("MY_URL = %q, want alias binding", env["MY_URL"])
+	}
+}

@@ -399,9 +399,10 @@ DownloadImage:
 
 外部数据一律通过参数传入：节点包在 `parameters` 中声明所需数据（`description` 详细描述数据要求，可选 `source` 标注推荐来源节点），由 workflow YAML 完成实际接线（规则 5）。
 
-### 规则 1：env 优先
+### 规则 1：env 覆盖
 
-如果 `flowx.json` 中定义了 `env`，则按 env 生成环境变量注入：
+`flowx.json` 的 `env` 用于**覆盖/别名**自动注入的 `FLOWX_PARAM_*`（规则 3），
+键名可自定义（历史节点惯用裸大写名，如 `URL`/`SERVICE_URL`）：
 
 ```json
 "env": {
@@ -417,6 +418,10 @@ DownloadImage:
 
 **不允许**：`{{ GetWeather.city }}` 等任何节点实例 ID 引用（导入校验会报错）。也不存在 `{{ Metadata.UpNode.field }}` 语法。
 
+> 参数声明即注入：`env` 只需列出要改名/固定值的键，未列出的参数仍会以
+> `FLOWX_PARAM_<NAME>` 注入（2026-09-23 修正——此前「声明了 env 就只注入 env 里的键」
+> 会让未列出的参数在运行时静默取默认值）。
+
 ### 规则 2：run 模板
 
 如果定义了 `run`，则追加在 env 注入之后。`run` 中同样只允许 `{{ Param.name }}` 模板。
@@ -429,16 +434,16 @@ DownloadImage:
 
 注意：`run` 命令本身仍是 shell 文本，模板渲染值会原样拼入——若参数值可能包含引号/空格/特殊字符，应改用 `env` 传递（真实进程环境变量，无 shell 解析问题），不要在 `run` 里拼接不可信值。
 
-### 规则 3：默认 env 回退
+### 规则 3：默认 env 注入
 
-如果 `env` 未定义，则为每个 `parameter` 自动生成默认环境变量：
+每个声明的 `parameter` 都会自动生成默认环境变量（`env` 中同名的键覆盖它）：
 
 ```
 FLOWX_PARAM_URL={{ Param.url }}
 FLOWX_PARAM_TIMEOUT={{ Param.timeout }}
 ```
 
-注意：`NodeService.MockTest`（`internal/service/node.go`）同样以 `FLOWX_PARAM_` 前缀注入环境变量，并额外保留裸大写参数名（如 `URL`）作为兼容别名——Mock 与运行时展开的变量名已统一（2026-08-17 修复）。
+注意：`NodeService.MockTest`（`internal/service/node.go`）同样以 `FLOWX_PARAM_` 前缀注入环境变量，并额外保留裸大写参数名（如 `URL`）作为兼容别名。Mock 侧对**全部**参数注入 `FLOWX_PARAM_*`（不因 `env` 而缩减），运行时展开自 2026-09-23 起与之一致。
 
 ### 规则 4：默认 run 命令
 
