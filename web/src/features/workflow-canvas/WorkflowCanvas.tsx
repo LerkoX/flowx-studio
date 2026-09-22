@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow,
   Background,
@@ -20,13 +20,14 @@ import { useWorkflowStore } from '@/stores/workflowStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import { syncCanvasStatusesFromExecutionNodes } from './executionSelection'
 import { useIsMobile } from '@/hooks/useMediaQuery'
-import { parseWorkflowGraph, parseNodeRefs, parseNodeParams, parseParamSources } from '@/utils/mermaidParser'
-import { updateWorkflow, getWorkflow } from '@/services/workflowService'
+import { parseWorkflowGraph, parseNodeRefs, parseNodeNames, parseNodeParams, parseParamSources } from '@/utils/mermaidParser'
+import { updateWorkflow, getWorkflow, getWorkflowExecutors } from '@/services/workflowService'
 import { resolveNodes } from '@/services/nodeService'
 import type { NodeDefinition } from '@/types/node'
+import type { ExecutorResolutionResult, OutputIncompleteReason } from '@/types/workflow'
 import { useEventStream } from '@/services/eventService'
 import type { ExecutionLog, ExecutionStatus } from '@/types/execution'
-import { ArrowUpDown, ArrowLeftRight, Eye, LockKeyholeOpen, History } from 'lucide-react'
+import { ArrowUpDown, ArrowLeftRight, Eye, LockKeyholeOpen, History, FoldVertical, UnfoldVertical } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 const nodeTypes = { glowNode: GlowNode, terminalNode: TerminalNode }
@@ -78,6 +79,21 @@ function isEdgeTraversed(
   return completedAt[source] !== undefined && completedAt[target] !== undefined
 }
 
+// 注入节点 data 的执行器徽章字段（图重建与增量到达都走这里，保持一致）
+function executorFieldsFor(
+  nodeId: string,
+  info: ExecutorResolutionResult | null,
+  incomplete: Record<string, OutputIncompleteReason>,
+) {
+  const executor = info?.nodes?.[nodeId]
+  const executorInstance = executor?.executor ? info?.executors?.[executor.executor] : undefined
+  return {
+    executor,
+    executorInstance,
+    outputIncomplete: incomplete[nodeId],
+  }
+}
+
 function WorkflowCanvasInner({
   action,
   onShowHistory,
@@ -116,10 +132,17 @@ function WorkflowCanvasInner({
   const setNodeStatuses = useWorkflowStore((s) => s.setNodeStatuses)
   const setNodeRuntimeData = useWorkflowStore((s) => s.setNodeRuntimeData)
   const resetNodeRuntimeData = useWorkflowStore((s) => s.resetNodeRuntimeData)
+  // 顶栏一键收缩/展开所有节点：全局信号下发到各节点组件，尺寸变化触发实测重排
+  const nodesCollapsed = useWorkflowStore((s) => s.nodesCollapsed)
+  const setNodesCollapsed = useWorkflowStore((s) => s.setNodesCollapsed)
   // 画布引用的节点包定义：按 YAML 中的 nodeRef 集合批量 resolve（不拉全量列表），
   // key 为 YAML 原样 ref 字符串；nodeDefsTick 由节点变更 SSE 触发重取
   const [resolvedNodeDefs, setResolvedNodeDefs] = useState<Record<string, NodeDefinition | null>>({})
   const [nodeDefsTick, setNodeDefsTick] = useState(0)
+  // 各节点最终跑在哪个执行器（画布徽章）：编辑态按定义实时解析、回放态用执行快照。
+  // 同时用 ref 保存一份：图重新解析（重建节点）时读取最新值，避免徽章闪失
+  const [executorInfo, setExecutorInfo] = useState<ExecutorResolutionResult | null>(null)
+  const executorInfoRef = useRef<ExecutorResolutionResult | null>(null)
   const selectedExecutionId = useExecutionStore((s) => s.selectedExecutionId)
   const runningExecutionId = useExecutionStore((s) => s.runningExecutionId)
   const selectedExecutionYaml = useExecutionStore((s) => s.selectedExecutionYaml)
@@ -228,6 +251,8 @@ function WorkflowCanvasInner({
 
     // 节点实例 ID → 节点包名 → 节点包定义（含 ui 配置）
     const nodeRefs = parseNodeRefs(sourceYaml)
+    // 节点实例 ID → 显示名（YAML Nodes.<id>.name），画布节点名称优先用它展示
+    const nodeNames = parseNodeNames(sourceYaml)
     // 节点实例 ID → 当前参数绑定（config.params），下发给节点自定义 UI 组件
     const nodeParams = parseNodeParams(sourceYaml)
     // 节点实例 ID → 参数绑定来源（流水线参数/上游节点/字面值），供 UI 组件渲染来源标注
@@ -258,6 +283,9 @@ function WorkflowCanvasInner({
           nodePrevCompletedAt: curPrevCompletedAt,
           nodeRuntimeData: curRuntimeData,
         } = useWorkflowStore.getState()
+        // 解析完成时刻的最新值：执行器归属与"输出可能不完整"标记
+        const curExecutorInfo = executorInfoRef.current
+        const curIncomplete = incompleteRef.current
 
         const rawNodes: Node[] = parsedNodes.map((n) => {
           const nodeDef = n.id === '__start__' || n.id === '__end__' ? undefined : matchNodeDef(n.id)
@@ -267,9 +295,10 @@ function WorkflowCanvasInner({
             position: { x: 0, y: 0 },
             data: {
               id: n.id,
-              name: n.label,
+              name: nodeNames[n.id] || n.label,
               status: curStatuses[n.id] || 'idle',
               accentColor: nodeDef?.ui ? '#a855f7' : '#6366f1',
+              icon: nodeDef?.icon,
               inputs: curRuntimeData[n.id]?.inputs,
               outputs: curRuntimeData[n.id]?.outputs,
               direction,
@@ -279,6 +308,7 @@ function WorkflowCanvasInner({
               ui: nodeDef?.ui,
               params: nodeParams[n.id],
               paramSources: paramSources[n.id],
+              ...executorFieldsFor(n.id, curExecutorInfo, curIncomplete),
               // 非编辑（预览）模式：节点不可选中、内嵌 UI 不可交互
               interactive: modeRef.current === 'edit',
               onParamsChange: paramsEditable
@@ -523,6 +553,75 @@ function WorkflowCanvasInner({
   }, [nodeRuntimeData, setNodes])
 
   const selectedExecution = useExecutionStore((s) => s.selectedExecution)
+
+  // 执行器归属查询：编辑态按当前定义解析（与运行链路同一事实源），
+  // 回放态带 executionId 用执行快照解析（不随后续修改漂移）。
+  // 失败只影响徽章显示，不阻塞画布
+  const replayMode = !!(selectedExecutionId && selectedExecutionYaml)
+  useEffect(() => {
+    const wfId = currentWorkflow?.id
+    if (!wfId || !sourceYaml) {
+      executorInfoRef.current = null
+      setExecutorInfo(null)
+      return
+    }
+    let cancelled = false
+    getWorkflowExecutors(String(wfId), replayMode ? String(selectedExecutionId) : undefined)
+      .then((resp) => {
+        if (cancelled) return
+        const data = resp.code === 200 ? resp.data ?? null : null
+        executorInfoRef.current = data
+        setExecutorInfo(data)
+      })
+      .catch(() => {
+        if (cancelled) return
+        executorInfoRef.current = null
+        setExecutorInfo(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [currentWorkflow?.id, sourceYaml, replayMode, selectedExecutionId, nodeDefsTick])
+
+  // 「输出可能不完整」标记：flowx 在执行器流被截断 / 声明 extract 却零提取时写入
+  // <node>.__stream_truncated / <node>.__extract_missing，随 node_complete 事件合并进
+  // 执行 metadata（键为扁平点键），这里还原成按节点的提示。
+  const incompleteByNode = useMemo(() => {
+    const out: Record<string, OutputIncompleteReason> = {}
+    const meta = selectedExecution?.metadata as Record<string, unknown> | undefined
+    const runtime = (meta?.metadata ?? {}) as Record<string, unknown>
+    const isTrue = (value: unknown) => {
+      if (value === true || value === 'true') return true
+      if (value && typeof value === 'object' && 'value' in (value as Record<string, unknown>)) {
+        return String((value as Record<string, unknown>).value) === 'true'
+      }
+      return false
+    }
+    for (const [key, value] of Object.entries(runtime)) {
+      const dot = key.indexOf('.')
+      if (dot <= 0 || !isTrue(value)) continue
+      const nodeId = key.slice(0, dot)
+      const field = key.slice(dot + 1)
+      if (field === '__stream_truncated') out[nodeId] = 'stream-truncated'
+      else if (field === '__extract_missing') out[nodeId] = 'extract-missing'
+    }
+    return out
+  }, [selectedExecution])
+  const incompleteRef = useRef<Record<string, OutputIncompleteReason>>({})
+  incompleteRef.current = incompleteByNode
+
+  // 增量注入徽章与提示（执行器查询/metadata 晚于图解析到达时生效），
+  // 只改 data 保持 position 不变，避免丢失手动布局
+  useEffect(() => {
+    setNodes((prev) =>
+      prev.map((n) => {
+        const next = executorFieldsFor(n.id, executorInfo, incompleteByNode)
+        const cur = n.data as Record<string, unknown>
+        if (cur.executor === next.executor && cur.outputIncomplete === next.outputIncomplete) return n
+        return { ...n, data: { ...cur, ...next } }
+      })
+    )
+  }, [executorInfo, incompleteByNode, setNodes])
 
   // 将执行实例 metadata 中的节点输出（扁平点键：GetWeather.city）按节点分发到 nodeRuntimeData，
   // 驱动画布节点的「返回」区域与自定义 UI 组件展示真实数据
@@ -796,6 +895,13 @@ function WorkflowCanvasInner({
 
   const isMobile = useIsMobile()
 
+  // 一键收缩/展开所有节点：实测尺寸重排是异步的（内容变化 → ResizeObserver →
+  // dimension change → dagre 重排），延迟 fitView 等重排落定后再适配视野
+  const handleToggleAllNodes = useCallback(() => {
+    setNodesCollapsed(!nodesCollapsed)
+    setTimeout(() => fitView({ padding: isMobile ? 0.05 : 0.08, duration: 500 }), 450)
+  }, [nodesCollapsed, setNodesCollapsed, fitView, isMobile])
+
   return (
     <div className="w-full h-full relative">
       <ReactFlow
@@ -908,6 +1014,21 @@ function WorkflowCanvasInner({
           title={t('canvas.history')}
         >
           <History className={isMobile ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
+        </button>
+        <button
+          onClick={handleToggleAllNodes}
+          className={`p-1.5 rounded-md flex-shrink-0 transition-colors ${
+            nodesCollapsed
+              ? 'text-cyan-300 bg-cyan-400/15 hover:bg-cyan-400/25'
+              : 'text-white/60 hover:text-white/80 hover:bg-white/10'
+          }`}
+          title={nodesCollapsed ? t('canvas.expandAllNodes') : t('canvas.collapseAllNodes')}
+        >
+          {nodesCollapsed ? (
+            <UnfoldVertical className={isMobile ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
+          ) : (
+            <FoldVertical className={isMobile ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
+          )}
         </button>
         <button
           onClick={() => setMode((m) => (m === 'preview' ? 'edit' : 'preview'))}

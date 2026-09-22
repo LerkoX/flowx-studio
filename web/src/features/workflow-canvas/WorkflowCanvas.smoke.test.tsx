@@ -73,6 +73,8 @@ beforeAll(() => {
 
 vi.mock('@/services/workflowService', () => ({
   updateWorkflow: vi.fn(async () => ({ code: 200 })),
+  // 画布执行器徽章查询：测试不涉及，返回空解析结果
+  getWorkflowExecutors: vi.fn(async () => ({ code: 200, data: { source: 'workflow', executors: {}, nodes: {} } })),
   getWorkflow: vi.fn(async (id) => ({
     code: 200,
     data: {

@@ -1,6 +1,6 @@
 import { apiClient } from './api'
 import type { ApiResponse } from '@/types/api'
-import type { Workflow } from '@/types/workflow'
+import type { Workflow, ExecutorResolutionResult } from '@/types/workflow'
 import type { ExecutionStatus, ExecutionNode } from '@/types/execution'
 
 /**
@@ -23,6 +23,22 @@ export async function getWorkflows(params?: {
  */
 export async function getWorkflow(workflowId: string): Promise<ApiResponse<Workflow>> {
   const response = await apiClient.get(`/api/v1/workflows/${workflowId}`)
+  return response.data
+}
+
+/**
+ * 获取各节点的执行器归属（画布徽章，只读）
+ * GET /api/v1/workflows/:id/executors[?executionId=N]
+ * 不带 executionId：按当前定义实时解析（与运行链路同一事实源）；
+ * 带 executionId：用该执行的运行时快照解析（回放态，不随后续修改漂移）。
+ */
+export async function getWorkflowExecutors(
+  workflowId: string,
+  executionId?: string
+): Promise<ApiResponse<ExecutorResolutionResult>> {
+  const response = await apiClient.get(`/api/v1/workflows/${workflowId}/executors`, {
+    params: executionId ? { executionId } : undefined,
+  })
   return response.data
 }
 

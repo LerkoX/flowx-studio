@@ -13,6 +13,12 @@ interface WorkflowState {
   nodePrevCompletedAt: Record<string, number>
   params: Record<string, WorkflowParam>
   nodeRuntimeData: Record<string, NodeRuntimeData>
+  // 画布节点全局收缩/展开信号：collapsed 为目标状态，tick 单调递增。
+  // 节点组件以 tick 变化为触发（初值 0 不触发，保持各自默认展开态），
+  // 本地单独展开/收起覆盖在下次全局信号时被重置
+  nodesCollapsed: boolean
+  nodesCollapseTick: number
+  setNodesCollapsed: (collapsed: boolean) => void
   setCurrentWorkflow: (workflow: Workflow | null) => void
   addWorkflow: (workflow: Workflow) => void
   updateNodeStatus: (nodeId: string, status: string) => void
@@ -54,6 +60,14 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
   nodePrevCompletedAt: {},
   params: {},
   nodeRuntimeData: {},
+  nodesCollapsed: false,
+  nodesCollapseTick: 0,
+
+  setNodesCollapsed: (collapsed) =>
+    set((state) => ({
+      nodesCollapsed: collapsed,
+      nodesCollapseTick: state.nodesCollapseTick + 1,
+    })),
 
   setCurrentWorkflow: (workflow) => set({ currentWorkflow: workflow }),
 

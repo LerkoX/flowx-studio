@@ -173,6 +173,32 @@ type ExecutorResolver func(ref string, useDefault bool) (*model.Executor, error)
 // 没有该类型实例时返回 nil。由 ExecutorService 实现。
 type ExecutorTypeResolver func(execType string) (*model.Executor, error)
 
+// 执行器解析来源（ExecutorResolution.Source）。用于画布徽章 tooltip 与"为什么变了"
+// 的排查：同一个节点换环境后可能因注册表不同而落到不同分支。
+const (
+	ExecutorSourceWorkflowExplicit = "workflow-explicit"  // workflow YAML config.executor 显式选择
+	ExecutorSourcePackageRef       = "package-ref"        // 节点包 executor.ref 引用注册实例
+	ExecutorSourcePackageInline    = "package-inline"     // 节点包 executor.type 内联匿名实例
+	ExecutorSourcePackagePreferred = "package-preferred"  // supportedTypes/preferredType 命中偏好
+	ExecutorSourcePackageDegraded  = "package-degraded"   // 偏好类型不可用，按声明顺序降级
+	ExecutorSourceDockerDefault    = "docker-default"     // 未声明但有镜像 → 归 docker
+	ExecutorSourceGlobalDefault    = "global-default"     // 未声明且无镜像 → 全局默认执行器
+	ExecutorSourceFallback         = "anonymous-fallback" // 无注册表等兜底路径
+	ExecutorSourceSnapshot         = "snapshot"           // 执行快照已物化的 executor（回放态）
+)
+
+// ExecutorResolution 单节点执行器解析结果。
+type ExecutorResolution struct {
+	Name    string // 执行器条目名（workflow Executors 里的 key）
+	Type    string // local / docker / ...
+	Source  string // 解析来源，见 ExecutorSource*
+	Warning string // 需要提醒用户的情况（降级/匿名实例等），空表示无
+}
+
+// ExecutorResolutionObserver 在展开过程中回调每个 nodeRef 节点的执行器解析结果。
+// 供只读查询（画布徽章）收集"这个节点最终跑在哪"，不影响展开结果本身。
+type ExecutorResolutionObserver func(nodeName string, res ExecutorResolution)
+
 // ExpandWorkflowConfig 展开工作流 YAML 中的 nodeRef 引用。
 // 保持旧签名供测试/兼容场景使用；需要按类型选择注册执行器时使用
 // ExpandWorkflowConfigWithTypeResolver。
@@ -181,13 +207,19 @@ func ExpandWorkflowConfig(configYAML string, lookup func(name string) (*model.No
 	if len(resolvers) > 0 {
 		resolve = resolvers[0]
 	}
-	return expandWorkflowConfig(configYAML, lookup, resolve, nil)
+	return expandWorkflowConfig(configYAML, lookup, resolve, nil, nil)
 }
 
 // ExpandWorkflowConfigWithTypeResolver 展开 nodeRef，并支持 workflow 对每个节点
 // 通过 config.executor 选择执行器类型或具体执行器实例。
 func ExpandWorkflowConfigWithTypeResolver(configYAML string, lookup func(name string) (*model.Node, error), resolve ExecutorResolver, resolveType ExecutorTypeResolver) (string, error) {
-	return expandWorkflowConfig(configYAML, lookup, resolve, resolveType)
+	return expandWorkflowConfig(configYAML, lookup, resolve, resolveType, nil)
+}
+
+// ExpandWorkflowConfigWithExecutorObserver 同 ExpandWorkflowConfigWithTypeResolver，
+// 额外通过 observer 回传每个节点的执行器解析结果（含来源与提示），供只读展示使用。
+func ExpandWorkflowConfigWithExecutorObserver(configYAML string, lookup func(name string) (*model.Node, error), resolve ExecutorResolver, resolveType ExecutorTypeResolver, observer ExecutorResolutionObserver) (string, error) {
+	return expandWorkflowConfig(configYAML, lookup, resolve, resolveType, observer)
 }
 
 // expandWorkflowConfig 展开工作流 YAML 中的 nodeRef 引用
@@ -201,7 +233,7 @@ func ExpandWorkflowConfigWithTypeResolver(configYAML string, lookup func(name st
 //     无 image 使用全局默认执行器
 //
 // resolvers 缺省时回退到旧行为（匿名实例合成），便于不挂执行器注册表的场景（测试等）。
-func expandWorkflowConfig(configYAML string, lookup func(name string) (*model.Node, error), resolve ExecutorResolver, resolveType ExecutorTypeResolver) (string, error) {
+func expandWorkflowConfig(configYAML string, lookup func(name string) (*model.Node, error), resolve ExecutorResolver, resolveType ExecutorTypeResolver, observer ExecutorResolutionObserver) (string, error) {
 
 	var cfg core.WorkflowConfig
 	if err := yaml.Unmarshal([]byte(configYAML), &cfg); err != nil {
@@ -252,9 +284,13 @@ func expandWorkflowConfig(configYAML string, lookup func(name string) (*model.No
 		}
 
 		// 解析执行器：workflow 显式选择 → ref → 内联 → 偏好/降级 → 默认/docker
-		execName, execType, err := resolveNodeExecutor(node, executors, resolve, resolveType, selection)
+		resolution, err := resolveNodeExecutor(node, executors, resolve, resolveType, selection)
 		if err != nil {
 			return "", fmt.Errorf("failed to expand node %s: %w", ref, err)
+		}
+		execName, execType := resolution.Name, resolution.Type
+		if observer != nil {
+			observer(nodeName, resolution)
 		}
 
 		expanded, err := expandNodeWithExecutorType(node, execType, bindings)
@@ -283,7 +319,7 @@ func expandWorkflowConfig(configYAML string, lookup func(name string) (*model.No
 // （flowx core 执行器按名单例，镜像不同即不同容器）。优先级：节点 image > 条目 config.image。
 // 共享条目（ref 实例 / 默认实例）在镜像不一致时复制出节点专属条目，避免不同镜像的
 // 节点互相覆盖同一共享容器。
-func resolveNodeExecutor(node *model.Node, executors map[string]core.ExecutorConfig, resolve ExecutorResolver, resolveType ExecutorTypeResolver, selection *nodeExecutorSelection) (string, string, error) {
+func resolveNodeExecutor(node *model.Node, executors map[string]core.ExecutorConfig, resolve ExecutorResolver, resolveType ExecutorTypeResolver, selection *nodeExecutorSelection) (ExecutorResolution, error) {
 	pkg := node.PackageConfig
 	if pkg == nil {
 		pkg = &model.NodePackage{Image: node.Image}
@@ -295,70 +331,108 @@ func resolveNodeExecutor(node *model.Node, executors map[string]core.ExecutorCon
 	if selection != nil {
 		if selection.Ref != "" {
 			if resolve == nil {
-				return "", "", fmt.Errorf("workflow selects executor %q but no executor registry is available", selection.Ref)
+				return ExecutorResolution{}, fmt.Errorf("workflow selects executor %q but no executor registry is available", selection.Ref)
 			}
 			inst, err := resolve(selection.Ref, false)
 			if err != nil {
-				return "", "", err
+				return ExecutorResolution{}, err
 			}
 			if selection.Type != "" && inst.Type != selection.Type {
-				return "", "", fmt.Errorf("workflow selects executor %q of type %q, want %q", selection.Ref, inst.Type, selection.Type)
+				return ExecutorResolution{}, fmt.Errorf("workflow selects executor %q of type %q, want %q", selection.Ref, inst.Type, selection.Type)
 			}
 			if err := ensureExecutorTypeAllowed(node.Name, pkg, inst.Type); err != nil {
-				return "", "", err
+				return ExecutorResolution{}, err
 			}
-			return addRegisteredExecutor(node, image, inst, executors), inst.Type, nil
+			return ExecutorResolution{
+				Name:   addRegisteredExecutor(node, image, inst, executors),
+				Type:   inst.Type,
+				Source: ExecutorSourceWorkflowExplicit,
+			}, nil
 		}
 		if selection.Type != "" {
 			if err := ensureExecutorTypeAllowed(node.Name, pkg, selection.Type); err != nil {
-				return "", "", err
+				return ExecutorResolution{}, err
 			}
 			if resolveType != nil {
 				inst, err := resolveType(selection.Type)
 				if err != nil {
-					return "", "", err
+					return ExecutorResolution{}, err
 				}
 				if inst != nil {
-					return addRegisteredExecutor(node, image, inst, executors), inst.Type, nil
+					return ExecutorResolution{
+						Name:   addRegisteredExecutor(node, image, inst, executors),
+						Type:   inst.Type,
+						Source: ExecutorSourceWorkflowExplicit,
+					}, nil
 				}
 			}
-			return addAnonymousExecutor(node, selection.Type, image, pkg.Executor.Config, executors), selection.Type, nil
+			return ExecutorResolution{
+				Name:    addAnonymousExecutor(node, selection.Type, image, pkg.Executor.Config, executors),
+				Type:    selection.Type,
+				Source:  ExecutorSourceWorkflowExplicit,
+				Warning: "workflow 指定了执行器类型 " + selection.Type + "，但没有该类型的注册实例，已合成匿名实例",
+			}, nil
 		}
 	}
 
 	// 1. 旧版 executor.ref：引用注册的执行器实例
 	if pkg.Executor.Ref != "" {
 		if resolve == nil {
-			return "", "", fmt.Errorf("node declares executor.ref %q but no executor registry is available", pkg.Executor.Ref)
+			return ExecutorResolution{}, fmt.Errorf("node declares executor.ref %q but no executor registry is available", pkg.Executor.Ref)
 		}
 		inst, err := resolve(pkg.Executor.Ref, false)
 		if err != nil {
-			return "", "", err
+			return ExecutorResolution{}, err
 		}
-		return addRegisteredExecutor(node, image, inst, executors), inst.Type, nil
+		return ExecutorResolution{
+			Name:   addRegisteredExecutor(node, image, inst, executors),
+			Type:   inst.Type,
+			Source: ExecutorSourcePackageRef,
+		}, nil
 	}
 
 	// 2. 旧版 executor.type (+config)：内联匿名实例（条目本来即节点专属，直接注入镜像）
 	if pkg.Executor.Type != "" {
-		return addAnonymousExecutor(node, pkg.Executor.Type, image, pkg.Executor.Config, executors), pkg.Executor.Type, nil
+		return ExecutorResolution{
+			Name:   addAnonymousExecutor(node, pkg.Executor.Type, image, pkg.Executor.Config, executors),
+			Type:   pkg.Executor.Type,
+			Source: ExecutorSourcePackageInline,
+		}, nil
 	}
 
 	// 3. portable 声明：supportedTypes + preferredType。优先 preferred；该类型没有
 	// 注册实例时按 supportedTypes 声明顺序降级到其他类型。所有类型都没有实例时，
 	// 使用偏好类型合成匿名执行器（docker 会注入节点 image/config）。
 	if candidates := portableExecutorCandidates(pkg); len(candidates) > 0 {
+		preferred := candidates[0]
 		if resolveType != nil {
 			for _, execType := range candidates {
 				inst, err := resolveType(execType)
 				if err != nil {
-					return "", "", err
+					return ExecutorResolution{}, err
 				}
-				if inst != nil {
-					return addRegisteredExecutor(node, image, inst, executors), inst.Type, nil
+				if inst == nil {
+					continue
 				}
+				resolution := ExecutorResolution{
+					Name:   addRegisteredExecutor(node, image, inst, executors),
+					Type:   inst.Type,
+					Source: ExecutorSourcePackagePreferred,
+				}
+				// 降级：偏好类型不可用，按声明顺序落到其他类型（运行结果可能与预期不同）
+				if !strings.EqualFold(execType, preferred) {
+					resolution.Source = ExecutorSourcePackageDegraded
+					resolution.Warning = "节点偏好 " + preferred + "，但该类型没有可用实例，已降级为 " + execType
+				}
+				return resolution, nil
 			}
 		}
-		return addAnonymousExecutor(node, candidates[0], image, pkg.Executor.Config, executors), candidates[0], nil
+		return ExecutorResolution{
+			Name:    addAnonymousExecutor(node, preferred, image, pkg.Executor.Config, executors),
+			Type:    preferred,
+			Source:  ExecutorSourcePackagePreferred,
+			Warning: "节点声明 " + preferred + " 但没有该类型的注册实例，已合成匿名实例",
+		}, nil
 	}
 
 	// 4. 未声明：有 image 归为 docker，无 image 走全局默认执行器
@@ -367,22 +441,40 @@ func resolveNodeExecutor(node *model.Node, executors map[string]core.ExecutorCon
 		// 镜像不同则继承实例配置合成节点专属条目；无 docker 默认时匿名 docker
 		if resolve != nil {
 			if def, err := resolve("", true); err == nil && def != nil && def.Type == "docker" {
-				return addRegisteredExecutor(node, image, def, executors), "docker", nil
+				return ExecutorResolution{
+					Name:   addRegisteredExecutor(node, image, def, executors),
+					Type:   "docker",
+					Source: ExecutorSourceDockerDefault,
+				}, nil
 			}
 		}
-		return addAnonymousExecutor(node, "docker", image, nil, executors), "docker", nil
+		return ExecutorResolution{
+			Name:    addAnonymousExecutor(node, "docker", image, nil, executors),
+			Type:    "docker",
+			Source:  ExecutorSourceDockerDefault,
+			Warning: "节点声明了镜像但没有可复用的 docker 默认实例，已合成匿名实例（请确认镜像内已打包该节点）",
+		}, nil
 	}
 
 	if resolve != nil {
 		def, err := resolve("", true)
 		if err != nil {
-			return "", "", err
+			return ExecutorResolution{}, err
 		}
-		return addRegisteredExecutor(node, image, def, executors), def.Type, nil
+		return ExecutorResolution{
+			Name:   addRegisteredExecutor(node, image, def, executors),
+			Type:   def.Type,
+			Source: ExecutorSourceGlobalDefault,
+		}, nil
 	}
 
 	// 无注册表（测试/兼容场景）：匿名 local
-	return addAnonymousExecutor(node, "local", image, nil, executors), "local", nil
+	return ExecutorResolution{
+		Name:    addAnonymousExecutor(node, "local", image, nil, executors),
+		Type:    "local",
+		Source:  ExecutorSourceFallback,
+		Warning: "没有可用的执行器注册表，已回退匿名 local 执行器",
+	}, nil
 }
 
 // nodeExecutorSelection workflow YAML 中单个 nodeRef 节点的执行器选择。

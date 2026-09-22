@@ -35,3 +35,38 @@ export interface Workflow {
   createdAt: Date
   updatedAt: Date
 }
+
+/** 展开结果里的一条执行器实例（Executors 表条目） */
+export interface ExecutorInstanceInfo {
+  name: string
+  /** local | docker | ... */
+  type: string
+  /** docker 远端地址（快照/注册实例的 config.host） */
+  host?: string
+  /** docker 镜像（config.image） */
+  image?: string
+  /** 是否存在于执行器注册表；false 表示展开器为节点合成的内部条目（名字不稳定，徽章显示类型） */
+  registered?: boolean
+}
+
+/** 单个节点的执行器归属与解析来源（画布徽章） */
+export interface NodeExecutorInfo {
+  /** 执行器实例名；空表示快照未记录 */
+  executor: string
+  type: string
+  /** 解析来源：workflow-explicit / package-preferred / snapshot ... */
+  source?: string
+  /** 需要提示的情况（降级/匿名实例等） */
+  warning?: string
+}
+
+/** GET /workflows/:id/executors 响应 */
+export interface ExecutorResolutionResult {
+  /** workflow：按当前定义实时解析；snapshot：来自执行快照（回放态） */
+  source: 'workflow' | 'snapshot'
+  executors: Record<string, ExecutorInstanceInfo>
+  nodes: Record<string, NodeExecutorInfo>
+}
+
+/** 节点输出完整性提示（执行器流被截断 / 未提取到输出数据） */
+export type OutputIncompleteReason = 'stream-truncated' | 'extract-missing'

@@ -34,6 +34,7 @@ func (h *WorkflowHandler) RegisterRoutes(r *gin.RouterGroup) {
 		workflows.GET("/:id", h.Get)
 		workflows.PUT("/:id", h.Update)
 		workflows.DELETE("/:id", h.Delete)
+		workflows.GET("/:id/executors", h.GetWorkflowExecutors)
 		workflows.POST("/:id/run", h.Run)
 		workflows.POST("/:id/mock", h.MockRun)
 	}
@@ -487,6 +488,33 @@ func (h *WorkflowHandler) GetExecutionNodes(c *gin.Context) {
 	}
 
 	Success(c, nodes)
+}
+
+// GetWorkflowExecutors 画布节点执行器标签（只读）：
+// GET /workflows/:id/executors[?executionId=N]
+// 不带 executionId：按当前流水线定义实时解析（与 Run 同链路）；
+// 带 executionId：用该执行的运行时快照解析（回放态，不随后续修改漂移）。
+func (h *WorkflowHandler) GetWorkflowExecutors(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		Error(c, http.StatusBadRequest, "invalid workflow id")
+		return
+	}
+	var executionID int64
+	if raw := c.Query("executionId"); raw != "" {
+		executionID, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			Error(c, http.StatusBadRequest, "invalid executionId")
+			return
+		}
+	}
+
+	result, err := h.service.ResolveNodeExecutors(id, executionID)
+	if err != nil {
+		Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	Success(c, result)
 }
 
 // ExportExecutionLogs 导出执行日志（GET /executions/:id/logs/export?format=json|txt|markdown）
