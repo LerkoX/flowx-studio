@@ -25,6 +25,16 @@ export interface NodeRuntimeData {
   preview?: NodePreview
 }
 
+/** 工作流执行统计（列表接口附带，卡片展示运行中/成功/失败次数） */
+export interface WorkflowStats {
+  total: number
+  /** 运行中口径：running | pending | paused */
+  running: number
+  success: number
+  failed: number
+  cancelled: number
+}
+
 export interface Workflow {
   id: string
   name: string
@@ -34,6 +44,8 @@ export interface Workflow {
   status: 'idle' | 'running' | 'success' | 'failed' | 'paused'
   createdAt: Date
   updatedAt: Date
+  /** 仅列表接口返回；无执行记录时缺省 */
+  stats?: WorkflowStats
 }
 
 /** 展开结果里的一条执行器实例（Executors 表条目） */

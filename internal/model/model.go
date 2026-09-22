@@ -281,6 +281,24 @@ type Workflow struct {
 	UpdatedAt   time.Time `json:"updatedAt" db:"updated_at"`
 }
 
+// WorkflowStats 工作流执行统计（按 executions 表聚合）
+// Running 口径：running | pending | paused（正在执行中，含排队与暂停）
+// Cancelled 单独计数，不计入 Total 之外的成败分类
+type WorkflowStats struct {
+	Total     int `json:"total" db:"total"`
+	Running   int `json:"running" db:"running"`
+	Success   int `json:"success" db:"success"`
+	Failed    int `json:"failed" db:"failed"`
+	Cancelled int `json:"cancelled" db:"cancelled"`
+}
+
+// WorkflowListItem 工作流列表项：工作流本体 + 执行统计。
+// 统计为列表接口附带字段（不落库），详情接口仍返回纯 Workflow。
+type WorkflowListItem struct {
+	Workflow
+	Stats *WorkflowStats `json:"stats,omitempty"`
+}
+
 // WorkflowNode 工作流节点关联
 type WorkflowNode struct {
 	ID            int64                  `json:"id" db:"id"`

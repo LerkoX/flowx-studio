@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -151,12 +152,71 @@ func (s *WorkflowService) List(status, search string, page, pageSize int) (*mode
 		return nil, fmt.Errorf("failed to list workflows: %w", err)
 	}
 
+	// 执行统计随列表返回（卡片展示运行中/成功/失败次数）。
+	// 单独聚合一次而非逐条查询，避免 N+1；统计失败不阻断列表。
+	stats, err := s.executionStats(workflows)
+	if err != nil {
+		log.Printf("failed to aggregate workflow execution stats: %v", err)
+	}
+
+	items := make([]model.WorkflowListItem, 0, len(workflows))
+	for i := range workflows {
+		items = append(items, model.WorkflowListItem{
+			Workflow: workflows[i],
+			Stats:    stats[workflows[i].ID],
+		})
+	}
+
 	return &model.PaginatedResponse{
-		Items:    workflows,
+		Items:    items,
 		Total:    total,
 		Page:     page,
 		PageSize: pageSize,
 	}, nil
+}
+
+// executionStats 按 workflow_id 聚合 executions 表的执行次数。
+// Running 口径：running | pending | paused；Cancelled 单独计数。
+// 返回 map[workflowID]*WorkflowStats，无执行记录的 workflow 不在 map 中（调用方置 nil）。
+func (s *WorkflowService) executionStats(workflows []model.Workflow) (map[int64]*model.WorkflowStats, error) {
+	result := make(map[int64]*model.WorkflowStats)
+	if len(workflows) == 0 {
+		return result, nil
+	}
+
+	ids := make([]int64, 0, len(workflows))
+	placeholders := make([]string, 0, len(workflows))
+	for _, wf := range workflows {
+		ids = append(ids, wf.ID)
+		placeholders = append(placeholders, "?")
+	}
+
+	query := `SELECT workflow_id,
+		COUNT(*) AS total,
+		COALESCE(SUM(CASE WHEN status IN ('running','pending','paused') THEN 1 ELSE 0 END), 0) AS running,
+		COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) AS success,
+		COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
+		COALESCE(SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END), 0) AS cancelled
+	FROM executions WHERE workflow_id IN (` + strings.Join(placeholders, ",") + `)
+	GROUP BY workflow_id`
+
+	type row struct {
+		WorkflowID int64 `db:"workflow_id"`
+		model.WorkflowStats
+	}
+	var rows []row
+	args := make([]interface{}, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	if err := s.db.Select(&rows, query, args...); err != nil {
+		return result, err
+	}
+	for i := range rows {
+		stats := rows[i].WorkflowStats
+		result[rows[i].WorkflowID] = &stats
+	}
+	return result, nil
 }
 
 // Get 获取工作流详情
