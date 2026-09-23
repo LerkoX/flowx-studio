@@ -155,7 +155,7 @@ var schemas = map[string]string{
   "title": "flowx-studio executor create",
   "type": "object",
   "properties": {
-    "file": {"type": "string", "description": "执行器定义文件（YAML/JSON），'-' 表示 stdin（必填）。字段：name（必填，字母开头）、type（必填，local|docker；local 全局限一个、docker 可多个；k8s 暂不支持）、description、config（对象；docker 支持 host/tlsVerify/certPath/registry/network/workdir/volumes/env/tty，local 支持 shell/workdir/timeout/env/pty）"}
+    "file": {"type": "string", "description": "执行器定义文件（YAML/JSON），'-' 表示 stdin（必填）。字段：name（必填，字母开头）、type（必填，local|docker；local 全局限一个、docker 可多个；k8s 暂不支持）、description、config（对象；docker 支持 host/tlsVerify/certPath/daemonTimeout/registry/network/workdir/volumes/env/tty，local 支持 shell/workdir/timeout/env/pty）"}
   },
   "required": ["file"]
 }`,
