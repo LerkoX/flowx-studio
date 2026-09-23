@@ -219,6 +219,7 @@ export default {
     seconds: 's',
     uiPreview: 'UI preview',
     uiPreviewHint: 'The component receives real output data after a test run',
+    uiPreviewReadonlyHint: 'Node definition preview (read-only): params show each parameter default and edits are not written back; use the Test panel for real data',
     running: 'Running...',
     runTest: 'Run test',
     execSuccess: 'Succeeded',

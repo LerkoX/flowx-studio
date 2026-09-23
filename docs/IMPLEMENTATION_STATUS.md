@@ -1,7 +1,17 @@
 # FlowX Studio 实现状态跟踪文档
 
 > 本文档记录 FlowX Studio 各模块的实现状态，区分「已实现」和「待实现」功能。
-> 最后更新：2026-09-01
+> 最后更新：2026-09-23
+
+---
+
+## 近期重要变更（2026-09-23，节点详情弹窗只读 UI 预览）
+
+### 节点详情弹窗「UI 预览」Tab（已落地）
+- 背景：节点管理里能看节点自带 UI 的入口只有「测试」面板（UI 预览区块排在输入参数/超时之后，参数多的节点要下滚），「查看」详情弹窗从引入起只有 概览/参数/输出/flowx.json 四个只读 Tab。
+- `NodeDetailModal` 在节点声明 `ui.entry` 时新增「UI 预览」Tab：复用 `ModuleNodeWidget` + `buildWidgetUrl`（`?v=<updatedAt>` 缓存破坏与画布一致）；**只读**——不透传 `onParamsChange`，`params` 取 `parameters[].default` 合成，`outputs: {}` / `execution: null` / `status: 'idle'`。
+- 自适应：组件宽于弹窗可用宽度时按 `useViewportWidth` 等比 `transform: scale()` 收窄（earth-3d-viewer 1080×280 等超宽组件不撑破弹窗）；tab 栏在窄屏缩小字号、隐藏图标，切换节点后失效的 tab（新节点无 UI/无输出）回退概览。
+- 用例：`NodeDetailModal.ui-preview.test.tsx`（4 例：Tab 出现与 URL 契约、超宽缩放、无 ui 节点不出现、tab 回退）。
 
 ---
 

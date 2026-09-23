@@ -298,7 +298,7 @@
 
 <p><strong>执行器解析优先级</strong>（运行时展开，见 <a href="07-node-system.md#741-运行时适配器与节点展开" target="_blank">7.4.1 节</a>）：workflow 节点 <code>config.executor</code> 显式选择 → 旧版 <code>executor.ref</code>（注册实例）→ 旧版 <code>executor.type + config</code>（内联匿名）→ <code>supportedTypes/preferredType</code>（偏好类型无可用实例时按支持列表降级）→ 有 <code>image</code> 归为 docker（默认执行器为 docker 实例时复用其配置，否则合成匿名 docker）→ 无 <code>image</code> 使用全局默认执行器。</p>
 
-<p><strong>docker 执行器实例支持的 config 键</strong>：<code>host</code>（远程 daemon 地址，如 <code>tcp://192.168.1.10:2375</code> / <code>ssh://user@host</code>，留空读 <code>DOCKER_HOST</code> 环境变量）、<code>tlsVerify</code>、<code>certPath</code>、<code>image</code>（容器镜像，默认 <code>alpine:latest</code>）、<code>registry</code>、<code>network</code>、<code>workdir</code>、<code>volumes</code>（远程 daemon 时为<strong>远端机器</strong>路径）、<code>env</code>、<code>tty</code>、<code>ttyWidth</code>、<code>ttyHeight</code>。</p>
+<p><strong>docker 执行器实例支持的 config 键</strong>：<code>host</code>（远程 daemon 地址，如 <code>tcp://192.168.1.10:2375</code> / <code>ssh://user@host</code>，留空读 <code>DOCKER_HOST</code> 环境变量）、<code>tlsVerify</code>、<code>certPath</code>、<code>image</code>（容器镜像，默认 <code>alpine:latest</code>）、<code>registry</code>、<code>network</code>、<code>workdir</code>、<code>volumes</code>（远程 daemon 时为<strong>远端机器</strong>路径）、<code>env</code>、<code>tty</code>、<code>ttyWidth</code>、<code>ttyHeight</code>、<code>daemonTimeout</code>（daemon 控制面请求响应超时，如 <code>"15s"</code>/秒数，默认 15s；daemon 不可达时节点在超时后快速失败，不会一直停在 running）。</p>
 
 <p><strong>镜像注入规则</strong>（展开时）：节点包的 <code>image</code> 会写入其 docker/k8s 执行器条目的 <code>config.image</code>，优先级为<strong>节点 <code>image</code> &gt; 条目 <code>config.image</code></strong>。flowx 执行器按名单例（同名=同容器），因此引用共享条目（<code>executor.ref</code> 实例或默认 docker 实例）且镜像与条目不一致时，展开器会复制条目配置合成节点专属的 <code>&lt;节点名&gt;-executor</code> 条目并注入镜像；镜像一致时直接复用共享条目。<code>executor.type: local</code> 时 <code>image</code> 只是 docker 能力声明，不注入。</p>
 <p><strong>local 执行器实例支持的 config 键</strong>：<code>shell</code>、<code>workdir</code>、<code>timeout</code>、<code>env</code>、<code>pty</code>、<code>ptyWidth</code>、<code>ptyHeight</code>。</p>
@@ -695,9 +695,10 @@ Content-Type: application/json
 </ul>
 <p>外部数据一律通过参数传入：节点包在 <code>parameters</code> 中声明所需数据（<code>description</code> 详细描述数据要求，可选 <code>source</code> 标注推荐来源节点），由 workflow YAML 完成实际接线（规则 5）。</p>
 
-<h3 id="规则-1env-优先">规则 1：env 优先</h3>
+<h3 id="规则-1env-覆盖">规则 1：env 覆盖</h3>
 
-<p>如果 <code>flowx.json</code> 中定义了 <code>env</code>，则按 env 生成环境变量注入：</p>
+<p><code>flowx.json</code> 的 <code>env</code> 用于<strong>覆盖/别名</strong>自动注入的 <code>FLOWX_PARAM_*</code>（规则 3），</p>
+<p>键名可自定义（历史节点惯用裸大写名，如 <code>URL</code>/<code>SERVICE_URL</code>）：</p>
 
 <pre><code class="language-json">"env": {
   "URL": "{{ Param.url }}",
@@ -712,6 +713,10 @@ Content-Type: application/json
 </ul>
 <p><strong>不允许</strong>：<code>{{ GetWeather.city }}</code> 等任何节点实例 ID 引用（导入校验会报错）。也不存在 <code>{{ Metadata.UpNode.field }}</code> 语法。</p>
 
+<blockquote>参数声明即注入：<code>env</code> 只需列出要改名/固定值的键，未列出的参数仍会以</blockquote>
+<blockquote><code>FLOWX_PARAM_&lt;NAME&gt;</code> 注入（2026-09-23 修正——此前「声明了 env 就只注入 env 里的键」</blockquote>
+<blockquote>会让未列出的参数在运行时静默取默认值）。</blockquote>
+
 <h3 id="规则-2run-模板">规则 2：run 模板</h3>
 
 <p>如果定义了 <code>run</code>，则追加在 env 注入之后。<code>run</code> 中同样只允许 <code>{{ Param.name }}</code> 模板。</p>
@@ -722,14 +727,14 @@ Content-Type: application/json
 
 <p>注意：<code>run</code> 命令本身仍是 shell 文本，模板渲染值会原样拼入——若参数值可能包含引号/空格/特殊字符，应改用 <code>env</code> 传递（真实进程环境变量，无 shell 解析问题），不要在 <code>run</code> 里拼接不可信值。</p>
 
-<h3 id="规则-3默认-env-回退">规则 3：默认 env 回退</h3>
+<h3 id="规则-3默认-env-注入">规则 3：默认 env 注入</h3>
 
-<p>如果 <code>env</code> 未定义，则为每个 <code>parameter</code> 自动生成默认环境变量：</p>
+<p>每个声明的 <code>parameter</code> 都会自动生成默认环境变量（<code>env</code> 中同名的键覆盖它）：</p>
 
 <pre><code>FLOWX_PARAM_URL={{ Param.url }}
 FLOWX_PARAM_TIMEOUT={{ Param.timeout }}</code></pre>
 
-<p>注意：<code>NodeService.MockTest</code>（<code>internal/service/node.go</code>）同样以 <code>FLOWX_PARAM_</code> 前缀注入环境变量，并额外保留裸大写参数名（如 <code>URL</code>）作为兼容别名——Mock 与运行时展开的变量名已统一（2026-08-17 修复）。</p>
+<p>注意：<code>NodeService.MockTest</code>（<code>internal/service/node.go</code>）同样以 <code>FLOWX_PARAM_</code> 前缀注入环境变量，并额外保留裸大写参数名（如 <code>URL</code>）作为兼容别名。Mock 侧对<strong>全部</strong>参数注入 <code>FLOWX_PARAM_*</code>（不因 <code>env</code> 而缩减），运行时展开自 2026-09-23 起与之一致。</p>
 
 <h3 id="规则-4默认-run-命令">规则 4：默认 run 命令</h3>
 
@@ -952,8 +957,9 @@ interface NodeWidgetProps {
   } | null
   preview?: {                   // 节点实时预览帧（可选）：节点经 stdout FLOWX_PREVIEW
     url: string                 // 标记上报帧地址，Studio 中转拉帧后随 SSE 进度事件
-    progress?: number           // 刷新（见 11.16）。瞬态：node_complete 清除，回放态
-  }                             // 缺省，需判空。预览 UI 由组件自行渲染（&lt;img src=url&gt;
+    progress?: number           // 刷新（见 11.16）。节点完成后保留最后一帧（帧源有
+  }                             // TTL，过期需 img onerror 回退占位）；回放态缺省，需判空。
+                                // 预览 UI 由组件自行渲染（&lt;img src=url&gt;
                                 // 直出，媒体不经 base64），画布外壳不渲染预览
   theme: 'dark'                 // 预留
   locale: string                // 预留
@@ -980,7 +986,8 @@ interface NodeWidgetParamSource {
 
 <p>module 模式本质是在 Studio 前端上下文执行节点包携带的任意 JS（可访问</p>
 <p>localStorage、auth token、Studio 内部状态），<strong>只应导入可信来源的节点包</strong>。</p>
-<p>节点详情弹窗对含自定义 UI 的节点有明确标记。前端对加载/mount/update/unmount</p>
+<p>节点详情弹窗对含自定义 UI 的节点有明确标记（并多一个只读「UI 预览」Tab，见</p>
+<p>11.13.4）。前端对加载/mount/update/unmount</p>
 <p>各阶段做 try/catch 兜底：失败时内嵌区域显示警示条，不影响节点卡片其余部分。</p>
 
 <h3 id="11134-前端渲染细节">11.13.4 前端渲染细节</h3>
@@ -996,7 +1003,12 @@ interface NodeWidgetParamSource {
 <ul>
 <li><code>AutoLayout</code>（dagre）：带 ui 节点按组件尺寸动态计算占位</li>
 <li><code>NodeTestPanel</code>：提供「UI 预览」，用 Mock 测试的真实输出渲染组件</li>
+<li><code>NodeDetailModal</code>（节点管理→「查看」）：含 <code>ui.entry</code> 时提供<strong>只读</strong>「UI 预览」Tab</li>
 </ul>
+<p>  —— 弹窗看的是节点包定义本身，没有实例 <code>config.params</code> 可写回，故不透传</p>
+<p>  <code>onParamsChange</code>（组件按契约进只读），<code>params</code> 取 <code>parameters[].default</code> 合成；</p>
+<p>  组件宽于弹窗可用宽度时按视口等比 <code>transform: scale()</code> 收窄</p>
+
 <h2 id="1114-节点文件资产存储assets-store2026-08-30-起">11.14 节点文件资产存储（assets store，2026-08-30 起）</h2>
 
 <p>节点文件内容<strong>不存数据库</strong>（迁移 009 已删除 <code>nodes.files</code> 列），统一落盘到资产库：</p>

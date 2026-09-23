@@ -159,7 +159,7 @@ web/
 │   │   │
 │   │   ├── node-manager/           # 节点管理模块
 │   │   │   ├── NodeCard.tsx            # 节点卡片
-│   │   │   ├── NodeDetailModal.tsx     # 节点详情弹窗
+│   │   │   ├── NodeDetailModal.tsx     # 节点详情弹窗（含只读 UI 预览 Tab）
 │   │   │   ├── NodeImportModal.tsx     # 节点导入弹窗（git/folder）
 │   │   │   └── NodeTestPanel.tsx       # 节点测试面板
 │   │   │
@@ -300,6 +300,7 @@ Mermaid `stateDiagram-v2` 中的 `[*]` 渲染为圆形 Start / End 节点（`com
 - **缓存**：模块级 `Map<url, Promise<mount>>` 缓存，同一节点包多实例只加载一次；串行加载队列避免 IIFE 全局注册并发串扰；加载失败自动清缓存允许重试
 - **生命周期**：`mount(el, props)` 挂载 → props 变化时 `update(props)`（以 JSON 序列化去重）→ 卸载时 `unmount()`，组件未清理 DOM 时兜底清空容器
 - **数据装配**：`GlowNode` 订阅 `executionStore.selectedExecution`，将节点状态/入参/输出与流水线执行实例实时 metadata 组装为 `NodeWidgetProps`（`types/nodeWidget.ts`，apiVersion 1，只读契约）
+- **第三处宿主（节点定义只读预览）**：`NodeDetailModal` 的「UI 预览」Tab（仅 `ui.entry` 存在时出现）。弹窗展示的是节点包定义本身、没有「某个流水线实例的 config.params」可写回，因此**不透传 `onParamsChange`**（widget 依契约进入只读），`params` 取 `parameters[].default` 合成、`outputs: {}`、`execution: null`、`status: 'idle'`；组件超过弹窗可用宽度时按 `useViewportWidth` 等比 `transform: scale()` 收窄（earth-3d-viewer 等 1080 宽组件不撑破弹窗）。要试真实输出数据仍用「测试」面板
 - **错误兜底**：加载/mount 失败显示警示条，不影响节点卡片其余部分
 - **画布交互隔离**：容器带 `nodrag nowheel` class 并拦截点击/指针事件，防止误拖画布节点
 - **布局**：`AutoLayout.ts`（dagre）对带 ui 节点按组件尺寸动态计算占位
@@ -336,7 +337,7 @@ Mermaid `stateDiagram-v2` 中的 `[*]` 渲染为圆形 Start / End 节点（`com
 - **顶部工具栏**：搜索框（匹配名称/显示名/描述）+ 标签筛选 + 语言筛选 + 类型筛选（全部/code/image）+ 导入按钮
 - **节点网格**：`NodeCard` 卡片列表，支持删除
 - **导入弹窗** `NodeImportModal`：支持 git 仓库 URL 或本地 folder 两种导入方式，调用 `nodeService.importNode`
-- **详情弹窗** `NodeDetailModal`：展示节点完整定义
+- **详情弹窗** `NodeDetailModal`：展示节点完整定义（概览 / UI 预览 / 参数 / 输出 / flowx.json；含 `ui.entry` 的节点才有「UI 预览」Tab，只读）
 - **测试面板** `NodeTestPanel`：节点 Mock 测试
 
 ### 5.7.4 界面 4: 执行器配置 (ExecutorConfigPage)
@@ -409,7 +410,7 @@ Mermaid `stateDiagram-v2` 中的 `[*]` 渲染为圆形 Start / End 节点（`com
 节点管理功能位于 `/nodes` 页面（`NodeManagerPage`）+ `features/node-manager/` 模块：
 
 - **NodeCard**：节点卡片，展示图标、名称、描述、语言/标签等元信息，点击进入详情
-- **NodeDetailModal**：节点详情全屏弹窗，展示节点完整定义；外层容器 `pointer-events-none` + 内部卡片 `pointer-events-auto`，点击遮罩可关闭（见 5.16.4）
+- **NodeDetailModal**：节点详情全屏弹窗，展示节点完整定义；外层容器 `pointer-events-none` + 内部卡片 `pointer-events-auto`，点击遮罩可关闭（见 5.16.4）；含 `ui.entry` 的节点多一个只读「UI 预览」Tab（见 5.6.7）
 - **NodeImportModal**：节点导入弹窗，支持 `git`（仓库 URL）和 `folder`（本地目录）两种方式，提交后调用 `nodeService.importNode`，后端读取 `flowx.json` 完成导入
 - **NodeTestPanel**：节点测试面板，用于对节点进行 Mock 测试
 - **筛选与搜索**：由 `nodeStore` 提供 `getFilteredNodes`（搜索词 + 标签多选 + 语言 + 节点类型组合过滤）、`getAllTags`、`getAllLanguages`
@@ -641,7 +642,7 @@ Mermaid `stateDiagram-v2` 中的 `[*]` 渲染为圆形 Start / End 节点（`com
 ### 5.16.6 节点自定义 UI 组件（module 模式）
 - 节点包可在 `flowx.json` 中声明 `ui.entry` 携带预编译单文件 JS bundle，画布节点内嵌渲染（见 5.6.7 节与 `docs/11-node-package.md` 11.13 节）。
 - `NodeTestPanel` 新增「UI 预览」区域：Mock 测试后以真实输出驱动组件，供节点作者验证。
-- `NodeDetailModal` 对含自定义 UI 的节点显示「自定义 UI 组件」标记（安全提示）。
+- `NodeDetailModal` 对含自定义 UI 的节点显示「自定义 UI 组件」标记（安全提示），并提供只读「UI 预览」Tab（参数取参数默认值、控件改动不写回）。
 
 ---
 *主要变更: 从"AI 对话驱动"设计稿修订为与代码一致的现状文档——5 页面架构（工作流列表/画布/节点管理/执行器/设置），Zustand + axios service 层 + SSE 事件流，Taskade/n8n 深色主题风格*

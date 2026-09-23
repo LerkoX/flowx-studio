@@ -641,7 +641,8 @@ interface NodeWidgetParamSource {
 
 module 模式本质是在 Studio 前端上下文执行节点包携带的任意 JS（可访问
 localStorage、auth token、Studio 内部状态），**只应导入可信来源的节点包**。
-节点详情弹窗对含自定义 UI 的节点有明确标记。前端对加载/mount/update/unmount
+节点详情弹窗对含自定义 UI 的节点有明确标记（并多一个只读「UI 预览」Tab，见
+11.13.4）。前端对加载/mount/update/unmount
 各阶段做 try/catch 兜底：失败时内嵌区域显示警示条，不影响节点卡片其余部分。
 
 ### 11.13.4 前端渲染细节
@@ -652,6 +653,10 @@ localStorage、auth token、Studio 内部状态），**只应导入可信来源�
   摘要折叠为「查看数据」开关；移动端组件按 `ui.collapsed` 默认收起
 - `AutoLayout`（dagre）：带 ui 节点按组件尺寸动态计算占位
 - `NodeTestPanel`：提供「UI 预览」，用 Mock 测试的真实输出渲染组件
+- `NodeDetailModal`（节点管理→「查看」）：含 `ui.entry` 时提供**只读**「UI 预览」Tab
+  —— 弹窗看的是节点包定义本身，没有实例 `config.params` 可写回，故不透传
+  `onParamsChange`（组件按契约进只读），`params` 取 `parameters[].default` 合成；
+  组件宽于弹窗可用宽度时按视口等比 `transform: scale()` 收窄
 
 ## 11.14 节点文件资产存储（assets store，2026-08-30 起）
 

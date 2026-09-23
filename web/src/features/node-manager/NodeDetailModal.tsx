@@ -1,10 +1,14 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, GitBranch, Container, Code, Tag, FileCode, FileJson, Box, Clock, User, Copy, Check, AlertTriangle } from 'lucide-react'
+import { X, GitBranch, Container, Code, Tag, FileCode, FileJson, Box, Clock, User, Copy, Check, AlertTriangle, LayoutGrid } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { NodeDefinition } from '@/types/node'
+import type { NodeWidgetProps } from '@/types/nodeWidget'
 import GlassPanel from '@/components/GlassPanel'
 import JsonViewer from '@/components/JsonViewer'
+import ModuleNodeWidget, { buildWidgetUrl } from '@/components/ModuleNodeWidget'
+import { useViewportWidth } from '@/hooks/useMediaQuery'
+import { getCurrentTheme } from '@/utils/theme'
 
 interface NodeDetailModalProps {
   node: NodeDefinition | null
@@ -15,12 +19,43 @@ interface NodeDetailModalProps {
 
 export default function NodeDetailModal({ node, isOpen, loading, onClose }: NodeDetailModalProps) {
   const { t, i18n } = useTranslation()
-  const [activeTab, setActiveTab] = useState<'overview' | 'params' | 'outputs' | 'raw'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'ui' | 'params' | 'outputs' | 'raw'>('overview')
   const [copied, setCopied] = useState(false)
+  const viewportWidth = useViewportWidth()
 
   if (!node) return null
 
   const isImageNode = node.nodeType === 'image'
+  const hasUI = !!(node.ui?.entry && node.id)
+
+  // UI 预览（只读）：弹窗展示的是节点包定义本身，没有「某个流水线实例的参数」可写回，
+  // 因此不透传 onParamsChange（widget 契约里判空即进只读），params 取各参数默认值。
+  const uiWidth = node.ui?.width || 260
+  const uiHeight = node.ui?.height || 120
+  // 弹窗卡片 max-w-2xl + 内容区 p-6 + GlassPanel p-4，按视口收窄后的可用宽度
+  const availableWidth = Math.max(200, Math.min(672, viewportWidth - 32) - 80)
+  const uiScale = Math.min(1, availableWidth / uiWidth)
+  const previewProps: NodeWidgetProps = {
+    // 合成实例 ID：弹窗不是任何流水线实例，仅用于组件内部自持的展示逻辑
+    nodeId: `node-detail-${node.id}`,
+    nodeRef: node.name,
+    status: 'idle',
+    inputs: node.parameters.map((p) => p.name),
+    outputs: {},
+    params: Object.fromEntries(
+      node.parameters.map((p) => [p.name, p.default !== undefined ? String(p.default) : ''])
+    ),
+    execution: null,
+    theme: getCurrentTheme(),
+    locale: typeof navigator !== 'undefined' ? navigator.language : 'zh-CN',
+  }
+
+  // 切换节点后旧 tab 可能已不适用（从含 UI 的节点切到不含 UI 的、输出 tab 无输出），
+  // 此时回退到概览，避免内容区空白
+  const effectiveTab: typeof activeTab =
+    (activeTab === 'ui' && !hasUI) || (activeTab === 'outputs' && !node.outputs)
+      ? 'overview'
+      : activeTab
 
   const packageJson = node.package ? JSON.stringify(node.package, null, 2) : ''
 
@@ -85,8 +120,10 @@ export default function NodeDetailModal({ node, isOpen, loading, onClose }: Node
 
               {/* 标签切换 */}
               <div className="flex border-b border-white/10 flex-shrink-0">
+                {/* 5 个 tab 在窄屏上很挤：标签缩到 text-xs 并去掉多余间隙，允许换行 */}
                 {[
                   { key: 'overview' as const, label: t('node.tabOverview'), icon: Box },
+                  ...(hasUI ? [{ key: 'ui' as const, label: t('node.uiPreview'), icon: LayoutGrid }] : []),
                   { key: 'params' as const, label: t('node.tabParams'), icon: FileCode },
                   ...(node.outputs ? [{ key: 'outputs' as const, label: t('node.tabOutputs'), icon: Code }] : []),
                   { key: 'raw' as const, label: 'flowx.json', icon: FileJson },
@@ -94,14 +131,14 @@ export default function NodeDetailModal({ node, isOpen, loading, onClose }: Node
                   <button
                     key={tab.key}
                     onClick={() => setActiveTab(tab.key)}
-                    className={`flex-1 py-3 text-sm font-medium transition-all relative
-                      ${activeTab === tab.key ? 'text-white' : 'text-white/40 hover:text-white/60'}`}
+                    className={`flex-1 min-w-0 px-1 py-3 text-xs sm:text-sm font-medium transition-all relative
+                      ${effectiveTab === tab.key ? 'text-white' : 'text-white/40 hover:text-white/60'}`}
                   >
-                    <span className="flex items-center justify-center gap-2">
-                      <tab.icon size={14} />
+                    <span className="flex items-center justify-center gap-1 sm:gap-2">
+                      <tab.icon size={14} className="hidden sm:block flex-shrink-0" />
                       {tab.label}
                     </span>
-                    {activeTab === tab.key && (
+                    {effectiveTab === tab.key && (
                       <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
@@ -115,7 +152,7 @@ export default function NodeDetailModal({ node, isOpen, loading, onClose }: Node
 
               {/* 内容 */}
               <div className="flex-1 overflow-y-auto p-6">
-                {activeTab === 'overview' && (
+                {effectiveTab === 'overview' && (
                   <div className="space-y-4">
                     {/* 基本信息 */}
                     <GlassPanel className="p-4">
@@ -247,7 +284,63 @@ export default function NodeDetailModal({ node, isOpen, loading, onClose }: Node
                   </div>
                 )}
 
-                {activeTab === 'params' && (
+                {effectiveTab === 'ui' && hasUI && (
+                  <GlassPanel className="p-4">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <h3 className="text-white/70 font-medium text-sm flex items-center gap-2">
+                        <LayoutGrid size={14} />
+                        {t('node.uiPreview')}
+                      </h3>
+                      <span className="text-white/30 text-[10px] font-mono truncate">{node.ui!.entry}</span>
+                    </div>
+                    {/* 组件超过可用宽度时等比缩放，保证 UI 完整可见、不撑破弹窗 */}
+                    <div className="overflow-x-auto">
+                      {uiScale < 1 ? (
+                        <div
+                          style={{
+                            width: Math.round(uiWidth * uiScale),
+                            height: Math.round(uiHeight * uiScale),
+                            overflow: 'hidden',
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: uiWidth,
+                              height: uiHeight,
+                              transform: `scale(${uiScale})`,
+                              transformOrigin: 'top left',
+                            }}
+                          >
+                            <ModuleNodeWidget
+                              url={buildWidgetUrl(
+                                String(node.id),
+                                node.ui!.entry,
+                                node.updatedAt ? String(node.updatedAt) : undefined
+                              )}
+                              width={uiWidth}
+                              height={uiHeight}
+                              widgetProps={previewProps}
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <ModuleNodeWidget
+                          url={buildWidgetUrl(
+                            String(node.id),
+                            node.ui!.entry,
+                            node.updatedAt ? String(node.updatedAt) : undefined
+                          )}
+                          width={uiWidth}
+                          height={uiHeight}
+                          widgetProps={previewProps}
+                        />
+                      )}
+                    </div>
+                    <p className="text-white/30 text-[10px] mt-2">{t('node.uiPreviewReadonlyHint')}</p>
+                  </GlassPanel>
+                )}
+
+                {effectiveTab === 'params' && (
                   <div className="space-y-3">
                     {node.parameters.length === 0 ? (
                       <div className="text-center py-8 text-white/30 text-sm">
@@ -282,7 +375,7 @@ export default function NodeDetailModal({ node, isOpen, loading, onClose }: Node
                   </div>
                 )}
 
-                {activeTab === 'outputs' && node.outputs && (
+                {effectiveTab === 'outputs' && node.outputs && (
                   <div className="space-y-3">
                     {node.outputs.length === 0 ? (
                       <div className="text-center py-8 text-white/30 text-sm">
@@ -308,7 +401,7 @@ export default function NodeDetailModal({ node, isOpen, loading, onClose }: Node
                     )}
                   </div>
                 )}
-                {activeTab === 'raw' && (
+                {effectiveTab === 'raw' && (
                   loading && !node.package ? (
                     <div className="text-center py-8 text-white/30 text-sm">
                       {t('common.loading')}

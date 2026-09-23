@@ -306,7 +306,7 @@
 │   │   │
 │   │   ├── node-manager/           # 节点管理模块
 │   │   │   ├── NodeCard.tsx            # 节点卡片
-│   │   │   ├── NodeDetailModal.tsx     # 节点详情弹窗
+│   │   │   ├── NodeDetailModal.tsx     # 节点详情弹窗（含只读 UI 预览 Tab）
 │   │   │   ├── NodeImportModal.tsx     # 节点导入弹窗（git/folder）
 │   │   │   └── NodeTestPanel.tsx       # 节点测试面板
 │   │   │
@@ -454,6 +454,7 @@
 <li><strong>缓存</strong>：模块级 <code>Map&lt;url, Promise&lt;mount&gt;&gt;</code> 缓存，同一节点包多实例只加载一次；串行加载队列避免 IIFE 全局注册并发串扰；加载失败自动清缓存允许重试</li>
 <li><strong>生命周期</strong>：<code>mount(el, props)</code> 挂载 → props 变化时 <code>update(props)</code>（以 JSON 序列化去重）→ 卸载时 <code>unmount()</code>，组件未清理 DOM 时兜底清空容器</li>
 <li><strong>数据装配</strong>：<code>GlowNode</code> 订阅 <code>executionStore.selectedExecution</code>，将节点状态/入参/输出与流水线执行实例实时 metadata 组装为 <code>NodeWidgetProps</code>（<code>types/nodeWidget.ts</code>，apiVersion 1，只读契约）</li>
+<li><strong>第三处宿主（节点定义只读预览）</strong>：<code>NodeDetailModal</code> 的「UI 预览」Tab（仅 <code>ui.entry</code> 存在时出现）。弹窗展示的是节点包定义本身、没有「某个流水线实例的 config.params」可写回，因此<strong>不透传 <code>onParamsChange</code></strong>（widget 依契约进入只读），<code>params</code> 取 <code>parameters[].default</code> 合成、<code>outputs: {}</code>、<code>execution: null</code>、<code>status: 'idle'</code>；组件超过弹窗可用宽度时按 <code>useViewportWidth</code> 等比 <code>transform: scale()</code> 收窄（earth-3d-viewer 等 1080 宽组件不撑破弹窗）。要试真实输出数据仍用「测试」面板</li>
 <li><strong>错误兜底</strong>：加载/mount 失败显示警示条，不影响节点卡片其余部分</li>
 <li><strong>画布交互隔离</strong>：容器带 <code>nodrag nowheel</code> class 并拦截点击/指针事件，防止误拖画布节点</li>
 <li><strong>布局</strong>：<code>AutoLayout.ts</code>（dagre）对带 ui 节点按组件尺寸动态计算占位</li>
@@ -493,7 +494,7 @@
 <li><strong>顶部工具栏</strong>：搜索框（匹配名称/显示名/描述）+ 标签筛选 + 语言筛选 + 类型筛选（全部/code/image）+ 导入按钮</li>
 <li><strong>节点网格</strong>：<code>NodeCard</code> 卡片列表，支持删除</li>
 <li><strong>导入弹窗</strong> <code>NodeImportModal</code>：支持 git 仓库 URL 或本地 folder 两种导入方式，调用 <code>nodeService.importNode</code></li>
-<li><strong>详情弹窗</strong> <code>NodeDetailModal</code>：展示节点完整定义</li>
+<li><strong>详情弹窗</strong> <code>NodeDetailModal</code>：展示节点完整定义（概览 / UI 预览 / 参数 / 输出 / flowx.json；含 <code>ui.entry</code> 的节点才有「UI 预览」Tab，只读）</li>
 <li><strong>测试面板</strong> <code>NodeTestPanel</code>：节点 Mock 测试</li>
 </ul>
 <h3 id="574-界面-4-执行器配置-executorconfigpage">5.7.4 界面 4: 执行器配置 (ExecutorConfigPage)</h3>
@@ -571,7 +572,7 @@
 
 <ul>
 <li><strong>NodeCard</strong>：节点卡片，展示图标、名称、描述、语言/标签等元信息，点击进入详情</li>
-<li><strong>NodeDetailModal</strong>：节点详情全屏弹窗，展示节点完整定义；外层容器 <code>pointer-events-none</code> + 内部卡片 <code>pointer-events-auto</code>，点击遮罩可关闭（见 5.16.4）</li>
+<li><strong>NodeDetailModal</strong>：节点详情全屏弹窗，展示节点完整定义；外层容器 <code>pointer-events-none</code> + 内部卡片 <code>pointer-events-auto</code>，点击遮罩可关闭（见 5.16.4）；含 <code>ui.entry</code> 的节点多一个只读「UI 预览」Tab（见 5.6.7）</li>
 <li><strong>NodeImportModal</strong>：节点导入弹窗，支持 <code>git</code>（仓库 URL）和 <code>folder</code>（本地目录）两种方式，提交后调用 <code>nodeService.importNode</code>，后端读取 <code>flowx.json</code> 完成导入</li>
 <li><strong>NodeTestPanel</strong>：节点测试面板，用于对节点进行 Mock 测试</li>
 <li><strong>筛选与搜索</strong>：由 <code>nodeStore</code> 提供 <code>getFilteredNodes</code>（搜索词 + 标签多选 + 语言 + 节点类型组合过滤）、<code>getAllTags</code>、<code>getAllLanguages</code></li>
@@ -866,7 +867,7 @@
 <ul>
 <li>节点包可在 <code>flowx.json</code> 中声明 <code>ui.entry</code> 携带预编译单文件 JS bundle，画布节点内嵌渲染（见 5.6.7 节与 <code>docs/11-node-package.md</code> 11.13 节）。</li>
 <li><code>NodeTestPanel</code> 新增「UI 预览」区域：Mock 测试后以真实输出驱动组件，供节点作者验证。</li>
-<li><code>NodeDetailModal</code> 对含自定义 UI 的节点显示「自定义 UI 组件」标记（安全提示）。</li>
+<li><code>NodeDetailModal</code> 对含自定义 UI 的节点显示「自定义 UI 组件」标记（安全提示），并提供只读「UI 预览」Tab（参数取参数默认值、控件改动不写回）。</li>
 </ul>
 <hr>
 <p><em>主要变更: 从"AI 对话驱动"设计稿修订为与代码一致的现状文档——5 页面架构（工作流列表/画布/节点管理/执行器/设置），Zustand + axios service 层 + SSE 事件流，Taskade/n8n 深色主题风格</em></p>

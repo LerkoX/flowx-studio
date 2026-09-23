@@ -219,6 +219,7 @@ export default {
     seconds: '秒',
     uiPreview: 'UI 预览',
     uiPreviewHint: '运行测试后组件将收到真实输出数据',
+    uiPreviewReadonlyHint: '节点定义预览（只读）：参数取各参数默认值，控件改动不会写回；要看真实数据请用「测试」面板',
     running: '执行中...',
     runTest: '运行测试',
     execSuccess: '执行成功',

@@ -63,8 +63,19 @@
                 <h1 id="flowx-studio-实现状态跟踪文档">FlowX Studio 实现状态跟踪文档</h1>
 
 <blockquote>本文档记录 FlowX Studio 各模块的实现状态，区分「已实现」和「待实现」功能。</blockquote>
-<blockquote>最后更新：2026-09-01</blockquote>
+<blockquote>最后更新：2026-09-23</blockquote>
 
+<hr>
+
+<h2 id="近期重要变更2026-09-23节点详情弹窗只读-ui-预览">近期重要变更（2026-09-23，节点详情弹窗只读 UI 预览）</h2>
+
+<h3 id="节点详情弹窗ui-预览tab已落地">节点详情弹窗「UI 预览」Tab（已落地）</h3>
+<ul>
+<li>背景：节点管理里能看节点自带 UI 的入口只有「测试」面板（UI 预览区块排在输入参数/超时之后，参数多的节点要下滚），「查看」详情弹窗从引入起只有 概览/参数/输出/flowx.json 四个只读 Tab。</li>
+<li><code>NodeDetailModal</code> 在节点声明 <code>ui.entry</code> 时新增「UI 预览」Tab：复用 <code>ModuleNodeWidget</code> + <code>buildWidgetUrl</code>（<code>?v=&lt;updatedAt&gt;</code> 缓存破坏与画布一致）；<strong>只读</strong>——不透传 <code>onParamsChange</code>，<code>params</code> 取 <code>parameters[].default</code> 合成，<code>outputs: {}</code> / <code>execution: null</code> / <code>status: 'idle'</code>。</li>
+<li>自适应：组件宽于弹窗可用宽度时按 <code>useViewportWidth</code> 等比 <code>transform: scale()</code> 收窄（earth-3d-viewer 1080×280 等超宽组件不撑破弹窗）；tab 栏在窄屏缩小字号、隐藏图标，切换节点后失效的 tab（新节点无 UI/无输出）回退概览。</li>
+<li>用例：<code>NodeDetailModal.ui-preview.test.tsx</code>（4 例：Tab 出现与 URL 契约、超宽缩放、无 ui 节点不出现、tab 回退）。</li>
+</ul>
 <hr>
 
 <h2 id="近期重要变更2026-09-01命名执行器实例-远程-docker">近期重要变更（2026-09-01，命名执行器实例 + 远程 Docker）</h2>
