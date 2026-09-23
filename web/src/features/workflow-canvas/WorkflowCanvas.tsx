@@ -273,7 +273,14 @@ function WorkflowCanvasInner({
     const staggerTimers: ReturnType<typeof setTimeout>[] = []
 
     parseWorkflowGraph(sourceYaml)
-      .then(({ nodes: parsedNodes, edges: parsedEdges }) => {        // 状态读取必须取解析完成时刻的最新值（getState），不能用 effect 闭包快照：
+      .then(({ nodes: parsedNodes, edges: parsedEdges }) => {
+        // 本次重建的位置全部来自估算尺寸（rawNodes 是全新对象，没有 measured，
+        // AutoLayout 只能按 ui 配置占位），此前那次「按实测尺寸重排」的去重 key
+        // 随之失效：若不清空，重建后实测尺寸与上一份恰好相同时（折叠态切换
+        // 模板/执行快照时尺寸不变是常态）会被去重命中而跳过重排，画布就永久停在
+        // 估算尺寸（展开态量级）的大间距上，且再也不会自愈
+        layoutKeyRef.current = ''
+        // 状态读取必须取解析完成时刻的最新值（getState），不能用 effect 闭包快照：
         // mermaid 解析是异步的，期间 selectExecutionAndSync 可能已把执行状态
         // 同步进 store（选中/清除历史执行），用闭包快照重建节点会把刚同步的
         // 状态用旧值覆盖（出现「选中显示 idle、清除反而显示 success」的反转）
