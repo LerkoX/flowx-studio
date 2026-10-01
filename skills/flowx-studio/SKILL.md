@@ -195,6 +195,24 @@ Executors:
 `server_op.py`，节点运行时经 `flowx_client.ensure_plugin()` 自动上传注册到推理服务，
 服务端无需手动部署——加能力 = 只写一个节点包。
 
+#### 算子来源分层与选型纪律（先判断该走哪层，再动手）
+
+服务端算子有三个来源，**新增能力默认走第 3 层（自注册插件），不动服务端核心**：
+
+1. **核心内置**：`inference-server/app/main.py` 里的 `@registry.register`（如
+   `checkpoint.load` / `clip.encode` / `sample` / `vae.decode` 等基础原语）。
+   只有扩展**核心原语 / 加载层 / 新对象类型**时才允许动
+   `main.py`/`ops.py`/`model_manager.py`（见 inference-server/ROADMAP §1），且需方案先行
+2. **镜像内置插件**：`inference-server/plugins/*.py`（preprocess / upscale / cond_latent /
+   ipadapter / instantid / flux 等），随镜像部署、启动扫描注册；新增能力不要往这里加
+3. **节点自注册插件**（本节）：新推理算子一律做成节点包携带 `server_op.py`，参考实现
+   `nodes/detail-refine/`（SD3/Flux 全系列节点同模式）
+
+**先查再写**：动手前 `GET /ops`（或 `curl $service_url/ops`）确认所需算子是否已存在；
+已注册算子可直接用通用节点 `inference-op` 调用验证（零新代码），高频能力再补专属节点包。
+
+#### 实现契约
+
 - **插件契约**：`server_op.py` 定义模块级 `register(registry)`，内部用
   `@registry.register("op.name", inputs={...}, outputs={...}, description=...)` 声明算子；
   可 `from app import ops` 复用服务端核心原语（sample / vae_encode / resolve_pipe 等）
@@ -206,6 +224,10 @@ Executors:
 - **⚠️ 安全闸门**：`INFERENCE_TOKEN` 为空时 `/admin/*` 一律 404（上传接口=远程代码执行，
   公网隧道必须配 token）；配了 token 后流水线 `service_token` Param 必须填同一值，
   否则所有节点 401。参考实现：`nodes/detail-refine/`（server_op.py + ensure_plugin 调用）
+- **⚠️ 重名冲突**：上传与既有算子跨文件重名（或遮蔽核心算子）默认 **409 + 注册表/文件
+  全量回滚**；显式接管需 `force=true`（会 WARN 提示重启扫描顺序漂移风险）。注意重启后
+  服务端按文件名字典序扫描，跨文件重名的归属可能漂移——接管后应 DELETE 旧插件文件消除歧义。
+  算子已存在但非本节点上传时，`ensure_plugin` 视为可用直接复用（软注册），不要强行覆盖
 
 ### flowx.json 规范
 
