@@ -45,6 +45,9 @@ interface GlowNodeData {
   onParamsChange?: (params: Record<string, string>) => void
   /** 画布编辑模式标记：false 时节点不可选中、内嵌 UI 不可交互（缺省视为 true） */
   interactive?: boolean
+  /** 编辑态补充：本流水线最近一次成功执行的各节点输出（上游节点ID → 字段 → 值），
+   * 供 widget 在无运行实例时解析绑定运行时值（mask-paint 底图、绑上游地址的模型下拉等） */
+  lastOutputs?: Record<string, Record<string, string>>
   /** 离场标记：节点被外部删除后先播缩小淡出动画，再由画布移除 */
   leaving?: boolean
   /** 节点运行中推送的实时预览帧（如采样逐帧图像）：透传给自定义 UI 组件
@@ -171,14 +174,16 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
     let merged = src
     for (const [key, s] of Object.entries(src)) {
       if (s.kind !== 'node' || !s.nodeId || !s.field) continue
+      // 优先实时数据（执行中/回放），编辑态回退最近一次成功执行的输出
       const rv = nodeRuntimeData?.[s.nodeId]?.outputs?.[s.field]
+        ?? nodeData.lastOutputs?.[s.nodeId]?.[s.field]
       if (rv !== undefined && rv !== s.runtimeValue) {
         if (merged === src) merged = { ...src }
         merged[key] = { ...s, runtimeValue: rv }
       }
     }
     return merged
-  }, [nodeData.paramSources, nodeRuntimeData])
+  }, [nodeData.paramSources, nodeData.lastOutputs, nodeRuntimeData])
 
   const widgetProps = useMemo<NodeWidgetProps>(
     () => ({

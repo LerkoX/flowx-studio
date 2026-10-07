@@ -21,7 +21,7 @@ import { useExecutionStore } from '@/stores/executionStore'
 import { syncCanvasStatusesFromExecutionNodes } from './executionSelection'
 import { useIsMobile } from '@/hooks/useMediaQuery'
 import { parseWorkflowGraph, parseNodeRefs, parseNodeNames, parseNodeParams, parseParamSources } from '@/utils/mermaidParser'
-import { updateWorkflow, getWorkflow, getWorkflowExecutors } from '@/services/workflowService'
+import { updateWorkflow, getWorkflow, getWorkflowExecutors, getExecutions, getExecution } from '@/services/workflowService'
 import { resolveNodes } from '@/services/nodeService'
 import type { NodeDefinition } from '@/types/node'
 import type { ExecutorResolutionResult, OutputIncompleteReason } from '@/types/workflow'
@@ -148,6 +148,56 @@ function WorkflowCanvasInner({
   const selectedExecutionYaml = useExecutionStore((s) => s.selectedExecutionYaml)
   // 顶部栏展示的执行 ID：优先选中（回放）的执行，其次正在运行的执行
   const liveExecutionId = selectedExecutionId ?? runningExecutionId
+
+  // 编辑态补充：拉最近一次成功执行的节点输出（metadata 扁平点键还原），
+  // 经 data.lastOutputs 下发给 GlowNode，widget 的 paramSources.runtimeValue
+  // 在无运行实例时也能解析（mask-paint 底图、绑上游地址的模型下拉等）。
+  // 刻意不进 nodeRuntimeData store：避免编辑态「返回」区显示旧数据。
+  const [lastRunOutputs, setLastRunOutputs] = useState<Record<string, Record<string, string>>>({})
+  useEffect(() => {
+    const wfId = currentWorkflow?.id
+    if (mode !== 'edit' || !wfId) { setLastRunOutputs({}); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const list = await getExecutions({ workflow_id: Number(wfId), status: 'success', page: 1, page_size: 1 })
+        const latest = list.data?.items?.[0]
+        if (!latest || cancelled) return
+        const detail = await getExecution(String(latest.id))
+        if (cancelled) return
+        // metadata 可能是 JSON 字符串（API 直出）或已解析对象
+        let meta: unknown = detail.data?.metadata
+        if (typeof meta === 'string') { try { meta = JSON.parse(meta) } catch { meta = undefined } }
+        const runtime = (((meta as Record<string, unknown> | undefined)?.metadata) ?? {}) as Record<string, unknown>
+        const byNode: Record<string, Record<string, string>> = {}
+        for (const [key, value] of Object.entries(runtime)) {
+          const dot = key.indexOf('.')
+          if (dot <= 0) continue
+          const nodeId = key.slice(0, dot)
+          const field = key.slice(dot + 1)
+          if (!byNode[nodeId]) byNode[nodeId] = {}
+          byNode[nodeId][field] = typeof value === 'string'
+            ? value
+            : (value && typeof value === 'object' && 'value' in (value as Record<string, unknown>)
+              ? String((value as Record<string, unknown>).value)
+              : JSON.stringify(value))
+        }
+        setLastRunOutputs(byNode)
+      } catch { /* 装饰性数据，失败静默 */ }
+    })()
+    return () => { cancelled = true }
+  }, [mode, currentWorkflow?.id, runningExecutionId])
+
+  // 增量注入 lastOutputs（只改 data 保持 position 不变，避免丢失手动布局）
+  useEffect(() => {
+    setNodes((prev) =>
+      prev.map((n) => {
+        const cur = n.data as Record<string, unknown>
+        if (cur.lastOutputs === lastRunOutputs) return n
+        return { ...n, data: { ...cur, lastOutputs: lastRunOutputs } }
+      })
+    )
+  }, [lastRunOutputs, setNodes])
 
   // 画布图数据源：回放态（选中执行且有快照）用该执行的运行时快照渲染——
   // 快照是该执行的独立图定义（续跑追加节点后与模板已解耦）；
