@@ -26,7 +26,7 @@ interface WorkflowState {
     statuses: Record<string, string>,
     timestamps?: {
       completedAt: Record<string, number>
-      prevCompletedAt: Record<string, number>
+      prevCompletedAt?: Record<string, number>
     },
   ) => void
   syncParamsFromYAML: (yamlConfig: string) => void
@@ -99,8 +99,8 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
 
   // 整体重置状态（新执行开始/切换历史执行）时默认清空时间戳，
   // 画布高亮在无时间戳数据时回退为「目标节点运行即亮」。
-  // 选中历史执行时可传入从执行节点记录播种的时间戳，
-  // 避免中途选中运行中的执行时兜底逻辑误亮循环图的入环边
+  // 选中历史执行时只播种 completedAt（不播种 prevCompletedAt）：
+  // running 节点的前驱必定先于它启动前完成，播种 startedAt 会让入边全灭
   setNodeStatuses: (statuses, timestamps) => set({
     nodeStatuses: statuses,
     nodeCompletedAt: timestamps?.completedAt ?? {},

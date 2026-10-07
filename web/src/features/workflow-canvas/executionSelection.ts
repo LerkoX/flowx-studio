@@ -13,15 +13,15 @@ import { useWorkflowStore } from '@/stores/workflowStore'
 export function syncCanvasStatusesFromExecutionNodes(): void {
   const statuses: Record<string, string> = {}
   const completedAt: Record<string, number> = {}
-  const prevCompletedAt: Record<string, number> = {}
   useExecutionStore.getState().executionNodes.forEach((n) => {
     statuses[n.nodeId] = n.status
     if (n.completedAt) completedAt[n.nodeId] = n.completedAt.getTime()
-    if (n.status === 'running' && n.startedAt) {
-      prevCompletedAt[n.nodeId] = n.startedAt.getTime()
-    }
   })
-  useWorkflowStore.getState().setNodeStatuses(statuses, { completedAt, prevCompletedAt })
+  // 不播种 prevCompletedAt：快照里 running 节点的前驱必定先于它启动前完成，
+  // 若把 prevCompletedAt 设为 startedAt，isEdgeActive 的 sourceAt > prev 永不成立，
+  // 中途打开/刷新运行中的执行时所有入边都不亮（无快速流动动画）。
+  // 留空则回退为「目标运行即亮」——循环图的回边可能误亮，但优于全灭
+  useWorkflowStore.getState().setNodeStatuses(statuses, { completedAt })
 }
 
 export async function selectExecutionAndSync(id: string | null): Promise<void> {
