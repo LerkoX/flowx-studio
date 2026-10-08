@@ -636,6 +636,22 @@ func (s *WorkflowService) MockRun(id int64) (map[string]interface{}, error) {
 	}, nil
 }
 
+// pollWorkflowTerminal 轮询直到引擎给出终态（SUCCESS/FAILED/CANCELLED）或实例消失（err）。
+// 返回的是循环内捕获的终态：调用方不得出循环后重读状态——RunAsync 在 WorkflowFinish
+// 事件后立刻删除实例，重读会跑输拿到空串，把 FAILED 误判成 success（exec-550 事故）。
+func pollWorkflowTerminal(getStatus func() (string, error), interval time.Duration) (string, error) {
+	for {
+		status, err := getStatus()
+		if err != nil {
+			return "", err
+		}
+		if status == "SUCCESS" || status == "FAILED" || status == "CANCELLED" {
+			return status, nil
+		}
+		time.Sleep(interval)
+	}
+}
+
 func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 	ctx := context.Background()
 	startTime := time.Now()
@@ -700,22 +716,13 @@ func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 		return
 	}
 
-	// 轮询等待完成
-	var workflowErr error
-	for {
-		status, err := s.runtime.GetWorkflowStatus(execID)
-		if err != nil {
-			workflowErr = err
-			break
-		}
-		if status == "SUCCESS" || status == "FAILED" || status == "CANCELLED" {
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	status, _ := s.runtime.GetWorkflowStatus(execID)
-	finalStatus := strings.ToLower(status)
+	// 轮询等待完成：终态必须在循环内捕获，绝不能出循环后重读——RunAsync 在
+	// WorkflowFinish 事件后立刻删除实例，重读会跑输拿到空串（err 被忽略），
+	// 把 FAILED 误判成 success（exec-550 假阳性事故）
+	terminalStatus, workflowErr := pollWorkflowTerminal(func() (string, error) {
+		return s.runtime.GetWorkflowStatus(execID)
+	}, 500*time.Millisecond)
+	finalStatus := strings.ToLower(terminalStatus)
 
 	completedAt := time.Now()
 	durationMs := int(time.Since(startTime).Milliseconds())

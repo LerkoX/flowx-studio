@@ -1,6 +1,8 @@
 package service
 
 import (
+	"fmt"
+	"time"
 	"path/filepath"
 	"testing"
 
@@ -70,5 +72,47 @@ func TestResolveFinalStatusFromNodes(t *testing.T) {
 	emptyID := seedExec()
 	if status, errMsg := svc.resolveFinalStatusFromNodes(emptyID); status != "failed" || errMsg == "" {
 		t.Errorf("no nodes: status = %q errMsg = %q, want failed with message", status, errMsg)
+	}
+}
+
+// TestPollWorkflowTerminal exec-550 假阳性事故回归：轮询循环读到终态后，
+// RunAsync 的 defer 立刻删除实例，之后任何重读都只会拿到 err/空串。
+// 因此终态必须在循环内捕获并返回；若出循环重读，FAILED 会被误判成 success。
+func TestPollWorkflowTerminal(t *testing.T) {
+	// 场景 1：实例先给出 FAILED，随后（模拟被删）只会 err——必须捕获到 FAILED
+	calls := 0
+	terminal, err := pollWorkflowTerminal(func() (string, error) {
+		calls++
+		if calls == 1 {
+			return "RUNNING", nil
+		}
+		if calls == 2 {
+			return "FAILED", nil
+		}
+		return "", fmt.Errorf("workflow not found") // 实例已删
+	}, time.Millisecond)
+	if err != nil || terminal != "FAILED" {
+		t.Errorf("terminal = %q err = %v, want FAILED nil", terminal, err)
+	}
+
+	// 场景 2：从未读到终态实例就消失（竞态跑输）——返回 err，交给事件桥/节点兜底
+	terminal, err = pollWorkflowTerminal(func() (string, error) {
+		return "", fmt.Errorf("workflow not found")
+	}, time.Millisecond)
+	if err == nil || terminal != "" {
+		t.Errorf("terminal = %q err = %v, want empty + error", terminal, err)
+	}
+
+	// 场景 3：正常成功路径
+	calls = 0
+	terminal, err = pollWorkflowTerminal(func() (string, error) {
+		calls++
+		if calls < 3 {
+			return "RUNNING", nil
+		}
+		return "SUCCESS", nil
+	}, time.Millisecond)
+	if err != nil || terminal != "SUCCESS" {
+		t.Errorf("terminal = %q err = %v, want SUCCESS nil", terminal, err)
 	}
 }
