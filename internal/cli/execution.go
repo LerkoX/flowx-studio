@@ -313,6 +313,27 @@ func newExecutionContinueCmd() *cobra.Command {
 				body["run"] = false
 			}
 
+			// 续跑计划可见性：仅 SUCCESS 节点跳过，FAILED/CANCELLED/未运行节点
+			// 会真正重跑（flowx v0.1.9 起）；打印意图让用户知道会发生什么
+			if !noRun {
+				if nodesData, err := do(cmd.Context(), http.MethodGet,
+					"/executions/"+strconv.FormatInt(id, 10)+"/nodes", nil, nil); err == nil {
+					var nodes []executionNodeJSON
+					if json.Unmarshal(nodesData, &nodes) == nil {
+						skip, rerun := 0, []string{}
+						for _, n := range nodes {
+							if n.Status == "success" {
+								skip++
+							} else {
+								rerun = append(rerun, fmt.Sprintf("%s(%s)", n.NodeID, n.Status))
+							}
+						}
+						fmt.Printf("续跑计划：跳过 %d 个已成功节点，重跑 %d 个失败/未完成节点 %v\n",
+							skip, len(rerun), rerun)
+					}
+				}
+			}
+
 			data, err := do(cmd.Context(), http.MethodPost,
 				"/executions/"+strconv.FormatInt(id, 10)+"/continue", nil, body)
 			if err != nil {
@@ -334,7 +355,7 @@ func newExecutionContinueCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().Int64Var(&id, "id", 0, "execution ID (required)")
-	cmd.Flags().StringVar(&file, "file", "", "new workflow YAML ('-' for stdin) to update the graph before continuing; finished nodes are skipped, only new/unrun nodes execute")
+	cmd.Flags().StringVar(&file, "file", "", "new workflow YAML ('-' for stdin) to update the graph before continuing; successful nodes are skipped, failed/cancelled/unrun nodes (re)execute")
 	cmd.Flags().BoolVar(&follow, "follow", false, "follow the SSE log stream until the execution finishes")
 	cmd.Flags().BoolVar(&noRun, "no-run", false, "only update the execution snapshot (requires --file), do not run; continue later without --file to execute the new nodes")
 	return cmd
