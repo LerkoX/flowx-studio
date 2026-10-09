@@ -64,12 +64,16 @@ func (h *WorkflowHandler) RegisterRoutes(r *gin.RouterGroup) {
 
 // List 获取工作流列表
 func (h *WorkflowHandler) List(c *gin.Context) {
-	status := c.Query("status")
-	search := c.Query("search")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 
-	resp, err := h.service.List(status, search, page, pageSize)
+	filter := service.ListFilter{
+		Status:     c.Query("status"),
+		Search:     c.Query("search"),
+		Node:       c.Query("node"),
+		ExecStatus: c.Query("exec_status"),
+	}
+	resp, err := h.service.List(filter, page, pageSize)
 	if err != nil {
 		Error(c, http.StatusInternalServerError, err.Error())
 		return

@@ -114,7 +114,19 @@ func (s *WorkflowService) auditRecord(action, resourceID, detail string) {
 }
 
 // List 获取工作流列表
-func (s *WorkflowService) List(status, search string, page, pageSize int) (*model.PaginatedResponse, error) {
+// ListFilter 工作流列表过滤条件。
+// Search 模糊匹配名称/备注/YAML 配置全文；Node 匹配定义中引用的 nodeRef
+// （精确到 "<name>@" 前缀，避免子串误伤，如 flux-sampler 不会命中
+// flux-sampler-xl）；ExecStatus 按「最近一次执行」的状态过滤
+// （success|failed|running|cancelled|never，running 含 pending/paused）。
+type ListFilter struct {
+	Status     string
+	Search     string
+	Node       string
+	ExecStatus string
+}
+
+func (s *WorkflowService) List(f ListFilter, page, pageSize int) (*model.PaginatedResponse, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -125,13 +137,28 @@ func (s *WorkflowService) List(status, search string, page, pageSize int) (*mode
 	var conditions []string
 	var args []interface{}
 
-	if status != "" {
+	if f.Status != "" {
 		conditions = append(conditions, "status = ?")
-		args = append(args, status)
+		args = append(args, f.Status)
 	}
-	if search != "" {
-		conditions = append(conditions, "(name LIKE ? OR description LIKE ?)")
-		args = append(args, "%"+search+"%", "%"+search+"%")
+	if f.Search != "" {
+		conditions = append(conditions, "(name LIKE ? OR description LIKE ? OR yaml_config LIKE ?)")
+		args = append(args, "%"+f.Search+"%", "%"+f.Search+"%", "%"+f.Search+"%")
+	}
+	if f.Node != "" {
+		conditions = append(conditions, "yaml_config LIKE ?")
+		args = append(args, "%"+f.Node+"@%")
+	}
+	switch f.ExecStatus {
+	case "never":
+		conditions = append(conditions, "NOT EXISTS (SELECT 1 FROM executions WHERE workflow_id = workflows.id)")
+	case "running":
+		conditions = append(conditions,
+			"(SELECT status FROM executions WHERE workflow_id = workflows.id ORDER BY id DESC LIMIT 1) IN ('running','pending','paused')")
+	case "success", "failed", "cancelled":
+		conditions = append(conditions,
+			"(SELECT status FROM executions WHERE workflow_id = workflows.id ORDER BY id DESC LIMIT 1) = ?")
+		args = append(args, f.ExecStatus)
 	}
 
 	whereClause := ""

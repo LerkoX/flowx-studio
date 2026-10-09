@@ -49,7 +49,7 @@ type paginatedJSON struct {
 }
 
 func newWorkflowListCmd() *cobra.Command {
-	var status, search string
+	var status, search, node, execStatus string
 	var page, pageSize int
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -61,6 +61,12 @@ func newWorkflowListCmd() *cobra.Command {
 			}
 			if search != "" {
 				q.Set("search", search)
+			}
+			if node != "" {
+				q.Set("node", node)
+			}
+			if execStatus != "" {
+				q.Set("exec_status", execStatus)
 			}
 			q.Set("page", strconv.Itoa(page))
 			q.Set("page_size", strconv.Itoa(pageSize))
@@ -90,7 +96,9 @@ func newWorkflowListCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&status, "status", "", "filter by status (draft|active|archived)")
-	cmd.Flags().StringVar(&search, "search", "", "search keyword")
+	cmd.Flags().StringVar(&search, "search", "", "fuzzy keyword: name / description / yaml config")
+	cmd.Flags().StringVar(&node, "node", "", "filter by contained nodeRef (e.g. flux-sampler)")
+	cmd.Flags().StringVar(&execStatus, "exec-status", "", "filter by latest execution status (success|failed|running|cancelled|never)")
 	cmd.Flags().IntVar(&page, "page", 1, "page number")
 	cmd.Flags().IntVar(&pageSize, "page-size", 20, "page size")
 	return cmd

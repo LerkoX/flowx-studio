@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
-import { Activity, CheckCircle2, FileText, Trash2, X, XCircle } from 'lucide-react'
+import { Activity, CheckCircle2, FileText, Search, Trash2, X, XCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getWorkflows, deleteWorkflow } from '@/services/workflowService'
+import { getNodes } from '@/services/nodeService'
 import { useEventStream } from '@/services/eventService'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { toast } from '@/stores/toastStore'
@@ -59,13 +60,56 @@ export default function WorkflowListPage() {
   const setCurrentWorkflow = useWorkflowStore((s) => s.setCurrentWorkflow)
   const { confirm, dialog } = useConfirm()
 
-  const loadPage = useCallback(async (page: number, append: boolean) => {
-    if (loadingRef.current) return
-    loadingRef.current = true
-    if (append) setLoadingMore(true)
-    else setLoading(true)
-    try {
-      const res = await getWorkflows({ page, page_size: PAGE_SIZE })
+  // 过滤：关键字（防抖后入 filters）+ 状态下拉 + 最近运行下拉 + 包含节点下拉
+  const [searchInput, setSearchInput] = useState('')
+  const [filters, setFilters] = useState({ search: '', status: '', execStatus: '', node: '' })
+  const [nodeOptions, setNodeOptions] = useState<string[]>([])
+
+  // 关键字防抖 300ms，避免每敲一个字符就请求
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setFilters((f) => (f.search === searchInput.trim() ? f : { ...f, search: searchInput.trim() }))
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchInput])
+
+  // 节点下拉选项一次性拉取（节点名列表，跨页聚合）
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const names = new Set<string>()
+        for (let page = 1; page <= 10; page++) {
+          const res = await getNodes({ page, page_size: 100 })
+          const items = res.data?.items || []
+          for (const n of items) names.add(n.name)
+          if (page * 100 >= (res.data?.total ?? 0)) break
+        }
+        if (!cancelled) setNodeOptions([...names].sort())
+      } catch {
+        // 节点列表拉取失败不阻塞搜索主流程
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const loadPage = useCallback(
+    async (page: number, append: boolean) => {
+      if (loadingRef.current) return
+      loadingRef.current = true
+      if (append) setLoadingMore(true)
+      else setLoading(true)
+      try {
+        const res = await getWorkflows({
+          page,
+          page_size: PAGE_SIZE,
+          search: filters.search || undefined,
+          status: filters.status || undefined,
+          exec_status: filters.execStatus || undefined,
+          node: filters.node || undefined,
+        })
       const items = res.data?.items || []
       const totalCount = res.data?.total ?? 0
       pageRef.current = page
@@ -83,8 +127,11 @@ export default function WorkflowListPage() {
       setLoading(false)
       setLoadingMore(false)
     }
-  }, [])
+    },
+    [filters]
+  )
 
+  // 过滤条件变化 → 重置分页从头加载
   useEffect(() => {
     loadPage(1, false)
   }, [loadPage])
@@ -158,6 +205,71 @@ export default function WorkflowListPage() {
         <div>
           <h1 className="text-2xl font-bold text-white/90">{t('workflow.listTitle')}</h1>
           <p className="text-white/40 text-sm mt-1">{t('workflow.listSubtitle')}</p>
+        </div>
+
+        {/* 过滤工具条：关键字（名称/备注/配置全文）+ 状态 + 最近运行 + 包含节点 */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[220px]">
+            <Search
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none"
+            />
+            <input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder={t('workflow.searchPlaceholder')}
+              className="w-full pl-8 pr-8 py-2 rounded-lg bg-white/5 border border-white/10
+                         text-sm text-white/85 placeholder-white/30 outline-none
+                         focus:border-white/25 transition-colors"
+            />
+            {searchInput && (
+              <button
+                onClick={() => setSearchInput('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded text-white/40
+                           hover:text-white hover:bg-white/10 transition-colors"
+                title={t('common.close')}
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+          <select
+            value={filters.status}
+            onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}
+            className="px-2.5 py-2 rounded-lg bg-white/5 border border-white/10 text-sm
+                       text-white/75 outline-none focus:border-white/25 [&>option]:bg-panel"
+          >
+            <option value="">{t('workflow.filterStatusAll')}</option>
+            <option value="draft">{t('workflow.statusDraft')}</option>
+            <option value="active">{t('workflow.statusActive')}</option>
+            <option value="archived">{t('workflow.statusArchived')}</option>
+          </select>
+          <select
+            value={filters.execStatus}
+            onChange={(e) => setFilters((f) => ({ ...f, execStatus: e.target.value }))}
+            className="px-2.5 py-2 rounded-lg bg-white/5 border border-white/10 text-sm
+                       text-white/75 outline-none focus:border-white/25 [&>option]:bg-panel"
+          >
+            <option value="">{t('workflow.filterExecAll')}</option>
+            <option value="success">{t('workflow.statSuccess')}</option>
+            <option value="failed">{t('workflow.statFailed')}</option>
+            <option value="running">{t('workflow.statRunning')}</option>
+            <option value="cancelled">{t('workflow.execCancelled')}</option>
+            <option value="never">{t('workflow.execNever')}</option>
+          </select>
+          <select
+            value={filters.node}
+            onChange={(e) => setFilters((f) => ({ ...f, node: e.target.value }))}
+            className="px-2.5 py-2 rounded-lg bg-white/5 border border-white/10 text-sm
+                       text-white/75 outline-none focus:border-white/25 max-w-[200px] [&>option]:bg-panel"
+          >
+            <option value="">{t('workflow.filterNodeAll')}</option>
+            {nodeOptions.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
         </div>
 
         {loading ? (

@@ -10,6 +10,8 @@ import type { ExecutionStatus, ExecutionNode } from '@/types/execution'
 export async function getWorkflows(params?: {
   status?: string
   search?: string
+  node?: string
+  exec_status?: string
   page?: number
   page_size?: number
 }): Promise<ApiResponse<{ items: Workflow[]; total: number; page: number; pageSize: number }>> {
