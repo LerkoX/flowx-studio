@@ -76,7 +76,7 @@ export default function OutputExplorer({ outputs, compact = false }: OutputExplo
           setListExpanded(!listExpanded)
         }}
         className={`flex items-center gap-1 text-white/40 hover:text-white/60 transition-colors ${
-          compact ? 'text-[10px]' : 'text-xs'
+          compact ? 'text-[11px]' : 'text-xs'
         }`}
       >
         {listExpanded ? <ChevronUp size={compact ? 12 : 14} /> : <ChevronDown size={compact ? 12 : 14} />}
@@ -102,7 +102,7 @@ export default function OutputExplorer({ outputs, compact = false }: OutputExplo
                     setSelectedKey(e.key)
                   }}
                   className={`flex items-center gap-1 rounded border font-mono transition-colors ${
-                    compact ? 'text-[10px] px-1.5 py-0.5' : 'text-xs px-2 py-1'
+                    compact ? 'text-[11px] px-1.5 py-0.5' : 'text-xs px-2 py-1'
                   } bg-white/5 border-white/5 text-white/50 hover:text-white/70 hover:bg-white/10`}
                 >
                   <span>{e.key}</span>
@@ -111,7 +111,7 @@ export default function OutputExplorer({ outputs, compact = false }: OutputExplo
                       e.kind === 'json'
                         ? 'bg-emerald-500/15 text-emerald-400/80'
                         : 'bg-white/5 text-white/30'
-                    } ${compact ? 'text-[8px]' : 'text-[10px]'}`}
+                    } ${compact ? 'text-[9px]' : 'text-[10px]'}`}
                   >
                     {e.kind === 'json' ? 'json' : 'text'}
                   </span>

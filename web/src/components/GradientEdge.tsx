@@ -1,13 +1,17 @@
 import { memo } from 'react'
-import { type EdgeProps, getBezierPath, EdgeLabelRenderer } from '@xyflow/react'
+import { type EdgeProps, EdgeLabelRenderer } from '@xyflow/react'
 import { Repeat } from 'lucide-react'
+import { useIsMobile } from '@/hooks/useMediaQuery'
+import { useCanvasOverview } from '@/features/workflow-canvas/useCanvasOverview'
+import { getRoutedBezierPath } from '@/features/workflow-canvas/edgeRouting'
 
 /**
  * 流水线连线：
- * - 目标端箭头 + 常驻慢速虚线流动（沿 source → target 方向）指示流水线方向
- * - 源节点运行中：渐变高亮 + 加速流动
- * - 目标节点失败：红色调
- * - 两端节点均已运行成功：实线、无流动效果（表示流已走过）
+ * - 目标端箭头指示 source → target 方向
+ * - 源节点运行中：渐变高亮 + 加速流动 + 霓虹呼吸光晕
+ * - 目标节点失败：红色实线
+ * - 两端节点均已运行成功：绿色实线、无流动效果（表示流已走过）
+ * - 未执行：低透明度灰色虚线，退到背景层
  * - 携带条件标签时（loop 回环等）在线条中点渲染琥珀色胶囊
  */
 const GradientEdge = memo(({
@@ -20,33 +24,55 @@ const GradientEdge = memo(({
   targetPosition,
   data,
 }: EdgeProps) => {
-  const [edgePath, labelX, labelY] = getBezierPath({
-    sourceX, sourceY, sourcePosition,
-    targetX, targetY, targetPosition,
-  })
+  const isMobile = useIsMobile()
+  // 低缩放时连线改用屏幕固定宽度；与节点概览使用同一套迟滞阈值
+  const overviewMode = useCanvasOverview(isMobile)
 
   const edgeData = (data as Record<string, unknown>) ?? {}
+  const controlOffset = typeof edgeData.controlOffset === 'number' ? edgeData.controlOffset : 0
+  const [edgePath, labelX, labelY] = getRoutedBezierPath({
+    sourceX, sourceY, sourcePosition,
+    targetX, targetY, targetPosition,
+    controlOffset,
+  })
+
   const isAnimated = edgeData.animated === true
   const isFailed = edgeData.status === 'failed'
   const isTraversed = edgeData.traversed === true
   const label = typeof edgeData.label === 'string' ? edgeData.label : undefined
 
-  const idleColor = 'rgba(255,255,255,0.25)'
-  const traversedColor = 'rgba(52,211,153,0.55)'
+  const idleColor = 'rgba(255,255,255,0.32)'
+  const traversedColor = 'rgba(52,211,153,0.72)'
+  const failedColor = 'rgba(251,113,133,0.88)'
   const stroke = isFailed
-    ? 'rgba(251,113,133,0.7)'
+    ? failedColor
     : isAnimated
       ? `url(#gradient-${id})`
       : isTraversed
         ? traversedColor
         : idleColor
   const arrowFill = isFailed
-    ? 'rgba(251,113,133,0.8)'
+    ? 'rgba(251,113,133,0.9)'
     : isAnimated
       ? '#a855f7'
       : isTraversed
-        ? 'rgba(52,211,153,0.7)'
-        : 'rgba(255,255,255,0.4)'
+        ? 'rgba(52,211,153,0.8)'
+        : 'rgba(255,255,255,0.42)'
+
+  const strokeWidth = isFailed
+    ? 4
+    : isAnimated
+      ? 4.5
+      : isTraversed
+        ? 3.5
+        : 3
+  const pathOpacity = isFailed
+    ? 0.95
+    : isAnimated
+      ? 1
+      : isTraversed
+        ? 0.9
+        : 0.36
 
   return (
     <>
@@ -69,25 +95,43 @@ const GradientEdge = memo(({
         </marker>
       </defs>
 
+      {/* 执行中的底层霓虹光晕：主线仍负责精确路径，光晕只负责状态识别 */}
+      {isAnimated && (
+        <path
+          className="edge-neon-halo"
+          d={edgePath}
+          stroke={`url(#gradient-${id})`}
+          strokeWidth={10}
+          fill="none"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          vectorEffect={overviewMode ? 'non-scaling-stroke' : 'none'}
+          pointerEvents="none"
+        />
+      )}
+
       {/* 连线：dasharray 周期均为 16，配合 edgeFlow 关键帧沿路径方向流动；
-          已流过（两端均成功）为实线无动画 */}
+          已流过（两端均成功）为实线无动画，未执行为低透明度静态虚线 */}
       <path
         id={id}
         className="react-flow__edge-path"
         d={edgePath}
         stroke={stroke}
-        strokeWidth={isAnimated ? 3.5 : 3}
+        strokeWidth={strokeWidth}
         fill="none"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        vectorEffect={overviewMode ? 'non-scaling-stroke' : 'none'}
         markerEnd={`url(#arrow-${id})`}
         style={{
-          filter: isAnimated ? 'drop-shadow(0 0 4px rgba(34,211,238,0.6))' : 'none',
-          strokeDasharray: isAnimated ? '10 6' : isTraversed ? 'none' : '4 12',
-          animation: isAnimated
-            ? 'edgeFlow 0.4s linear infinite'
-            : isTraversed
-              ? 'none'
-              : 'edgeFlow 1.5s linear infinite',
-          opacity: isFailed ? 0.9 : isAnimated ? 1 : isTraversed ? 0.85 : 0.7,
+          filter: isAnimated
+            ? 'drop-shadow(0 0 4px rgba(34,211,238,0.75)) drop-shadow(0 0 8px rgba(168,85,247,0.45))'
+            : isFailed
+              ? 'drop-shadow(0 0 4px rgba(251,113,133,0.35))'
+              : 'none',
+          strokeDasharray: isAnimated ? '10 6' : isFailed || isTraversed ? 'none' : '3 13',
+          animation: isAnimated ? 'edgeFlow 0.35s linear infinite' : 'none',
+          opacity: pathOpacity,
         }}
       />
 

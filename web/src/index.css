@@ -201,11 +201,16 @@
     transform: scale(0.85);
     transform-origin: bottom left;
   }
+}
 
-  .react-flow__minimap {
-    transform: scale(0.7);
-    transform-origin: bottom right;
-  }
+/* MiniMap 支持移动端 pointer/touch 拖动当前视口 */
+.react-flow__minimap-svg {
+  touch-action: none;
+  cursor: grab;
+}
+
+.react-flow__minimap-svg:active {
+  cursor: grabbing;
 }
 
 /* 移动端触摸优化 */
@@ -230,5 +235,44 @@
 @keyframes edgeFlow {
   to {
     stroke-dashoffset: -16;
+  }
+}
+
+/* 执行中连线的外层霓虹光晕：只做透明度呼吸，主线保持清晰 */
+.edge-neon-halo {
+  opacity: 0.18;
+  filter: blur(2.5px);
+  animation: edgeNeonPulse 1s ease-in-out infinite;
+}
+
+@keyframes edgeNeonPulse {
+  0%, 100% {
+    opacity: 0.16;
+  }
+  50% {
+    opacity: 0.52;
+  }
+}
+
+/* 执行中节点外壳霓虹描边：只让边框呼吸，节点主体保持稳定 */
+.node-neon-ring {
+  border: 2px solid transparent;
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.95), rgba(168, 85, 247, 0.8)) border-box;
+  -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  box-shadow:
+    0 0 8px rgba(34, 211, 238, 0.45),
+    0 0 14px rgba(168, 85, 247, 0.22);
+  opacity: 0.42;
+  animation: nodeNeonPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes nodeNeonPulse {
+  0%, 100% {
+    opacity: 0.36;
+  }
+  50% {
+    opacity: 0.95;
   }
 }

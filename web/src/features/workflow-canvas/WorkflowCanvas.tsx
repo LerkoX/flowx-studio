@@ -544,8 +544,10 @@ function WorkflowCanvasInner({
         .join('|')
     if (key === layoutKeyRef.current) return
     layoutKeyRef.current = key
-    const { nodes: layouted } = autoLayout(nodes, edges, { direction })
-    setNodes(layouted)
+    const { nodes: layoutedNodes, edges: layoutedEdges } = autoLayout(nodes, edges, { direction })
+    setNodes(layoutedNodes)
+    // 实测尺寸重排后同步更新绕行控制点；否则节点展开/收起后仍沿用旧路径
+    setEdges(layoutedEdges)
   }, [nodes, edges, direction, setNodes])
 
   // 实时同步执行状态：空状态表（退出回放态/新执行开始）时全量复位为 idle，
@@ -565,15 +567,20 @@ function WorkflowCanvasInner({
     )
 
     setEdges((eds) =>
-      eds.map((edge) => ({
-        ...edge,
-        data: {
-          ...edge.data,
-          animated: isEdgeActive(edge, nodeStatuses, nodeCompletedAt, nodePrevCompletedAt),
-          traversed: isEdgeTraversed(edge.source, edge.target, nodeStatuses, nodeCompletedAt),
-          status: nodeStatuses[edge.target] === 'failed' ? 'failed' : 'normal',
-        },
-      }))
+      eds.map((edge) => {
+        const animated = isEdgeActive(edge, nodeStatuses, nodeCompletedAt, nodePrevCompletedAt)
+        return {
+          ...edge,
+          // 复杂图中若绕行后仍有轻微交叉，执行中的路径优先保持在节点上方
+          zIndex: animated ? 10 : 0,
+          data: {
+            ...edge.data,
+            animated,
+            traversed: isEdgeTraversed(edge.source, edge.target, nodeStatuses, nodeCompletedAt),
+            status: nodeStatuses[edge.target] === 'failed' ? 'failed' : 'normal',
+          },
+        }
+      })
     )
   }, [nodeStatuses, nodeCompletedAt, nodePrevCompletedAt, setNodes, setEdges])
 
@@ -1000,23 +1007,27 @@ function WorkflowCanvasInner({
           />
         )}
 
-        {/* 小地图 - 移动端隐藏 */}
-        {!isMobile && (
-          <MiniMap
-            className="!bg-white/5 !border-white/10 !rounded-xl !backdrop-blur-xl"
-            nodeColor={(node) => {
-              const colors: Record<string, string> = {
-                idle: '#94a3b8',
-                running: '#22d3ee',
-                success: '#34d399',
-                failed: '#fb7185',
-                skipped: '#64748b',
-              }
-              return colors[node.data?.status as string] || '#94a3b8'
-            }}
-            maskColor="var(--minimap-mask)"
-          />
-        )}
+        {/* 小地图：桌面/移动端均显示；移动端抬高避开底部 Tab 栏 */}
+        <MiniMap
+          className={`!bg-white/5 !border-white/10 !rounded-xl !backdrop-blur-xl
+                     ${isMobile ? '!mb-14 !mr-2' : ''}`}
+          style={{ width: isMobile ? 144 : 200, height: isMobile ? 104 : 150 }}
+          nodeColor={(node) => {
+            const colors: Record<string, string> = {
+              idle: '#94a3b8',
+              running: '#22d3ee',
+              success: '#34d399',
+              failed: '#fb7185',
+              skipped: '#64748b',
+            }
+            return colors[node.data?.status as string] || '#94a3b8'
+          }}
+          maskColor="var(--minimap-mask)"
+          maskStrokeColor="rgba(34,211,238,0.85)"
+          maskStrokeWidth={isMobile ? 2 : 1.5}
+          pannable
+          zoomable={false}
+        />
 
       </ReactFlow>
 

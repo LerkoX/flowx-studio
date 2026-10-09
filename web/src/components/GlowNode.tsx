@@ -10,6 +10,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { getCurrentTheme } from '@/utils/theme'
 import ModuleNodeWidget, { buildWidgetUrl } from '@/components/ModuleNodeWidget'
 import OutputExplorer from '@/components/OutputExplorer'
+import { useCanvasOverview, useOverviewTitleScale } from '@/features/workflow-canvas/useCanvasOverview'
 import type { NodeWidgetExecution, NodeWidgetParamSource, NodeWidgetProps } from '@/types/nodeWidget'
 import type { NodeUIConfig } from '@/types/node'
 import type { NodePreview } from '@/types/workflow'
@@ -105,6 +106,8 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
   ) as NodeWidgetStatus
   const config = statusConfig[status]
   const isMobile = useIsMobile()
+  const overviewMode = useCanvasOverview(isMobile)
+  const overviewTitleScale = useOverviewTitleScale(isMobile)
 
   const hasUI = !!(nodeData.ui?.entry && nodeData.nodeDbId)
   // 执行器徽章：名称/类型/来源/实例详情与输出完整性提示（画布注入）
@@ -162,6 +165,9 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
 
   // 仅带 UI 组件的节点订阅执行实例 metadata，避免无关重渲染
   const selectedExecution = useExecutionStore((s) => (hasUI ? s.selectedExecution : null))
+  // 实时执行期间降低未执行节点存在感；布尔订阅只在开始/结束时重渲染
+  const isExecuting = useExecutionStore((s) => s.isExecuting)
+  const pendingDuringRun = isExecuting && status === 'idle'
   // 仅带 UI 组件的节点订阅全图运行时数据：解析 {{ 节点.字段 }} 绑定的运行时值
   const nodeRuntimeData = useWorkflowStore((s) => (hasUI ? s.nodeRuntimeData : null))
   // 订阅主题偏好，切换主题时重渲染 widget
@@ -219,7 +225,7 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
       className="relative"
       style={leaving ? { pointerEvents: 'none' } : undefined}
       initial={{ scale: 0.85, opacity: 0, y: 10 }}
-      animate={leaving ? { scale: 0.6, opacity: 0, y: 8 } : { scale: 1, opacity: 1, y: 0 }}
+      animate={leaving ? { scale: 0.6, opacity: 0, y: 8 } : { scale: 1, opacity: pendingDuringRun ? 0.55 : 1, y: 0 }}
       transition={
         leaving
           ? { duration: 0.3, ease: 'easeIn' }
@@ -236,6 +242,11 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
             filter: 'blur(4px)',
           }}
         />
+      )}
+
+      {/* 执行中霓虹描边：只让边缘呼吸，不改变节点主体亮度 */}
+      {status === 'running' && (
+        <div className="node-neon-ring absolute -inset-[2px] rounded-[22px] pointer-events-none" />
       )}
 
       {/* 节点主体 */}
@@ -258,7 +269,9 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
           ...(hasUI && !collapsed ? { width: widgetWidth + 26 } : {}),
           boxShadow: selected
             ? `0 0 20px ${config.color}40, inset 0 1px 0 rgb(var(--color-ink) / 0.05)`
-            : 'inset 0 1px 0 rgb(var(--color-ink) / 0.05)',
+            : status === 'running'
+              ? '0 0 18px rgba(34,211,238,0.38), 0 0 34px rgba(168,85,247,0.18), inset 0 1px 0 rgb(var(--color-ink) / 0.05)'
+              : 'inset 0 1px 0 rgb(var(--color-ink) / 0.05)',
         }}
       >
         {/* 顶部彩色条 */}
@@ -279,38 +292,69 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
         <div className="flex items-start gap-2">
           {/* 图标 */}
           <div
-            className={`rounded-full flex items-center justify-center flex-shrink-0
+            className={`relative rounded-full flex items-center justify-center flex-shrink-0
                         ${isMobile ? 'w-8 h-8' : 'w-10 h-10'}`}
             style={{ background: `linear-gradient(135deg, ${accentColor}, ${accentColor}80)` }}
           >
             <span className={`text-on-accent ${isMobile ? 'text-base' : 'text-lg'}`}>
               {nodeData.icon || '◆'}
             </span>
+            {/* 概览模式下隐藏文字状态徽章，用状态色点保留运行状态识别 */}
+            {overviewMode && (
+              <span
+                className="absolute -right-0.5 -bottom-0.5 w-2.5 h-2.5 rounded-full border border-black/40"
+                style={{ background: config.color }}
+                title={status}
+              />
+            )}
           </div>
 
           <div className="flex-1 min-w-0">
             {/* 名称行：显示名（YAML Nodes.<id>.name，缺省回退图标签）+ 节点实例 ID 标签 */}
             <div className="flex items-center gap-1.5 min-w-0">
-              <div className={`text-white/90 font-semibold truncate ${isMobile ? 'text-xs' : 'text-sm'}`}>{name}</div>
+              <div
+                className={`text-white/90 font-semibold ${isMobile ? 'text-sm' : 'text-base'} ${
+                  overviewMode ? 'min-w-0 max-w-full whitespace-nowrap overflow-visible' : 'truncate'
+                }`}
+                style={
+                  overviewTitleScale > 1
+                    ? {
+                        width: '100%',
+                        maxWidth: '100%',
+                        transform: `scale(${overviewTitleScale})`,
+                        transformOrigin: 'left center',
+                        textShadow: '0 1px 6px rgba(0, 0, 0, 0.85)',
+                      }
+                    : undefined
+                }
+              >
+                {name}
+              </div>
               <span
                 className={`px-1 py-px rounded bg-white/5 border border-white/10 text-white/35
-                            font-mono flex-shrink-0 ${isMobile ? 'text-[8px]' : 'text-[9px]'}`}
+                            font-mono flex-shrink-0 ${overviewMode ? 'invisible' : ''}
+                            ${isMobile ? 'text-[9px]' : 'text-[10px]'}`}
               >
                 {nodeData.id}
               </span>
             </div>
             {description && (
-              <div className={`text-white/40 truncate mt-0.5 ${isMobile ? 'text-[10px]' : 'text-xs'}`}>{description}</div>
+              <div
+                className={`text-white/40 truncate mt-0.5 ${overviewMode ? 'invisible' : ''}
+                            ${isMobile ? 'text-[11px]' : 'text-[13px]'}`}
+              >
+                {description}
+              </div>
             )}
-            <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+            <div className={`flex items-center gap-1.5 mt-1.5 flex-wrap ${overviewMode ? 'invisible' : ''}`}>
               {language && (
                 <span className={`px-1.5 py-0.5 rounded-full bg-white/5 text-white/50 border border-white/10
-                                  ${isMobile ? 'text-[9px]' : 'text-[10px]'}`}>
+                                  ${isMobile ? 'text-[10px]' : 'text-[11px]'}`}>
                   {language}
                 </span>
               )}
               <span
-                className={`px-1.5 py-0.5 rounded-full border ${isMobile ? 'text-[9px]' : 'text-[10px]'}`}
+                className={`px-1.5 py-0.5 rounded-full border ${isMobile ? 'text-[10px]' : 'text-[11px]'}`}
                 style={{
                   color: config.color,
                   borderColor: `${config.color}40`,
@@ -324,7 +368,7 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
               {executor && (
                 <span
                   className={`px-1.5 py-0.5 rounded-full border max-w-[140px] truncate
-                              ${isMobile ? 'text-[9px]' : 'text-[10px]'}`}
+                              ${isMobile ? 'text-[10px]' : 'text-[11px]'}`}
                   style={{
                     color: executorBadgeColor(executor),
                     borderColor: `${executorBadgeColor(executor)}40`,
@@ -344,7 +388,7 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
               {outputIncomplete && (
                 <span
                   className={`px-1.5 py-0.5 rounded-full border border-amber-400/40 bg-amber-400/10
-                              text-amber-300 ${isMobile ? 'text-[9px]' : 'text-[10px]'}`}
+                              text-amber-300 ${isMobile ? 'text-[10px]' : 'text-[11px]'}`}
                   title={outputIncompleteTooltip}
                 >
                   ⚠ {t('canvas.outputIncomplete')}
@@ -418,7 +462,7 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
                   e.stopPropagation()
                   setRawDataExpanded(!rawDataExpanded)
                 }}
-                className="mt-1.5 flex items-center gap-1 text-[10px] text-white/30 hover:text-white/60 transition-colors pointer-events-auto"
+                className="mt-1.5 flex items-center gap-1 text-[11px] text-white/30 hover:text-white/60 transition-colors pointer-events-auto"
               >
                 {rawDataExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                 {rawDataExpanded ? t('canvas.collapseData') : t('canvas.viewData')}
@@ -439,7 +483,7 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
                     e.stopPropagation()
                     setCollapsedOverride(!collapsed)
                   }}
-                  className="w-full flex items-center justify-between text-[10px] text-white/40 hover:text-white/60 transition-colors"
+                  className="w-full flex items-center justify-between text-[11px] text-white/40 hover:text-white/60 transition-colors"
                 >
                   <span>
                     {hasInputs && t('canvas.inputsCount', { count: nodeData.inputs!.length })}
@@ -454,12 +498,12 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
                   <div className="mt-2">
                     {hasInputs && (
                       <div className="mb-2">
-                        <div className="text-[10px] text-white/30 uppercase tracking-wider mb-1">{t('canvas.inputs')}</div>
+                        <div className="text-[11px] text-white/30 uppercase tracking-wider mb-1">{t('canvas.inputs')}</div>
                         <div className="flex flex-wrap gap-1">
                           {nodeData.inputs!.map((input) => (
                             <span
                               key={input}
-                              className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-white/50 border border-white/5"
+                              className="text-[11px] px-1.5 py-0.5 rounded bg-white/5 text-white/50 border border-white/5"
                             >
                               {input}
                             </span>
@@ -478,12 +522,12 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
               <>
                 {hasInputs && (
                   <div className="mb-2">
-                    <div className="text-[10px] text-white/30 uppercase tracking-wider mb-1">{t('canvas.inputs')}</div>
+                    <div className="text-[11px] text-white/30 uppercase tracking-wider mb-1">{t('canvas.inputs')}</div>
                     <div className="flex flex-wrap gap-1">
                       {nodeData.inputs!.map((input) => (
                         <span
                           key={input}
-                          className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-white/50 border border-white/5"
+                          className="text-[11px] px-1.5 py-0.5 rounded bg-white/5 text-white/50 border border-white/5"
                         >
                           {input}
                         </span>

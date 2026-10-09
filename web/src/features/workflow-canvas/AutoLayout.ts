@@ -1,10 +1,14 @@
 import dagre from 'dagre'
-import type { Node, Edge } from '@xyflow/react'
+import { Position, type Node, type Edge } from '@xyflow/react'
+import { sampleRoutedBezier } from './edgeRouting'
 
 const NODE_WIDTH = 220
 const NODE_HEIGHT = 100
-const RANK_SEP = 48
-const NODE_SEP = 16
+// 给层间/同层连线预留通道，降低长连线穿过中间节点的概率
+const RANK_SEP = 64
+const NODE_SEP = 28
+const EDGE_NODE_GAP = 14
+const ROUTE_OFFSET_CANDIDATES = [40, 64, 88, 120, 160, 220, 300, 400, 540, 720, 960, 1200]
 
 // 内嵌 UI 组件时节点卡片的额外占位（内边距 + 边框 + 间距）
 const WIDGET_PAD_X = 28
@@ -105,6 +109,127 @@ function compactRanks(
   }
 }
 
+interface NodeBox {
+  left: number
+  right: number
+  top: number
+  bottom: number
+}
+
+function buildNodeBoxes(
+  positions: Map<string, { x: number; y: number }>,
+  sizes: Map<string, Size>,
+): Map<string, NodeBox> {
+  const boxes = new Map<string, NodeBox>()
+  positions.forEach((center, id) => {
+    const size = sizes.get(id) ?? { width: NODE_WIDTH, height: NODE_HEIGHT }
+    boxes.set(id, {
+      left: center.x - size.width / 2 - EDGE_NODE_GAP,
+      right: center.x + size.width / 2 + EDGE_NODE_GAP,
+      top: center.y - size.height / 2 - EDGE_NODE_GAP,
+      bottom: center.y + size.height / 2 + EDGE_NODE_GAP,
+    })
+  })
+  return boxes
+}
+
+function edgeRouteParams(
+  edge: Edge,
+  positions: Map<string, { x: number; y: number }>,
+  sizes: Map<string, Size>,
+  direction: 'TB' | 'LR',
+  controlOffset: number,
+) {
+  const sourceCenter = positions.get(edge.source)
+  const targetCenter = positions.get(edge.target)
+  if (!sourceCenter || !targetCenter) return null
+
+  const sourceSize = sizes.get(edge.source) ?? { width: NODE_WIDTH, height: NODE_HEIGHT }
+  const targetSize = sizes.get(edge.target) ?? { width: NODE_WIDTH, height: NODE_HEIGHT }
+
+  if (direction === 'LR') {
+    return {
+      sourceX: sourceCenter.x + sourceSize.width / 2,
+      sourceY: sourceCenter.y,
+      sourcePosition: Position.Right,
+      targetX: targetCenter.x - targetSize.width / 2,
+      targetY: targetCenter.y,
+      targetPosition: Position.Left,
+      controlOffset,
+    }
+  }
+
+  return {
+    sourceX: sourceCenter.x,
+    sourceY: sourceCenter.y + sourceSize.height / 2,
+    sourcePosition: Position.Bottom,
+    targetX: targetCenter.x,
+    targetY: targetCenter.y - targetSize.height / 2,
+    targetPosition: Position.Top,
+    controlOffset,
+  }
+}
+
+function collidingNodeIds(
+  edge: Edge,
+  positions: Map<string, { x: number; y: number }>,
+  sizes: Map<string, Size>,
+  boxes: Map<string, NodeBox>,
+  direction: 'TB' | 'LR',
+  controlOffset: number,
+): Set<string> {
+  const params = edgeRouteParams(edge, positions, sizes, direction, controlOffset)
+  const collisions = new Set<string>()
+  if (!params) return collisions
+
+  // 端点附近本来就会接触自身节点，跳过首尾采样点
+  const samples = sampleRoutedBezier(params, 36).slice(2, -2)
+  for (const point of samples) {
+    boxes.forEach((box, nodeId) => {
+      if (nodeId === edge.source || nodeId === edge.target || collisions.has(nodeId)) return
+      if (
+        point.x >= box.left &&
+        point.x <= box.right &&
+        point.y >= box.top &&
+        point.y <= box.bottom
+      ) {
+        collisions.add(nodeId)
+      }
+    })
+  }
+
+  return collisions
+}
+
+function chooseControlOffset(
+  edge: Edge,
+  positions: Map<string, { x: number; y: number }>,
+  sizes: Map<string, Size>,
+  boxes: Map<string, NodeBox>,
+  direction: 'TB' | 'LR',
+): number {
+  const baseCollisions = collidingNodeIds(edge, positions, sizes, boxes, direction, 0)
+  if (baseCollisions.size === 0) return 0
+
+  let bestOffset = 0
+  let bestCollisionCount = baseCollisions.size
+
+  for (const side of [-1, 1]) {
+    for (const magnitude of ROUTE_OFFSET_CANDIDATES) {
+      const offset = side * magnitude
+      const collisionCount = collidingNodeIds(edge, positions, sizes, boxes, direction, offset).size
+      if (collisionCount === 0) return offset
+      if (collisionCount < bestCollisionCount) {
+        bestOffset = offset
+        bestCollisionCount = collisionCount
+      }
+    }
+  }
+
+  // 无法完全绕开时，至少使用碰撞更少的一侧；没有改善则保持原始路径
+  return bestOffset
+}
+
 export function autoLayout(
   nodes: Node[],
   edges: Edge[],
@@ -153,5 +278,20 @@ export function autoLayout(
     }
   })
 
-  return { nodes: layoutedNodes, edges }
+  const boxes = buildNodeBoxes(positions, sizes)
+  const layoutedEdges = edges.map((edge) => {
+    const data = { ...(edge.data ?? {}) } as Record<string, unknown>
+    delete data.controlOffset
+
+    // 长连线如果穿过中间节点，只给这条边增加控制点偏移绕行；
+    // 普通无碰撞连线仍保持原贝塞尔路径
+    const controlOffset = chooseControlOffset(edge, positions, sizes, boxes, direction)
+    if (controlOffset !== 0) {
+      data.controlOffset = controlOffset
+    }
+
+    return { ...edge, data }
+  })
+
+  return { nodes: layoutedNodes, edges: layoutedEdges }
 }
