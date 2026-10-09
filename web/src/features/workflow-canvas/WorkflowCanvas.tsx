@@ -323,7 +323,7 @@ function WorkflowCanvasInner({
     const staggerTimers: ReturnType<typeof setTimeout>[] = []
 
     parseWorkflowGraph(sourceYaml)
-      .then(({ nodes: parsedNodes, edges: parsedEdges }) => {
+      .then(async ({ nodes: parsedNodes, edges: parsedEdges }) => {
         // 本次重建的位置全部来自估算尺寸（rawNodes 是全新对象，没有 measured，
         // AutoLayout 只能按 ui 配置占位），此前那次「按实测尺寸重排」的去重 key
         // 随之失效：若不清空，重建后实测尺寸与上一份恰好相同时（折叠态切换
@@ -394,7 +394,7 @@ function WorkflowCanvasInner({
           },
         }))
 
-        const { nodes: layoutedNodes, edges: layoutedEdges } = autoLayout(rawNodes, rawEdges, { direction })
+        const { nodes: layoutedNodes, edges: layoutedEdges } = await autoLayout(rawNodes, rawEdges, { direction })
         if (cancelled) return
         // 与当前画布 diff：后台（CLI/API）更新带来的新增节点逐个延迟挂载，
         // 配合节点组件的入场弹簧动画形成依次出现的丝滑效果；
@@ -529,7 +529,7 @@ function WorkflowCanvasInner({
   }, [mode, setNodes])
 
   // 按实测尺寸重排：首帧布局只能按估算尺寸占位，组件挂载/详情展开后节点实际
-  // 尺寸会变化（React Flow 自动测量到 node.measured），此处检测到变化后重跑 dagre，
+  // 尺寸会变化（React Flow 自动测量到 node.measured），此处检测到变化后重跑 ELK，
   // 避免节点重叠。key 不含位置，重排只改 position 不改变 measured，因此不会循环。
   // 新增节点逐个入场期间跳过：此时画布是部分图，重排会让已有节点位置抖动
   useEffect(() => {
@@ -544,11 +544,24 @@ function WorkflowCanvasInner({
         .join('|')
     if (key === layoutKeyRef.current) return
     layoutKeyRef.current = key
-    const { nodes: layoutedNodes, edges: layoutedEdges } = autoLayout(nodes, edges, { direction })
-    setNodes(layoutedNodes)
-    // 实测尺寸重排后同步更新绕行控制点；否则节点展开/收起后仍沿用旧路径
-    setEdges(layoutedEdges)
-  }, [nodes, edges, direction, setNodes])
+
+    let cancelled = false
+    autoLayout(nodes, edges, { direction })
+      .then(({ nodes: layoutedNodes, edges: layoutedEdges }) => {
+        if (cancelled) return
+        setNodes(layoutedNodes)
+        setEdges(layoutedEdges)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        if (layoutKeyRef.current === key) layoutKeyRef.current = ''
+        console.error('Failed to run ELK layout:', err)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [nodes, edges, direction, setNodes, setEdges])
 
   // 实时同步执行状态：空状态表（退出回放态/新执行开始）时全量复位为 idle，
   // 不能 early-return，否则上一轮的着色会残留在节点上

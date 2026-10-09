@@ -9,9 +9,9 @@ GO_FILES=$(shell find . -name '*.go' -not -path './$(WEB_DIR)/*')
 # 默认目标
 all: build
 
-# 构建前端
+# 构建前端（ELK worker 资源较大，提升 Vite 构建堆内存上限）
 build-web:
-	cd $(WEB_DIR) && npm install && npm run build
+	cd $(WEB_DIR) && npm install && NODE_OPTIONS=--max-old-space-size=2048 npm run build
 
 # 复制前端到 embed 目录
 copy-web: build-web

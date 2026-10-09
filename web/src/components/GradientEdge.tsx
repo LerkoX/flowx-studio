@@ -1,9 +1,50 @@
 import { memo } from 'react'
-import { type EdgeProps, EdgeLabelRenderer } from '@xyflow/react'
+import { type EdgeProps, getBezierPath, EdgeLabelRenderer } from '@xyflow/react'
 import { Repeat } from 'lucide-react'
 import { useIsMobile } from '@/hooks/useMediaQuery'
 import { useCanvasOverview } from '@/features/workflow-canvas/useCanvasOverview'
-import { getRoutedBezierPath } from '@/features/workflow-canvas/edgeRouting'
+
+interface RoutePoint {
+  x: number
+  y: number
+}
+
+function isRoutePoint(value: unknown): value is RoutePoint {
+  if (!value || typeof value !== 'object') return false
+  const point = value as Record<string, unknown>
+  return typeof point.x === 'number' && typeof point.y === 'number'
+}
+
+function routePath(points: RoutePoint[]): [string, number, number] {
+  const path = points
+    .map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x},${point.y}`)
+    .join(' ')
+
+  // 将条件标签放在折线总长度中点，而不是简单取首尾平均值
+  const lengths: number[] = []
+  let total = 0
+  for (let i = 1; i < points.length; i++) {
+    const length = Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y)
+    lengths.push(length)
+    total += length
+  }
+
+  let remaining = total / 2
+  for (let i = 1; i < points.length; i++) {
+    const length = lengths[i - 1]
+    if (remaining <= length || i === points.length - 1) {
+      const ratio = length > 0 ? remaining / length : 0
+      return [
+        path,
+        points[i - 1].x + (points[i].x - points[i - 1].x) * ratio,
+        points[i - 1].y + (points[i].y - points[i - 1].y) * ratio,
+      ]
+    }
+    remaining -= length
+  }
+
+  return [path, points[0].x, points[0].y]
+}
 
 /**
  * 流水线连线：
@@ -29,12 +70,21 @@ const GradientEdge = memo(({
   const overviewMode = useCanvasOverview(isMobile)
 
   const edgeData = (data as Record<string, unknown>) ?? {}
-  const controlOffset = typeof edgeData.controlOffset === 'number' ? edgeData.controlOffset : 0
-  const [edgePath, labelX, labelY] = getRoutedBezierPath({
-    sourceX, sourceY, sourcePosition,
-    targetX, targetY, targetPosition,
-    controlOffset,
-  })
+  const elkRoutePoints = Array.isArray(edgeData.routePoints)
+    ? edgeData.routePoints.filter(isRoutePoint)
+    : []
+  const routeMatchesEndpoints =
+    elkRoutePoints.length >= 2 &&
+    Math.abs(elkRoutePoints[0].x - sourceX) <= 2 &&
+    Math.abs(elkRoutePoints[0].y - sourceY) <= 2 &&
+    Math.abs(elkRoutePoints[elkRoutePoints.length - 1].x - targetX) <= 2 &&
+    Math.abs(elkRoutePoints[elkRoutePoints.length - 1].y - targetY) <= 2
+  const [edgePath, labelX, labelY] = routeMatchesEndpoints
+    ? routePath(elkRoutePoints)
+    : getBezierPath({
+        sourceX, sourceY, sourcePosition,
+        targetX, targetY, targetPosition,
+      })
 
   const isAnimated = edgeData.animated === true
   const isFailed = edgeData.status === 'failed'
