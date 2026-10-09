@@ -5,6 +5,7 @@ import { Activity, CheckCircle2, FileText, Search, Trash2, X, XCircle } from 'lu
 import { useTranslation } from 'react-i18next'
 import { getWorkflows, deleteWorkflow } from '@/services/workflowService'
 import { getNodes } from '@/services/nodeService'
+import Select from '@/components/Select'
 import { useEventStream } from '@/services/eventService'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { toast } from '@/stores/toastStore'
@@ -233,43 +234,40 @@ export default function WorkflowListPage() {
               </button>
             )}
           </div>
-          <select
+          <Select
             value={filters.status}
-            onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}
-            className="px-2.5 py-2 rounded-lg bg-white/5 border border-white/10 text-sm
-                       text-white/75 outline-none focus:border-white/25 [&>option]:bg-panel"
-          >
-            <option value="">{t('workflow.filterStatusAll')}</option>
-            <option value="draft">{t('workflow.statusDraft')}</option>
-            <option value="active">{t('workflow.statusActive')}</option>
-            <option value="archived">{t('workflow.statusArchived')}</option>
-          </select>
-          <select
+            onChange={(v) => setFilters((f) => ({ ...f, status: v }))}
+            options={[
+              { value: '', label: t('workflow.filterStatusAll') },
+              { value: 'draft', label: t('workflow.statusDraft') },
+              { value: 'active', label: t('workflow.statusActive') },
+              { value: 'archived', label: t('workflow.statusArchived') },
+            ]}
+            triggerClassName="px-2.5 py-2 rounded-lg text-sm text-white/75"
+          />
+          <Select
             value={filters.execStatus}
-            onChange={(e) => setFilters((f) => ({ ...f, execStatus: e.target.value }))}
-            className="px-2.5 py-2 rounded-lg bg-white/5 border border-white/10 text-sm
-                       text-white/75 outline-none focus:border-white/25 [&>option]:bg-panel"
-          >
-            <option value="">{t('workflow.filterExecAll')}</option>
-            <option value="success">{t('workflow.statSuccess')}</option>
-            <option value="failed">{t('workflow.statFailed')}</option>
-            <option value="running">{t('workflow.statRunning')}</option>
-            <option value="cancelled">{t('workflow.execCancelled')}</option>
-            <option value="never">{t('workflow.execNever')}</option>
-          </select>
-          <select
+            onChange={(v) => setFilters((f) => ({ ...f, execStatus: v }))}
+            options={[
+              { value: '', label: t('workflow.filterExecAll') },
+              { value: 'success', label: t('workflow.statSuccess') },
+              { value: 'failed', label: t('workflow.statFailed') },
+              { value: 'running', label: t('workflow.statRunning') },
+              { value: 'cancelled', label: t('workflow.execCancelled') },
+              { value: 'never', label: t('workflow.execNever') },
+            ]}
+            triggerClassName="px-2.5 py-2 rounded-lg text-sm text-white/75"
+          />
+          <Select
             value={filters.node}
-            onChange={(e) => setFilters((f) => ({ ...f, node: e.target.value }))}
-            className="px-2.5 py-2 rounded-lg bg-white/5 border border-white/10 text-sm
-                       text-white/75 outline-none focus:border-white/25 max-w-[200px] [&>option]:bg-panel"
-          >
-            <option value="">{t('workflow.filterNodeAll')}</option>
-            {nodeOptions.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => setFilters((f) => ({ ...f, node: v }))}
+            options={[
+              { value: '', label: t('workflow.filterNodeAll') },
+              ...nodeOptions.map((n) => ({ value: n, label: n })),
+            ]}
+            className="max-w-[200px]"
+            triggerClassName="px-2.5 py-2 rounded-lg text-sm text-white/75"
+          />
         </div>
 
         {loading ? (
