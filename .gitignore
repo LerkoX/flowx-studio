@@ -4,6 +4,8 @@ node_modules
 
 # Build artifacts
 /flowx-studio
+# 临时/对比构建产物（如 flowx-studio-new）：只作为本地验证用，不随仓库分发
+/flowx-studio-*
 *.exe
 internal/server/web/dist
 web/dist
