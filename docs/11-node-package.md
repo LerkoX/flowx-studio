@@ -149,7 +149,7 @@ image-downloader/
 **docker 执行器实例支持的 config 键**：`host`（远程 daemon 地址，如 `tcp://192.168.1.10:2375` / `ssh://user@host`，留空读 `DOCKER_HOST` 环境变量）、`tlsVerify`、`certPath`、`image`（容器镜像，默认 `alpine:latest`）、`registry`、`network`、`workdir`、`volumes`（远程 daemon 时为**远端机器**路径）、`env`、`tty`、`ttyWidth`、`ttyHeight`、`daemonTimeout`（daemon 控制面请求响应超时，如 `"15s"`/秒数，默认 15s；daemon 不可达时节点在超时后快速失败，不会一直停在 running）。
 
 **镜像注入规则**（展开时）：节点包的 `image` 会写入其 docker/k8s 执行器条目的 `config.image`，优先级为**节点 `image` > 条目 `config.image`**。flowx 执行器按名单例（同名=同容器），因此引用共享条目（`executor.ref` 实例或默认 docker 实例）且镜像与条目不一致时，展开器会复制条目配置合成节点专属的 `<节点名>-executor` 条目并注入镜像；镜像一致时直接复用共享条目。`executor.type: local` 时 `image` 只是 docker 能力声明，不注入。
-**local 执行器实例支持的 config 键**：`shell`、`workdir`、`timeout`、`env`、`pty`、`ptyWidth`、`ptyHeight`。
+**local 执行器实例支持的 config 键**：`shell`、`workdir`、`timeout`、`env`、`pty`、`ptyWidth`、`ptyHeight`、`interruptGrace`（终止/超时时的优雅退出宽限期，`"10s"` 或秒数，默认 10s，`0` 表示立即强杀——见 [11.16.2 节](#11162-终止中断纪律)）。
 | `requirements` | string[] | 否 | 依赖列表；若不填，可尝试读取 `requirements.txt` |
 | `parameters` | Parameter[] | 是 | 参数定义（`description` 应详细描述所需数据；可用 `source` 标注推荐来源节点包 + 输出字段） |
 | `env` | map<string, string> | 否 | 参数 → 环境变量映射，值支持模板表达式 |
@@ -750,6 +750,44 @@ Studio 从日志管道拦截标记行（**不落日志库、不进 execution.log
 参考实现：`flowx-pixelforge/nodes/ksampler/`（轮询推理服务 job 时上报标记）+
 `flowx-pixelforge/inference-server/app/preview.py`（帧缓冲）+ `flowx_client.py`
 的 `emit_preview()`（标记输出）。
+
+### 11.16.1 媒体传递纪律（硬性）
+
+节点的 `outputs` / `emit()` / 执行 metadata / 日志**不得**承载媒体本体
+（`data:...;base64,...`、裸 base64、二进制 hex）。控制通道只传不透明引用（对象 ID /
+本地路径）——媒体进 metadata 会被同步写进 `executions.metadata_json`，并随
+`GET /executions/:id` 与 SSE 全量回传，体积与延迟成倍放大。
+
+画布拿到媒体的三条合法路径（均为 HTTP 二进制，不经 base64）：
+
+| 场景 | 机制 |
+| --- | --- |
+| 过程/结果预览 | `FLOWX_PREVIEW` 标记（`emit_preview` / `emit_result_preview`）→ Studio `GET /executions/:id/nodes/:nodeId/preview-frame` 中转 → `props.preview.url` |
+| widget 取第三方服务对象 | 节点级通用代理 `service-proxy?path=/images/{id}&method=GET`（base/token 由 Studio 按执行记录解析，防 SSRF） |
+| 本地产物文件 | widget `mediaUrl()`（宿主路径，`load-image` / `save-*` 类节点） |
+
+历史教训：`image_io.thumb_data_url()`（`thumb_b64` 输出）是已删除的旧内嵌路线——
+曾把 ~10KB base64 缩略图写进每次执行 metadata（584/585 记录里的
+`MaskPaint.thumb_b64` 等键），并留下 widget 侧兼容分支；现已全部移除
+（相关节点改为 `emit_result_preview`）。
+
+### 11.16.2 终止/中断纪律
+
+流水线「终止执行」/节点超时 → flowx 本地执行器（`executor/local`）先向节点进程发
+**SIGTERM**，宽限期 `interruptGrace`（默认 10s）内未退出才 SIGKILL
+（`killCurrentProcess` / `prepareCmd` 的取消路径）。因此与第三方服务交互、任务可取消的
+节点必须：
+
+1. **进程侧自清**：捕获 SIGTERM/SIGINT → 定向取消自己提交的后台任务（
+   `flowx_client.submit_job()` 已自动登记进行中任务并安装信号处理器，逐个
+   `POST /interrupt` 后以 128+signal 退出）；
+2. **上报任务标识**：`emit_preview(..., base=..., job_id=...)` 带上服务基地址与任务 ID，
+   使 Studio 能在进程被强杀时**兜底转发** `/interrupt`
+   （`WorkflowService.CancelExecution` → `interruptRemoteJobs`：对该执行所有运行中且
+   建立过服务连接的节点统一转发，与具体流水线/节点类型无关；未上报 job_id 时跳过，
+   避免第三方服务 `{}` 语义误伤同服务上其他执行的任务）。
+
+只调同步 `/op` 的节点无需自清（同步执行不可取消）。
 
 ## 11.17 参考资料
 

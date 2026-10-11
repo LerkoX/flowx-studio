@@ -599,6 +599,31 @@ image/jpeg），`Cache-Control: no-cache`；无预览来源时 404。
 中转拉帧（1s 短缓存，单帧上限 16MB）。媒体全程 HTTP 二进制，不经 base64；
 Studio 无需对节点/推理服务开放任何入站回调接口。
 
+### 4.5.9 终止运行中的执行实例
+
+```http
+POST /api/v1/executions/:id/cancel
+```
+
+**说明**：终止运行中/暂停的执行（`running` / `paused`）。与「暂停」不同，这是**真终止**：
+引擎侧取消上下文，运行中的节点进程被终止，执行与仍处于 `running` 的节点均置为
+`cancelled`（之后可用 4.5.7 续跑未完成节点）。
+
+两段式终止（保证第三方服务上的后台任务不残留）：
+
+1. **节点侧优雅退出**：flowx 本地执行器先向节点进程发 `SIGTERM`，宽限期
+   `interruptGrace`（执行器 config，默认 10s）内未退出才 `SIGKILL`；节点应在收到信号时
+   取消自己提交的后台任务（`flowx_client` 内置：`submit_job` 登记 + 信号处理器
+   `POST /interrupt`，随后以 128+signal 退出）
+2. **Studio 侧兜底转发**：`CancelExecution` 对该执行**所有运行中、且建立过第三方服务
+   连接的节点**统一转发 `POST {base}/interrupt`（`{"job_id": "..."}`，Bearer 用该节点
+   执行时的 token），覆盖进程被强杀/信号丢失/节点未实现自清的情况。服务基地址与
+   job id 取自节点上报的预览标记（`FLOWX_PREVIEW` 的 `base`/`job_id` 字段），缺失时
+   回退到执行 metadata 的 `params.service_url`。**未上报 job_id 的节点不转发**——
+   第三方服务的空载荷语义是「取消该服务上全部任务」，会误伤同服务上其他执行的任务。
+
+转发失败不影响取消本身（仅记日志与审计：`cancel_remote_job` / `cancel_remote_job_failed`）。
+
 ## 4.6 全局事件流 API
 
 ### 4.6.1 订阅全局事件

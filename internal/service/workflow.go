@@ -573,6 +573,10 @@ func (s *WorkflowService) CancelExecution(execID int64) error {
 		}
 		// 实例不在内存（server 重启过）：无引擎事件，走下方落库收尾
 	}
+	// 兜底：向所有仍在运行、且与第三方（推理）服务建立过连接的节点转发中断。
+	// 节点进程先收到终止信号（SIGTERM）自行优雅退出并回收自己的后台任务；
+	// 但进程被强杀/信号丢失/节点未实现自清时，只有这里能阻止远程任务变孤儿。
+	s.interruptRemoteJobs(execID)
 	// 立即落库并广播：不依赖引擎事件；在内存时 runWorkflowAsync 轮询收尾与
 	// execution_complete 事件随后到达，重复写入相同状态（幂等）
 	now := time.Now()
@@ -1219,6 +1223,51 @@ func (s *WorkflowService) NodeServiceProxy(execID int64, nodeID, method, path st
 		return nil, "", 0, ErrNoNodeConnection
 	}
 	return proxyRequest(base, tok, method, path, body, 120*time.Second)
+}
+
+// interruptRemoteJobs 取消执行时，向所有运行中、且建立过第三方（推理）服务连接的
+// 节点转发中断（POST /interrupt）。节点是与第三方服务交互的主体，凡“可取消”的
+// 后台任务都在此收口；与具体流水线/节点类型无关，任何执行都适用。
+//
+// 设计取舍：
+//   - 只按节点执行时上报的任务标识（job_id）定向取消。标识缺失时**不**发空载荷——
+//     第三方服务的 {} 语义是“取消该服务上全部 running/pending 任务”，会误伤同服务
+//     上其他执行的任务；此时依赖节点进程侧的优雅退出（见 flowx_client 的信号处理）。
+//   - 失败仅记日志：远程中断失败不应阻塞执行终止本身。
+func (s *WorkflowService) interruptRemoteJobs(execID int64) {
+	rows, err := s.db.Query("SELECT node_id FROM execution_nodes WHERE execution_id = ? AND status = 'running'", execID)
+	if err != nil {
+		return
+	}
+	var nodeIDs []string
+	for rows.Next() {
+		var nodeID string
+		if rows.Scan(&nodeID) == nil {
+			nodeIDs = append(nodeIDs, nodeID)
+		}
+	}
+	_ = rows.Close()
+
+	for _, nodeID := range nodeIDs {
+		base, tok, jobID := s.nodeConnectionOf(execID, nodeID)
+		if base == "" {
+			continue
+		}
+		if jobID == "" {
+			log.Printf("[cancel] exec=%d node=%s: 未上报任务标识，跳过定向中断（依赖节点进程优雅退出）", execID, nodeID)
+			continue
+		}
+		body, _ := json.Marshal(map[string]string{"job_id": jobID})
+		detail := fmt.Sprintf("exec=%d node=%s job=%s", execID, nodeID, jobID)
+		_, _, status, err := proxyRequest(base, tok, http.MethodPost, "/interrupt", body, 30*time.Second)
+		if err != nil || status < 200 || status >= 300 {
+			log.Printf("[cancel] exec=%d node=%s: 远程中断失败 base=%s status=%d err=%v", execID, nodeID, base, status, err)
+			s.auditRecord("cancel_remote_job_failed", fmt.Sprintf("%d", execID), detail+fmt.Sprintf("err=%v status=%d", err, status))
+			continue
+		}
+		log.Printf("[cancel] exec=%d node=%s: 已转发远程中断 job=%s", execID, nodeID, jobID)
+		s.auditRecord("cancel_remote_job", fmt.Sprintf("%d", execID), detail)
+	}
 }
 
 // nodeConnectionOf 查节点执行时记录的第三方服务连接（base/token/jobID）：

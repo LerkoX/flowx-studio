@@ -288,12 +288,52 @@ config:
 - **节点 UI 一律在节点自己的 ui bundle 中实现，禁止改 flowx-studio 前端来实现节点级 UI**：参数控件、实时预览、进度条、结果展示等所有节点特有 UI 都属于节点包；GlowNode/WorkflowCanvas 等画布外壳只保留所有节点通用的基础元素（图标/名称/状态徽章/连接点/入参返回区）。Studio 侧的合法改动仅限通用数据管道（如把数据透传进 `props`）
 - `entry`：包内预编译单文件 `.js` bundle（≤10MB），格式不限——ESM 默认导出 `mount`，或 IIFE 调用 `window.FlowXNodeWidget.define(mount)`
 - 契约：`mount(el, props) => { update(props), unmount() }`；`props` 含 `status`/`inputs`/`outputs`/`execution`（流水线实时 metadata，无运行实例为 null）与 `params`（该节点实例当前的 `config.params` 绑定值，常量或 `{{ 上游.输出 }}` 模板原样下发）
-- **实时预览（`props.preview`，可选）**：节点脚本执行中途把预览帧地址以 stdout 标记行 `FLOWX_PREVIEW {"url": "...", "progress": 0~1, "token": "..."}` 上报（媒体本体不走 stdout/base64）；Studio 拦截标记（不落日志）记录帧来源，广播轻量 `node_preview` SSE（只带进度），前端以 `<img>` 直读 `GET /api/v1/executions/:id/nodes/:nodeId/preview-frame`（Studio 向帧源中转拉取）。帧以 `props.preview.url` 透传给组件（节点完成后保留最后一帧——帧源与 Studio 来源映射均有 TTL，组件需处理 img onerror 回退；回放态缺省，必须判空）。参考实现：flowx-pixelforge `nodes/ksampler/ui/node-widget.js` 预览面板 + `flowx_client.py` 的 `emit_preview()` + `inference-server/app/preview.py` 帧缓冲
+- **实时预览（`props.preview`，可选）**：节点脚本执行中途把预览帧地址以 stdout 标记行 `FLOWX_PREVIEW {"url": "...", "progress": 0~1, "token": "..."}` 上报（媒体本体不走 stdout/base64）；Studio 拦截标记（不落日志）记录帧来源，广播轻量 `node_preview` SSE（只带进度），前端以 `<img>` 直读 `GET /api/v1/executions/:id/nodes/:nodeId/preview-frame`（Studio 向帧源中转拉取）。帧以 `props.preview.url` 透传给组件（节点完成后保留最后一帧——帧源与 Studio 来源映射均有 TTL，组件需处理 img onerror 回退；回放态缺省，必须判空）。参考实现：flowx-pixelforge `nodes/ksampler/ui/node-widget.js` 预览面板 + `flowx_client.py` 的 `emit_preview()` + `inference-server/app/preview.py` 帧缓冲。**结果图（无采样过程的算子）用 `flowx_client.emit_result_preview(base, oid, tok)` 上报 `{host}/images/{oid}` 即可，媒体不进 outputs/metadata**
 - **参数来源标注（必做）**：渲染参数时不要直接展示 `{{ Param.xxx }}` 原始绑定串，优先用 `props.paramSources[key]` 渲染来源说明——`workflow` → `⚡ 流水线参数 · 参数名 = 当前值`（附 paramValue）；`node` → `🔗 上游节点显示名 · 字段`（执行中/回放时用 runtimeValue 补实时值）；`literal` → `✏️ 自定义值`。`paramSources` 缺省时（旧版 Studio）才回退展示原始绑定串。参考实现：flowx-txt2img 各节点 widget 的 `sourceCaptionOf`
 - **参数调整控件**：组件渲染滑杆/下拉等控件后调用 `props.onParamsChange(params)` 把**完整参数表**写回该节点的 `config.params`（全量替换，传 `{}` 清空），Studio 自动写回 workflow YAML 并持久化；回放态（查看历史执行快照）下 `onParamsChange` 为 undefined，调用前必须判空进入只读模式
 - 参考实现：免构建原生 JS 示例 `tests/e2e/testdata/ui-demo-node/ui/node-widget.js`；React+Vite 工程模板 `templates/node-widget/`
 - 改组件后只需重新 `node import` 生效，无需重启 server；在「节点管理→测试」面板有 UI 预览（预览中 onParamsChange 写回 Mock 测试的输入参数表单）
 - 安全：组件代码在 Studio 前端上下文执行，只导入可信来源
+
+### 媒体传递纪律（硬性，节点包必读）
+
+**禁止把媒体本体塞进控制通道**：节点的 `outputs` / `emit()` / 执行 metadata / 日志行
+里**不得**出现图片、音频、视频等媒体本体（`data:image/...;base64,...`、裸 base64、
+二进制 hex）。控制通道只传不透明引用（服务端对象 ID、本地路径），否则执行
+metadata 落库、`execution get` 响应、SSE 事件会被媒体撑爆。
+
+结果可视化按这三条路（都不经过 base64）：
+1. **预览帧（首选）**：执行中/完成后用 `flowx_client.emit_preview(url, progress, tok,
+   base, job_id)` 或 `emit_result_preview(base, oid, tok)` 上报 `FLOWX_PREVIEW` 标记 →
+   Studio 记录帧来源并由 `GET /api/v1/executions/:id/nodes/:nodeId/preview-frame`
+   **中转拉取**（媒体是 HTTP 二进制），widget 读 `props.preview.url` 渲染。URL 必须经
+   `flowx_client.host_base()` 构造（Studio 宿主机可达 ≠ 容器内可达），并给节点声明
+   `service_url_host` 参数
+2. **画布取对象本体**：widget 用节点级通用代理拉取第三方服务资源——
+   `POST/GET /api/v1/executions/:id/nodes/:nodeId/service-proxy?path=/images/{id}&method=GET`
+   （base/token 由 Studio 按该节点执行记录解析，防 SSRF；path/method/body 由 widget 自持），
+   即 `nodes/_common/widget-base.js` 的 `nodeProxyUrl()`
+3. **本地文件**：宿主路径用 widget 的 `mediaUrl()`（load-image / save-* 类节点）
+
+历史教训：`image_io.thumb_data_url()`（`thumb_b64` 输出）是已废弃的内嵌路线——曾把
+~10KB base64 缩略图写进每次执行的 metadata（584/585 执行记录里可见
+`MaskPaint.thumb_b64` 等键），DB/API/SSE 全链路随之膨胀。该函数与 widget 回退分支
+已删除，**新增节点一律不得复活**（存量节点已改为 `emit_result_preview`）。
+
+### 中断/终止纪律（节点包必读）
+
+流水线「终止执行」/节点超时 → flowx 本地执行器先向节点进程发 **SIGTERM**，
+宽限期（`interruptGrace`，默认 10s）内不退出才 SIGKILL。因此与第三方服务交互、
+任务可取消的节点必须做到两点：
+1. **进程侧自清**：收到 SIGTERM/SIGINT 时定向取消自己提交的后台任务。
+   `flowx_client` 已内置：`submit_job()` 登记进行中任务，信号处理器逐个
+   `POST /interrupt`（短超时，必须落在宽限期内）后以 128+signal 退出。
+2. **上报任务标识**：`emit_preview(..., base=..., job_id=...)` 带上服务基地址与 job id，
+   Studio 侧才能在进程被强杀时**兜底转发** `/interrupt`（`CancelExecution` 对所有
+   运行中且建立过服务连接的节点统一执行，与具体流水线无关）。
+
+只调用同步 `/op` 的节点无需自清（服务端同步执行不可取消）；`call_op` 超时后由
+服务端自行收尾。
 
 ### 导入与验证
 
