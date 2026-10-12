@@ -410,7 +410,7 @@ func ExpandNodeToConfig(node *model.Node) (*core.NodeConfig, error)
 
 多 Docker 实例时，节点包只声明 `supportedTypes: ["docker"]`，不绑定实例名；具体实例由 workflow 的 `config.executor.ref` 选择。未显式选择时按类型解析：优先类型匹配的全局默认实例，否则按名称稳定选择该类型第一个实例。
 
-执行器实例由 `ExecutorService`（`internal/service/executor.go`）管理：`local` 全局限一个、docker 可多个、全局唯一默认（迁移 010）；API 见 4.9 节 `/executors` 路由组，CLI 为 `flowx-studio executor` 命令组。解析结果同时决定资产引导方式：实例类型为 `local` 时走 `cp` 物化，`docker`/`k8s` 时要求镜像节点（`executor.bundled`）直接运行镜像内代码。
+执行器实例由 `ExecutorService`（`internal/service/executor.go`）管理：`local` 全局限一个、docker 可多个、全局唯一默认（迁移 010）；API 见 4.10 节 `/executors` 路由组，CLI 为 `flowx-studio executor` 命令组。解析结果同时决定资产引导方式：实例类型为 `local` 时走 `cp` 物化，`docker`/`k8s` 时要求镜像节点（`executor.bundled`）直接运行镜像内代码。
 
 同时以解析出的执行器名为键向 `cfg.Executors` 写入执行器配置。未声明 `extract` 时默认 `codec-block`。
 

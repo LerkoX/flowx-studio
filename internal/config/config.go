@@ -51,6 +51,11 @@ type MediaConfig struct {
 	// 默认 [~/flowx-output, ~/flowx-input]（节点默认输出/输入目录）。
 	// 也可通过 FLOWX_STUDIO_MEDIA_ROOTS 环境变量配置（逗号分隔），显式设置时覆盖配置文件。
 	Roots []string `mapstructure:"roots"`
+	// 上传落点根目录（支持 ~）。留空 = 自动选白名单里名为 flowx-input 的根下的
+	// uploads/（默认 ~/flowx-input/uploads；没有 flowx-input 则退第一个可写根）。
+	// 显式配置的目录会自动纳入可读白名单（否则上传物没法经 /media/file 预览）。
+	// 也可用 FLOWX_STUDIO_MEDIA_UPLOAD_DIR 覆盖。
+	UploadDir string `mapstructure:"upload_dir"`
 }
 
 // Load 加载配置
@@ -107,6 +112,17 @@ func Load() (*Config, error) {
 		cfg.Media.Roots[i] = expandPath(r, home)
 	}
 
+	// media.upload_dir：显式环境变量（非空白）优先，其次配置文件，都是空 = 自动落点。
+	// 不能直接用 cfg.Media.UploadDir：viper 的 AutomaticEnv 会把「设置成空串的环境变量」
+	// 当成显式设置，从而把配置文件里的值盖成空（systemd/docker-compose 注入空值是常见写法）。
+	switch env := strings.TrimSpace(os.Getenv(uploadDirEnvKey)); {
+	case env != "":
+		cfg.Media.UploadDir = env
+	default:
+		cfg.Media.UploadDir = configFileString("media.upload_dir")
+	}
+	cfg.Media.UploadDir = expandPath(cfg.Media.UploadDir, home)
+
 	// 展开 ~
 	cfg.Data.Dir = expandPath(cfg.Data.Dir, home)
 	cfg.Data.DBPath = expandPath(cfg.Data.DBPath, home)
@@ -117,6 +133,27 @@ func Load() (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// uploadDirEnvKey 上传落点目录的环境变量（与 viper AutomaticEnv 推导出的名字一致）
+const uploadDirEnvKey = "FLOWX_STUDIO_MEDIA_UPLOAD_DIR"
+
+// configFileString 只读配置文件里的字符串值，绕开 viper 的 AutomaticEnv：
+// 直接 viper.Get(key) 会被同名环境变量覆盖（含空串这种脏配置），
+// 而取父级 map 不受该叶子键的环境变量影响。
+func configFileString(key string) string {
+	idx := strings.LastIndex(key, ".")
+	if idx <= 0 || !viper.InConfig(key) {
+		return ""
+	}
+	parent, leaf := key[:idx], key[idx+1:]
+	m := viper.GetStringMap(parent)
+	if v, ok := m[leaf]; ok {
+		if str, ok := v.(string); ok {
+			return str
+		}
+	}
+	return ""
 }
 
 func expandPath(path, home string) string {

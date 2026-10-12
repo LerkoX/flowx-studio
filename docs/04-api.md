@@ -634,6 +634,10 @@ GET /api/v1/events
 
 **说明**：全局 SSE 事件流，推送事件总线上的所有事件（事件名为 `evt.Type`，数据为完整事件对象），客户端断开连接时自动取消订阅。节点实时预览进度以 `node_preview` 事件出现在该流中：`{"execution_id": 42, "node_id": "Sampler", "progress": 0.4, "timestamp": ...}`（不含媒体；帧经 4.5.8 的 preview-frame 接口拉取）。
 
+> **该流是全局的、不按流水线过滤**：所有流水线的执行事件都会推送过来。字段可用性分两类：`execution.started` / `execution.completed`（执行服务直接发出）的 `data` **带** `workflow_id`（流水线列表页据此更新卡片状态）；由 FlowX 桥接的 `node_start` / `node_complete` / `node_preview` / `execution.log` / `execution_start` / `execution_complete` / `execution_paused` / `execution_resumed` **只有** `execution_id`（要按流水线判断得先反查 `GET /executions/:id`）。消费方必须自己圈定「我关心的执行」，否则别的流水线运行会改写本视图——画布侧事故：选中运行中的执行 607 看回放，另一条流水线开始运行 → `execution.started` 被无差别处理 → `selectExecution(别人的 id)` → 「选中执行不属于本流水线 ⇒ 退出回放态」立即生效，表现为「选中过一会自己取消了」；同理别人的 `execution.completed`/`execution_complete` 会把本端运行态 `stopExecution()` 一起清掉，别人的 `node_start`/`node_complete` 还会因节点 id 跨流水线重名（`Save`/`MaskPaint`…）点亮本画布的节点。
+>
+> 画布侧现行规则（`workflow-canvas/WorkflowCanvas.tsx` 的 `eventAppliesToCanvas`）：**只有回放态选中的、或本页点运行发起的那个执行**的事件生效；**编辑态（未选中任何执行）保持完全干净**——他端（CLI/另一台设备）发起的运行不在画布上留任何运行特效（想看就在执行历史里选中它进回放态）。本页点运行后的「自动进入新执行回放态」由页面依 `POST /workflows/:id/run` 返回的 `executionId` 本地完成，不依赖 SSE：事件是全局流，分不出「我点的运行」和「他端起的运行」。回归测试：`web/src/features/workflow-canvas/WorkflowCanvas.sse-scope.test.tsx`、`web/src/pages/WorkflowCanvasPage.run-button.test.tsx`。
+
 ## 4.7 配置管理 API
 
 ### 4.7.1 获取系统配置
@@ -679,7 +683,100 @@ PUT /api/v1/config/system
 }
 ```
 
-## 4.8 CLI 命令
+## 4.8 本地媒体文件 API
+
+画布 widget 直接读写 FlowX（Studio 所在机器）的本地媒体文件，媒体本体一律经 HTTP
+二进制传输、不走 base64。主要用于「加载类节点」（`load-image` / `mask-paint` /
+`load-video` 等 **local-only** 节点）的源文件预览与上传——远程 docker 执行器写出的
+文件不在本机，这三个端点覆盖不到。
+
+可访问目录由 `media.roots` 白名单限定（默认 `[~/flowx-output, ~/flowx-input]`，可用
+`FLOWX_STUDIO_MEDIA_ROOTS` 覆盖），白名单外的路径一律 403（含软链逃逸）。
+上传落点由 `media.upload_dir` 决定（默认 `~/flowx-input/uploads/`，见 4.8.4），
+上传**不限扩展名与大小**。
+
+### 4.8.1 读取本地媒体文件
+
+```http
+GET /api/v1/media/file?path=<绝对路径 | ~/...>
+```
+
+返回文件内容（`http.ServeContent`，自带 Range 支持——视频可拖动进度条；
+`Cache-Control: private, max-age=60`）。参数缺失 400、文件不存在 404、白名单外 403。
+
+### 4.8.2 查询白名单目录
+
+```http
+GET /api/v1/media/roots
+```
+
+返回当前生效的白名单根目录（已展开 `~` 并解析软链），供 widget 提示可上传/可预览的位置。
+
+### 4.8.3 上传文件
+
+```http
+POST /api/v1/media/upload?subdir=<可选子目录>
+Content-Type: multipart/form-data
+字段：file（一次一个文件）
+```
+
+**用途**：节点 widget 把浏览器侧文件送到 FlowX 机器上（加载类节点的「📁 选择文件 / 拖入」，
+`mask-paint` 保存手绘笔画 JSON 等），返回值直接写进节点的 `*_path` 参数
+（免手工拷贝 + 免手打路径）。
+
+- **放行范围**：**不限扩展名、不限大小**（原图片/视频白名单 + 32/512MB 上限已去掉）。
+  仍保留两条安全措施：`subdir` 不得越出上传根目录（禁止 `..`/路径分隔符）、
+  文件名一律消毒（去目录成分、非法字符转 `_`）
+- **落点**：见 4.8.4（默认 `~/flowx-input/uploads/`，`subdir` 在其下追加一层）
+- **命名**：`<UTC时间戳>_<消毒后原名>`（同名加 `-1`/`-2`，不覆盖已有文件）
+- **实现**：`MultipartReader` 单遍流式落盘（不落临时文件、大文件不占内存）
+- ⚠️ 无大小上限意味着磁盘写满前的写入都会成功；需要限额请在网关/反向代理层限制
+
+响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "path": "~/flowx-input/uploads/20261011T083012Z_pink_dress.png",
+    "abs_path": "/home/u/flowx-input/uploads/20261011T083012Z_pink_dress.png",
+    "name": "20261011T083012Z_pink_dress.png",
+    "size": 1357498,
+    "mime": "image/png",
+    "kind": "image",
+    "url": "/api/v1/media/file?path=~%2Fflowx-input%2Fuploads%2F..."
+  },
+  "message": "success"
+}
+```
+
+`kind` 由 MIME 推导（`image` / `video` / `audio` / 其他 `file`），纯提示、不参与放行判定。
+
+错误码：400（缺 `file` 字段 / 非 multipart / `subdir` 非法）、500（无法创建落点目录，
+如未配置 `media.roots` 且未配 `media.upload_dir`）。
+
+### 4.8.4 上传落点配置（`media.upload_dir`）
+
+上传目录**不写死在代码里**，由 `~/.flowx-studio/config.yaml` 决定：
+
+```yaml
+media:
+  roots:
+    - ~/flowx-input
+    - ~/flowx-output
+  upload_dir: ~/flowx-input/uploads      # 留空 = 自动（值同此行，见下）
+```
+
+- **默认（未配置）**：白名单里名为 `flowx-input` 的根（默认 `~/flowx-input`，语义上是
+  「素材进」）下的 `uploads/`；没有 `flowx-input` 时退到第一个可写的白名单根
+- `subdir` 追加在 `upload_dir` 之下（如 `?subdir=strokes` → `~/flowx-input/uploads/strokes/`）
+- 显式配置的 `upload_dir` **会自动纳入可读白名单**（否则刚上传的文件自己都预览不了，
+  `GET /media/file` 会 403）；`GET /media/roots` 返回的是生效后的完整列表
+- 支持 `~` 展开；环境变量覆盖：`FLOWX_STUDIO_MEDIA_UPLOAD_DIR`
+  （**空白值视为未配置**，回退配置文件里的值；这是刻意的——systemd/docker-compose
+  常注入 `<VAR>=` 形式的空值）
+
+## 4.9 CLI 命令
 
 除 HTTP API 外，`flowx-studio` 二进制还提供一组 CLI 客户端子命令，作为上述 REST API 的 HTTP 客户端（默认连接 `http://127.0.0.1:8080`，可用 `--server` flag 或 `FLOWX_STUDIO_SERVER_URL` 覆盖）。它们主要供 AI Agent（经 SKILL 文件指引）与终端用户使用：
 
@@ -716,7 +813,7 @@ PUT /api/v1/config/system
 
 全局约定：所有查询类子命令支持 `--json` 输出结构化结果；数据写入类子命令支持 `--schema` 输出参数 JSON Schema；校验失败以非零退出码退出并在 stderr 给出重试指引。详见 [06-ai-service.md](./06-ai-service.md)。
 
-## 4.9 API 路由汇总
+## 4.10 API 路由汇总
 
 ```
 /api/v1
@@ -772,9 +869,14 @@ PUT /api/v1/config/system
 └── /config
     ├── GET    /system    获取系统配置
     └── PUT    /system    更新系统配置
+
+/media（本地媒体文件，白名单目录）
+├── GET    /file?path=    读取本地媒体文件（图片/视频，支持 Range）
+├── GET    /roots         查询白名单根目录
+└── POST   /upload        上传媒体文件（加载类节点的「选/拖文件」，落 ~/flowx-input/uploads/）
 ```
 
-## 4.10 错误码定义
+## 4.11 错误码定义
 
 | HTTP 状态码 | 错误类型 | 说明 |
 |------------|---------|------|

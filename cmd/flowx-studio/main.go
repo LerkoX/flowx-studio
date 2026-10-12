@@ -250,8 +250,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	handler.NewAuditHandler(svcs.auditSvc).RegisterRoutes(api)
 	handler.NewBackupHandler(svcs.backupSvc).RegisterRoutes(api)
 	handler.NewExecutorHandler(svcs.executorSvc).RegisterRoutes(api)
-	// 本地多媒体文件服务（白名单目录，供画布 widget 直接播放，替代 base64 内嵌）
-	handler.NewMediaHandler(cfg.Media.Roots).RegisterRoutes(api)
+	// 本地多媒体文件服务（白名单目录，供画布 widget 直接播放，替代 base64 内嵌）；
+	// 上传不限扩展名/大小，落点由 config.yaml 的 media.upload_dir 决定（缺省 ~/flowx-input/uploads）
+	handler.NewMediaHandler(cfg.Media.Roots, cfg.Media.UploadDir).RegisterRoutes(api)
 
 	srv.RegisterStatic()
 
