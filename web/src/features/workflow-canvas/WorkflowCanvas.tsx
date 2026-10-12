@@ -33,6 +33,10 @@ import { useTranslation } from 'react-i18next'
 const nodeTypes = { glowNode: GlowNode, terminalNode: TerminalNode }
 const edgeTypes = { gradientEdge: GradientEdge }
 
+// 实测尺寸重排的防抖窗口：收缩/展开会让 ResizeObserver 在 300ms 过渡里连续上报
+// 中间尺寸，等尺寸稳定再跑 ELK，避免中间态布局反复落地
+const MEASURED_LAYOUT_DEBOUNCE_MS = 120
+
 // 节点参数防抖持久化的挂起冲刷句柄（模块级，画布单实例）
 // 运行流水线从 DB 读 YAML：800ms 防抖窗口内点击运行会拿到旧参数，
 // 运行前必须 await flushNodeParamsPersist() 把挂起的 PUT 立即落库
@@ -118,8 +122,12 @@ function WorkflowCanvasInner({
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // 新增节点逐个入场期间为 true：暂停「实测尺寸重排」，避免部分图重排抖动
   const staggeringRef = useRef(false)
-  // 实测尺寸重排的去重 key（不含位置，重排只改 position 不会循环）
+  // 实测尺寸重排的去重 key（不含位置，重排只改 position 不会循环）。
+  // 语义是「**已经落地**的尺寸集合」，只有布局真正应用后才写入——详见实测重排 effect
   const layoutKeyRef = useRef('')
+  // 请求一次实测重排的信号：入场/退场 stagger 动画期间实测重排被跳过，
+  // 动画结束后靠它再触发一次（此时尺寸已稳定，不能只清 key 等状态变化）
+  const [layoutEpoch, setLayoutEpoch] = useState(0)
   const { fitView } = useReactFlow()
   const [, setSelectedNode] = useState<string | null>(null)
   // 精确选择器订阅：避免 store 中无关字段变化触发整个画布重渲染
@@ -129,9 +137,7 @@ function WorkflowCanvasInner({
   const nodePrevCompletedAt = useWorkflowStore((s) => s.nodePrevCompletedAt)
   const nodeRuntimeData = useWorkflowStore((s) => s.nodeRuntimeData)
   const updateNodeStatus = useWorkflowStore((s) => s.updateNodeStatus)
-  const setNodeStatuses = useWorkflowStore((s) => s.setNodeStatuses)
   const setNodeRuntimeData = useWorkflowStore((s) => s.setNodeRuntimeData)
-  const resetNodeRuntimeData = useWorkflowStore((s) => s.resetNodeRuntimeData)
   // 顶栏一键收缩/展开所有节点：全局信号下发到各节点组件，尺寸变化触发实测重排
   const nodesCollapsed = useWorkflowStore((s) => s.nodesCollapsed)
   const setNodesCollapsed = useWorkflowStore((s) => s.setNodesCollapsed)
@@ -497,8 +503,18 @@ function WorkflowCanvasInner({
           setTimeout(() => {
             if (cancelled) return
             staggeringRef.current = false
+            // stagger 期间跳过了实测尺寸重排，这里必须补一次：否则整图会停在本轮
+            // 重建时的**估算尺寸**布局上（新节点尺寸没参与排布，节点挤在一起），
+            // 只有手动收缩再展开改变尺寸 key 才会自愈
             layoutKeyRef.current = ''
-            fitView({ padding: 0.08, duration: 500 })
+            setLayoutEpoch((e) => e + 1)
+            // 实测重排是防抖异步的，等它落地后再取景，避免按旧位置取景
+            staggerTimers.push(
+              setTimeout(() => {
+                if (cancelled) return
+                fitView({ padding: 0.08, duration: 500 })
+              }, 360),
+            )
           }, Math.max(lastAddDelay + 500, lastRemoveDone > 0 ? lastRemoveDone + 400 : 0)),
         )
       })
@@ -531,7 +547,13 @@ function WorkflowCanvasInner({
   // 按实测尺寸重排：首帧布局只能按估算尺寸占位，组件挂载/详情展开后节点实际
   // 尺寸会变化（React Flow 自动测量到 node.measured），此处检测到变化后重跑 ELK，
   // 避免节点重叠。key 不含位置，重排只改 position 不改变 measured，因此不会循环。
-  // 新增节点逐个入场期间跳过：此时画布是部分图，重排会让已有节点位置抖动
+  // 新增节点逐个入场期间跳过：此时画布是部分图，重排会让已有节点位置抖动。
+  //
+  // 去重 key 只在布局**应用成功**后记账：早期版本在调度前就写入 key，于是
+  // 状态同步/连线更新/参数注入等任意 setNodes/setEdges 引发的 effect 重跑会命中
+  // 同一 key 提前 return，同时 cleanup 把那轮还在飞的布局置为 cancelled——两个
+  // 都落不了地，画布就永久停在上一次（估算尺寸）的位置上，节点看起来挤成一团，
+  // 直到手动收缩再展开改变实测尺寸 key 才自愈。
   useEffect(() => {
     if (staggeringRef.current) return
     if (nodes.length === 0) return
@@ -543,25 +565,29 @@ function WorkflowCanvasInner({
         .map((n) => `${n.id}:${Math.round(n.measured!.width!)}x${Math.round(n.measured!.height!)}`)
         .join('|')
     if (key === layoutKeyRef.current) return
-    layoutKeyRef.current = key
 
     let cancelled = false
-    autoLayout(nodes, edges, { direction })
-      .then(({ nodes: layoutedNodes, edges: layoutedEdges }) => {
-        if (cancelled) return
-        setNodes(layoutedNodes)
-        setEdges(layoutedEdges)
-      })
-      .catch((err) => {
-        if (cancelled) return
-        if (layoutKeyRef.current === key) layoutKeyRef.current = ''
-        console.error('Failed to run ELK layout:', err)
-      })
+    // 收缩/展开是 300ms 的 CSS 过渡，ResizeObserver 期间会上报一长串中间尺寸；
+    // 防抖到尺寸稳定后再跑 ELK，避免中间态布局反复抢占最终布局
+    const timer = setTimeout(() => {
+      autoLayout(nodes, edges, { direction })
+        .then(({ nodes: layoutedNodes, edges: layoutedEdges }) => {
+          if (cancelled) return
+          layoutKeyRef.current = key
+          setNodes(layoutedNodes)
+          setEdges(layoutedEdges)
+        })
+        .catch((err) => {
+          if (cancelled) return
+          console.error('Failed to run ELK layout:', err)
+        })
+    }, MEASURED_LAYOUT_DEBOUNCE_MS)
 
     return () => {
       cancelled = true
+      clearTimeout(timer)
     }
-  }, [nodes, edges, direction, setNodes, setEdges])
+  }, [nodes, edges, direction, layoutEpoch, setNodes, setEdges])
 
   // 实时同步执行状态：空状态表（退出回放态/新执行开始）时全量复位为 idle，
   // 不能 early-return，否则上一轮的着色会残留在节点上
@@ -720,6 +746,27 @@ function WorkflowCanvasInner({
   }, [selectedExecution, setNodeRuntimeData])
 
   // 订阅 SSE 事件
+  // 注意：/api/v1/events 是**全局流**——所有流水线的执行事件都推过来（无 workflow 过滤）。
+  // 执行/节点/预览类事件必须先用它圈定「本画布正在展示的那个执行」，否则别的流水线的
+  // 运行会改写本画布：事故现场 = 选中运行中的执行（回放态），几分钟后别的流水线开始
+  // （execution.started）→ selectExecution(别人的 id) → 页面的「选中执行不属于本
+  // 流水线 ⇒ 退出回放态」 effect 立即生效，看起来就是「选中过一会自己取消了」；
+  // 同理别人完成时的 stopExecution() 会把本端的运行态一起清掉，别人的 node_start
+  // 还会因节点 id 跨流水线重名（Save/MaskPaint…）把本画布的节点点亮。
+  //
+  // 判定只看执行 id：**回放态选中的**或**本页正在运行的**那个执行。
+  // 编辑态（没选中任何执行）保持完全干净——他端（CLI/另一台设备）发起的运行
+  // 不会在画布上留下任何运行特效；想看某次运行的效果，在执行历史里选中它即可。
+  const eventAppliesToCanvas = (payload: {
+    execution_id?: unknown
+    executionId?: unknown
+  }) => {
+    const rawId = payload?.execution_id ?? payload?.executionId
+    if (rawId === undefined || rawId === null) return false
+    const s = useExecutionStore.getState()
+    const id = String(rawId)
+    return id === s.runningExecutionId || id === s.selectedExecutionId
+  }
   useEventStream('/api/v1/events', (type, data) => {
     if (type === 'workflow.updated') {
       // 后台（CLI/API）更新了当前流水线：防抖回读最新定义，驱动画布增量刷新。
@@ -754,15 +801,11 @@ function WorkflowCanvasInner({
       return
     }
 
+    // 新执行开始：**故意什么都不做**。本端点运行后的「自动进入该执行回放态」
+    // 由页面 handleRun 依接口返回的 execution_id 本地完成（见 WorkflowCanvasPage），
+    // 不依赖这个全局事件——否则他端（CLI/另一台设备）一齐跑，编辑态画布就会被
+    // 拽进别人的回放态，或平白多出一身运行特效
     if (type === 'execution.started') {
-      setNodeStatuses({})
-      resetNodeRuntimeData()
-      const payload = data as { execution_id?: number }
-      if (payload.execution_id) {
-        const id = String(payload.execution_id)
-        useExecutionStore.getState().startExecution(id)
-        useExecutionStore.getState().selectExecution(id)
-      }
       return
     }
 
@@ -790,6 +833,8 @@ function WorkflowCanvasInner({
       }
       if (payload.execution_id) {
         const id = String(payload.execution_id)
+        // 别的流水线的续跑与本画布无关（否则会污染 executions 列表与运行态）
+        if (!eventAppliesToCanvas(payload)) return
         useExecutionStore.getState().updateExecutionMetadata(id, {
           status: 'running',
           params: payload.params || {},
@@ -812,7 +857,7 @@ function WorkflowCanvasInner({
 
     if (type === 'execution_paused') {
       const payload = data as { execution_id?: number }
-      if (payload.execution_id) {
+      if (eventAppliesToCanvas(payload)) {
         useExecutionStore.getState().updateExecutionStatus(String(payload.execution_id), 'paused')
       }
       return
@@ -820,7 +865,7 @@ function WorkflowCanvasInner({
 
     if (type === 'execution_resumed') {
       const payload = data as { execution_id?: number }
-      if (payload.execution_id) {
+      if (eventAppliesToCanvas(payload)) {
         useExecutionStore.getState().updateExecutionStatus(String(payload.execution_id), 'running')
       }
       return
@@ -828,7 +873,7 @@ function WorkflowCanvasInner({
 
     if (type === 'execution_cancelled') {
       const payload = data as { execution_id?: number }
-      if (payload.execution_id) {
+      if (eventAppliesToCanvas(payload)) {
         const id = String(payload.execution_id)
         useExecutionStore.getState().updateExecutionStatus(id, 'cancelled')
         // 取消后运行中节点被终止：后端已将 running 节点落库 cancelled，
@@ -839,25 +884,27 @@ function WorkflowCanvasInner({
     }
 
     if (type === 'node_start') {
-      const payload = data as { node_id?: string }
-      if (payload.node_id) updateNodeStatus(payload.node_id, 'running')
+      const payload = data as { execution_id?: number; node_id?: string }
+      // 节点 id 跨流水线重名（Save/MaskPaint …）：不过滤的话别人跑的节点
+      // 会把本画布的节点点亮成 running
+      if (payload.node_id && eventAppliesToCanvas(payload)) {
+        updateNodeStatus(payload.node_id, 'running')
+      }
       return
     }
 
     if (type === 'node_preview') {
       // 节点运行中途上报的预览帧进度（瞬态，不落库；帧本体经 preview-frame
       // 接口以 HTTP 二进制中转拉取，不经 base64）：仅应用到当前画布正在
-      // 展示的执行（选中回放或正在运行的），其他执行的事件直接忽略
+      // 展示的执行（回放态选中的 / 本页正在运行的），其他执行直接忽略
+      // （帧地址按执行拼，跨执行混用会拿到别人的帧）
       const payload = data as {
         execution_id?: number
         node_id?: string
         progress?: number
         job_id?: string
       }
-      if (!payload.execution_id || !payload.node_id) return
-      const execStore = useExecutionStore.getState()
-      const liveId = execStore.selectedExecutionId ?? execStore.runningExecutionId
-      if (String(payload.execution_id) !== liveId) return
+      if (!payload.node_id || !eventAppliesToCanvas(payload)) return
       setNodeRuntimeData(payload.node_id, {
         preview: {
           // 时间戳参数驱使浏览器重新拉取最新帧（接口本身 no-cache）
@@ -871,12 +918,13 @@ function WorkflowCanvasInner({
 
     if (type === 'node_complete') {
       const payload = data as {
+        execution_id?: number
         node_id?: string
         status?: string
         // 后端 persistRuntimeEvent 会把事件 Data 展开到顶层，outputs 与 node_id 平级
         outputs?: Record<string, unknown>
       }
-      if (payload.node_id) {
+      if (payload.node_id && eventAppliesToCanvas(payload)) {
         updateNodeStatus(payload.node_id, statusMap[payload.status || ''] || 'idle')
         // 节点终结后保留最后一帧预览：帧源（推理服务帧缓冲 1h TTL）与 Studio
         // 来源映射（2h TTL）在执行结束后仍可拉取，最后一次上报的 url 保持有效，
@@ -908,7 +956,7 @@ function WorkflowCanvasInner({
         output?: string
         timestamp?: string
       }
-      if (payload.execution_id) {
+      if (payload.execution_id && eventAppliesToCanvas(payload)) {
         useExecutionStore.getState().appendRealtimeLog({
           id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
           executionId: payload.execution_id,
@@ -931,7 +979,8 @@ function WorkflowCanvasInner({
         params?: Record<string, unknown>
         metadata?: Record<string, unknown>
       }
-      if (payload.execution_id) {
+      // 别的流水线的收尾事件不得停掉本端的运行态（stopExecution 是全局的）
+      if (payload.execution_id && eventAppliesToCanvas(payload)) {
         const id = String(payload.execution_id)
         useExecutionStore.getState().updateExecutionMetadata(id, {
           status: (payload.status || 'success').toLowerCase(),
@@ -948,20 +997,25 @@ function WorkflowCanvasInner({
           )
         // 续跑（continue）不产生 execution.completed 事件，此处兜底结束运行态；
         // 普通运行该调用幂等（随后的 execution.completed 会重复设置，无副作用）
-        useExecutionStore.getState().stopExecution()
+        if (useExecutionStore.getState().runningExecutionId === id) {
+          useExecutionStore.getState().stopExecution()
+        }
       }
       return
     }
 
     if (type === 'execution.completed') {
       const payload = data as { execution_id?: number; status?: string }
-      if (payload.execution_id) {
-        useExecutionStore.getState().stopExecution()
+      if (eventAppliesToCanvas(payload)) {
+        const id = String(payload.execution_id)
+        if (useExecutionStore.getState().runningExecutionId === id) {
+          useExecutionStore.getState().stopExecution()
+        }
         useExecutionStore.getState().updateExecutionStatus(
-          String(payload.execution_id),
+          id,
           (payload.status as ExecutionStatus['status']) || 'success'
         )
-        useExecutionStore.getState().selectExecution(String(payload.execution_id))
+        useExecutionStore.getState().selectExecution(id)
       }
     }
   })

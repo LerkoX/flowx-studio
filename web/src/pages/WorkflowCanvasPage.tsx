@@ -188,8 +188,9 @@ export default function WorkflowCanvasPage() {
   // 参数变化不触发卸载，提前 return 会破坏 hooks 顺序
   if (!routeWorkflowId) return <Navigate to="/" replace />
 
-  // 内页运行：携带参数面板中的参数触发执行，SSE 事件会驱动画布状态与日志，
-  // 运行后自动进入新执行的回放态（execution.started 事件会设置 selectedExecutionId）
+  // 内页运行：携带参数面板中的参数触发执行；SSE 事件驱动画布状态与日志。
+  // 运行后由本函数按接口返回的 executionId 直接进入新执行的回放态（不再依赖
+  // execution.started 事件——那是个全局事件，分不出“我点的运行”和“他端起的运行”）
   const handleRun = async () => {
     if (!currentWorkflow || starting || isExecuting) return
     setStarting(true)
@@ -212,7 +213,18 @@ export default function WorkflowCanvasPage() {
         Object.values(params).forEach((p) => {
           runParams[p.key] = p.value
         })
-        await runWorkflow(currentWorkflow.id, runParams)
+        const resp = await runWorkflow(currentWorkflow.id, runParams)
+        // 本端发起的运行：拿接口返回的 execution_id 直接进入它的回放态。
+        // 这里**不能**等 SSE 的 execution.started（以前就是那样）——事件是全局流，
+        // 分不出“我点的运行”和“CLI/另一台设备起的运行”，等它就会把他端的运行
+        // 也拽进回放态；而且执行很快就开跑，等事件会丢掉开头几个节点的特效。
+        const runId = resp?.data?.executionId
+        if (runId) {
+          useWorkflowStore.getState().setNodeStatuses({})
+          useWorkflowStore.getState().resetNodeRuntimeData()
+          useExecutionStore.getState().startExecution(String(runId))
+          await selectExecutionAndSync(String(runId))
+        }
       }
       setTab('logs')
       if (isMobile) setMobileParamsOpen(true)

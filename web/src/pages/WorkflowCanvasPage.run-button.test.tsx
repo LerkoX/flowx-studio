@@ -34,7 +34,18 @@ vi.mock('@/services/workflowService', async (importOriginal) => {
       data: { items: serverExecutions, total: serverExecutions.length, page: 1, pageSize: 10 },
     })),
     getWorkflow: vi.fn(async () => ({ data: null })),
-    runWorkflow: vi.fn(async () => ({})),
+    // 本端运行：接口返回新执行 id（handleRun 据此本地进入回放态）
+    runWorkflow: vi.fn(async () => ({
+      code: 200,
+      data: { executionId: 900, status: 'running', streamUrl: '/api/v1/executions/900/stream' },
+    })),
+    getExecution: vi.fn(async () => ({
+      code: 200,
+      data: { id: 900, workflow_id: 113, status: 'running', trigger: 'manual' },
+    })),
+    getExecutionYaml: vi.fn(async () => ({ code: 200, data: { hasSnapshot: true, yaml: WF.yamlConfig } })),
+    getExecutionNodes: vi.fn(async () => ({ code: 200, data: [] })),
+    getExecutionLogs: vi.fn(async () => ({ code: 200, data: { items: [], total: 0 } })),
     continueExecution: vi.fn(async () => ({})),
     pauseExecution: vi.fn(async () => ({})),
     resumeExecution: vi.fn(async () => ({})),
@@ -144,6 +155,23 @@ describe('WorkflowCanvasPage 运行按钮禁用态（存活执行探测）', () 
     const btn = findRunButton(container)
     expect(btn).toBeTruthy()
     expect(btn.disabled).toBe(true)
+  })
+
+  it('本端点运行：按接口返回的 execution_id 直接进入该执行回放态（不依赖 SSE 事件）', async () => {
+    setServerExecutions([])
+    await renderPage()
+    const btn = findRunButton(container)
+    expect(btn.disabled).toBe(false)
+
+    await act(async () => {
+      btn.click()
+      await new Promise((r) => setTimeout(r, 50))
+    })
+
+    const exec = useExecutionStore.getState()
+    expect(exec.selectedExecutionId, '本端运行后应选中新执行（回放态）').toBe('900')
+    expect(exec.runningExecutionId, '同时标记为运行中，暂停按钮/停跑才正确').toBe('900')
+    expect(exec.isExecuting).toBe(true)
   })
 
   it('存活执行进入终态后：按钮恢复可点击（轮询复查）', async () => {

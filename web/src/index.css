@@ -254,25 +254,65 @@
   }
 }
 
-/* 执行中节点外壳霓虹描边：只让边框呼吸，节点主体保持稳定 */
+/* 执行中节点外壳霓虹描边：只让边框呼吸，节点主体保持稳定。
+   运行态要「一眼可见」，所以描边加粗、配色提亮，闪烁幅度拉满（opacity 0.4 ↔ 1） */
 .node-neon-ring {
-  border: 2px solid transparent;
-  background: linear-gradient(135deg, rgba(34, 211, 238, 0.95), rgba(168, 85, 247, 0.8)) border-box;
+  border: 3px solid transparent;
+  background: linear-gradient(
+    135deg,
+    rgba(103, 232, 249, 1),
+    rgba(34, 211, 238, 1) 40%,
+    rgba(168, 85, 247, 0.95)
+  ) border-box;
   -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   box-shadow:
-    0 0 8px rgba(34, 211, 238, 0.45),
-    0 0 14px rgba(168, 85, 247, 0.22);
-  opacity: 0.42;
-  animation: nodeNeonPulse 1.2s ease-in-out infinite;
+    0 0 10px rgba(34, 211, 238, 0.8),
+    0 0 22px rgba(34, 211, 238, 0.45),
+    0 0 38px rgba(168, 85, 247, 0.32);
+  opacity: 0.5;
+  animation: nodeNeonPulse 1s ease-in-out infinite;
 }
 
 @keyframes nodeNeonPulse {
   0%, 100% {
-    opacity: 0.36;
+    opacity: 0.4;
   }
   50% {
-    opacity: 0.95;
+    opacity: 1;
+  }
+}
+
+/* 执行中节点的外层光晕：与描边错频呼吸，形成「边缘发光闪烁」。
+   只动画 transform/opacity（合成层），不像逐帧改 box-shadow 那样触发重绘，
+   因此一层里几十个节点并发运行也不会拖慢画布 */
+.node-neon-halo {
+  box-shadow:
+    0 0 22px 4px rgba(34, 211, 238, 0.6),
+    0 0 54px 12px rgba(168, 85, 247, 0.4);
+  opacity: 0.45;
+  animation: nodeNeonHalo 1.1s ease-in-out infinite;
+}
+
+@keyframes nodeNeonHalo {
+  0%, 100% {
+    opacity: 0.38;
+    transform: scale(0.98);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.045);
+  }
+}
+
+/* 无障碍：用户要求减少动效时保留静态发光，不再闪烁 */
+@media (prefers-reduced-motion: reduce) {
+  .node-neon-ring,
+  .node-neon-halo,
+  .edge-neon-halo {
+    animation: none;
+    opacity: 0.9;
+    transform: none;
   }
 }

@@ -244,9 +244,13 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
         />
       )}
 
-      {/* 执行中霓虹描边：只让边缘呼吸，不改变节点主体亮度 */}
+      {/* 执行中霓虹描边 + 外层呼吸光晕：两层错频闪烁，让运行态在画布上一眼可见。
+          只让边缘发光，不改变节点主体亮度 */}
       {status === 'running' && (
-        <div className="node-neon-ring absolute -inset-[2px] rounded-[22px] pointer-events-none" />
+        <>
+          <div className="node-neon-halo absolute -inset-[6px] rounded-[26px] pointer-events-none" />
+          <div className="node-neon-ring absolute -inset-[2px] rounded-[22px] pointer-events-none" />
+        </>
       )}
 
       {/* 节点主体 */}
@@ -270,7 +274,8 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
           boxShadow: selected
             ? `0 0 20px ${config.color}40, inset 0 1px 0 rgb(var(--color-ink) / 0.05)`
             : status === 'running'
-              ? '0 0 18px rgba(34,211,238,0.38), 0 0 34px rgba(168,85,247,0.18), inset 0 1px 0 rgb(var(--color-ink) / 0.05)'
+              // 静态边缘光：闪烁交给 .node-neon-ring / .node-neon-halo 两层动画
+              ? '0 0 22px rgba(34,211,238,0.55), 0 0 46px rgba(34,211,238,0.28), 0 0 72px rgba(168,85,247,0.26), inset 0 1px 0 rgb(var(--color-ink) / 0.05)'
               : 'inset 0 1px 0 rgb(var(--color-ink) / 0.05)',
         }}
       >
