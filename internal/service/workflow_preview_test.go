@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -89,6 +90,66 @@ func TestHandleLogEntry_PreviewMarkerIntercepted(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("normal line should be persisted, got %d rows", count)
+	}
+}
+
+// TestHandleLogEntry_MarkerInMultilineEntry 断流补齐的尾部是多行合在一个 entry 里回调的：
+// 首行是标记时只剥离标记行，其余普通行必须照常落库
+// （exec 767 事故：整段 entry 被前缀匹配误吞，补齐内容"什么都没打印"）
+func TestHandleLogEntry_MarkerInMultilineEntry(t *testing.T) {
+	svc := newPreviewTestService(t)
+
+	marker := `FLOWX_PREVIEW {"url":"http://inference:8100/preview/job9","progress":0.9,"token":"k"}`
+	blob := marker + "\ntraceback line\nlatent: abc\n"
+	svc.handleLogEntry(logger.Entry{
+		Workflow: "exec-42", Node: "KSampler", Level: logger.LevelInfo,
+		Message: blob, Output: blob, Timestamp: time.Now(),
+	})
+
+	// 标记行被剥离，普通行保留落库
+	var msg string
+	if err := svc.db.Get(&msg, "SELECT message FROM execution_logs WHERE execution_id = 42"); err != nil {
+		t.Fatalf("query logs: %v", err)
+	}
+	if strings.Contains(msg, "FLOWX_PREVIEW") {
+		t.Errorf("marker line should be stripped: %q", msg)
+	}
+	if !strings.Contains(msg, "traceback line") || !strings.Contains(msg, "latent: abc") {
+		t.Errorf("normal lines should be persisted: %q", msg)
+	}
+
+	// 帧来源仍被记录
+	svc.previewMu.Lock()
+	src := svc.previewSrcs["42/KSampler"]
+	svc.previewMu.Unlock()
+	if src == nil || src.url != "http://inference:8100/preview/job9" {
+		t.Fatalf("preview source not recorded: %+v", src)
+	}
+}
+
+// TestSplitPreviewMarkers 按行拆分：无标记时原样返回；全文皆标记时 rest 为空
+func TestSplitPreviewMarkers(t *testing.T) {
+	markerA := `FLOWX_PREVIEW {"url":"a"}`
+	markerB := `FLOWX_PREVIEW {"url":"b"}`
+	cases := []struct {
+		name        string
+		in          string
+		wantRest    string
+		wantMarkers int
+	}{
+		{"无标记原样返回", "hello\nworld\n", "hello\nworld\n", 0},
+		{"单行标记", markerA + "\n", "", 1},
+		{"首行标记", markerA + "\ntail line\n", "tail line\n", 1},
+		{"中间标记", "a\n" + markerA + "\nb\n", "a\nb\n", 1},
+		{"多标记", markerA + "\n" + markerB + "\n", "", 2},
+		{"无结尾换行", "a\n" + markerA, "a", 1},
+	}
+	for _, c := range cases {
+		rest, markers := splitPreviewMarkers(c.in)
+		if rest != c.wantRest || len(markers) != c.wantMarkers {
+			t.Errorf("%s: splitPreviewMarkers(%q) = (%q, %d), want (%q, %d)",
+				c.name, c.in, rest, len(markers), c.wantRest, c.wantMarkers)
+		}
 	}
 }
 

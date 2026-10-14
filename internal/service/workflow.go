@@ -1313,6 +1313,29 @@ func (s *WorkflowService) GetExecutionNodes(executionID int64) ([]model.Executio
 	return nodes, nil
 }
 
+// splitPreviewMarkers 按行拆分日志文本：FLOWX_PREVIEW 标记行的 JSON 负载
+// 收进 markers，其余行原样（含缩进/空行）用 \n 重新 join 返回。无标记时 rest 为
+// 原文、markers 为空；全文皆标记时 rest 为空。结尾换行保留原文习惯（有标记时才重写）。
+func splitPreviewMarkers(text string) (rest string, markers []string) {
+	trailingNL := strings.HasSuffix(text, "\n")
+	var kept []string
+	for _, line := range strings.Split(strings.TrimSuffix(text, "\n"), "\n") {
+		if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, previewMarkerPrefix) {
+			markers = append(markers, strings.TrimPrefix(trimmed, previewMarkerPrefix))
+			continue
+		}
+		kept = append(kept, line)
+	}
+	if len(markers) == 0 {
+		return text, nil
+	}
+	rest = strings.Join(kept, "\n")
+	if trailingNL && rest != "" {
+		rest += "\n"
+	}
+	return rest, markers
+}
+
 // previewMarkerPrefix 节点 stdout 的预览帧地址标记前缀（见 emit_preview / handlePreviewMarker）
 const previewMarkerPrefix = "FLOWX_PREVIEW "
 
@@ -1325,13 +1348,23 @@ func (s *WorkflowService) handleLogEntry(entry logger.Entry) {
 	}
 
 	// FLOWX_PREVIEW 标记行：剥离出日志管道（不落库、不进 execution.log 事件），
-	// 转给预览通道更新帧来源映射并广播轻量 node_preview 事件
-	if msg := strings.TrimSpace(entry.Message); strings.HasPrefix(msg, previewMarkerPrefix) {
-		var payload previewMarkerPayload
-		if err := json.Unmarshal([]byte(strings.TrimPrefix(msg, previewMarkerPrefix)), &payload); err == nil {
-			s.handlePreviewMarker(execID, entry.Node, payload)
+	// 转给预览通道更新帧来源映射并广播轻量 node_preview 事件。
+	// 逐行扫描而非整 entry 前缀匹配：断流补齐的尾部是多行合在一个 entry 里回调的，
+	// 首行是标记时整段（含进度/traceback/输出块等普通行）会被误吞（exec 767 事故）。
+	if rest, markers := splitPreviewMarkers(entry.Message); len(markers) > 0 {
+		for _, m := range markers {
+			var payload previewMarkerPayload
+			if err := json.Unmarshal([]byte(m), &payload); err == nil {
+				s.handlePreviewMarker(execID, entry.Node, payload)
+			}
 		}
-		return
+		if rest == "" {
+			return
+		}
+		entry.Message = rest
+		if outRest, outMarkers := splitPreviewMarkers(entry.Output); len(outMarkers) > 0 {
+			entry.Output = outRest
+		}
 	}
 
 	ts := entry.Timestamp
@@ -1456,6 +1489,13 @@ func (s *WorkflowService) persistRuntimeEvent(evt runtime.ExecutionEvent) {
 		status := strings.ToLower(evt.Status)
 		if status == "" {
 			status = "success"
+		}
+		// 尊重 CancelExecution 先行落库的 cancelled（与 runWorkflowAsync 收尾同一口径）：
+		// 取消时节点以 SIGTERM(143) 退出，dag 会把整跑报成 FAILED——若此处直接写库，
+		// 用户显式取消的执行会显示为"失败"（红灯），且与节点行的 cancelled 自相矛盾。
+		var dbStatus string
+		if err := s.db.Get(&dbStatus, "SELECT status FROM executions WHERE id = ?", evt.ExecutionID); err == nil && dbStatus == "cancelled" {
+			status = "cancelled"
 		}
 		var startedAt *time.Time
 		if err := s.db.Get(&startedAt, "SELECT started_at FROM executions WHERE id = ?", evt.ExecutionID); err == nil && startedAt != nil {
