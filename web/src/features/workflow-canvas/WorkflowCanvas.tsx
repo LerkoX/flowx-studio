@@ -26,6 +26,8 @@ import { resolveNodes } from '@/services/nodeService'
 import type { NodeDefinition } from '@/types/node'
 import type { ExecutorResolutionResult, OutputIncompleteReason } from '@/types/workflow'
 import { useEventStream } from '@/services/eventService'
+import { ApiError } from '@/services/api'
+import { toast } from '@/stores/toastStore'
 import type { ExecutionLog, ExecutionStatus } from '@/types/execution'
 import { ArrowUpDown, ArrowLeftRight, Eye, LockKeyholeOpen, History, FoldVertical, UnfoldVertical } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -152,8 +154,9 @@ function WorkflowCanvasInner({
   const selectedExecutionId = useExecutionStore((s) => s.selectedExecutionId)
   const runningExecutionId = useExecutionStore((s) => s.runningExecutionId)
   const selectedExecutionYaml = useExecutionStore((s) => s.selectedExecutionYaml)
-  // 顶部栏展示的执行 ID：优先选中（回放）的执行，其次正在运行的执行
-  const liveExecutionId = selectedExecutionId ?? runningExecutionId
+  // 顶部栏展示的执行 ID：仅随选中（回放）的执行出现——未选中任何执行时
+  // 界面零痕迹，即使本端发起的运行仍在后台进行（运行按钮转圈已足够提示）
+  const liveExecutionId = selectedExecutionId
 
   // 编辑态补充：拉最近一次成功执行的节点输出（metadata 扁平点键还原），
   // 经 data.lastOutputs 下发给 GlowNode，widget 的 paramSources.runtimeValue
@@ -218,6 +221,8 @@ function WorkflowCanvasInner({
 
   // 组件 onParamsChange → 写回内存 yamlConfig（workflowStore.updateNodeParams）
   // → 防抖持久化到后端（滑杆类控件会连续触发，合并为一次 PUT）
+  // PUT 带乐观锁基线（baseRevision）：若流水线在本页编辑期间被他端（另一标签页/
+  // 设备/CLI）修改，服务端返回 409——回读最新版本并提示，不再静默整量覆盖。
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistNow = useCallback(async () => {
     const latest = useWorkflowStore.getState().currentWorkflow
@@ -229,10 +234,27 @@ function WorkflowCanvasInner({
         intent: latest.intent,
         yamlConfig: latest.yamlConfig,
         status: latest.status,
+        baseRevision: latest.revision,
       })
     } catch (err) {
       console.error('Failed to persist node params:', err)
+      if (err instanceof ApiError && err.status === 409) {
+        // 他端已改：回读最新版同步本地，提示用户刚才的改动未保存
+        try {
+          const resp = await getWorkflow(String(latest.id))
+          const cur = useWorkflowStore.getState().currentWorkflow
+          if (resp.data && cur && String(resp.data.id) === String(cur.id)) {
+            useWorkflowStore.getState().setCurrentWorkflow({ ...resp.data, id: String(resp.data.id) })
+          }
+        } catch (e) {
+          console.error('Failed to refetch workflow after conflict:', e)
+        }
+        toast.error(t('canvas.paramsConflict'))
+      } else {
+        toast.error(t('canvas.paramsPersistFailed', { message: err instanceof Error ? err.message : String(err) }))
+      }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const handleNodeParamsChange = useCallback((nodeId: string, params: Record<string, string>) => {
     useWorkflowStore.getState().updateNodeParams(nodeId, params)
@@ -255,6 +277,11 @@ function WorkflowCanvasInner({
 
   useEffect(() => {
     return () => {
+      // 卸载前把挂起的防抖写回立即落库（fire-and-forget）：
+      // 离开画布页时 800ms 窗口内的参数修改不能丢
+      if (persistTimerRef.current && pendingParamsFlush) {
+        pendingParamsFlush().catch(() => undefined)
+      }
       if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
       pendingParamsFlush = null
@@ -754,10 +781,41 @@ function WorkflowCanvasInner({
   // 同理别人完成时的 stopExecution() 会把本端的运行态一起清掉，别人的 node_start
   // 还会因节点 id 跨流水线重名（Save/MaskPaint…）把本画布的节点点亮。
   //
-  // 判定只看执行 id：**回放态选中的**或**本页正在运行的**那个执行。
-  // 编辑态（没选中任何执行）保持完全干净——他端（CLI/另一台设备）发起的运行
-  // 不会在画布上留下任何运行特效；想看某次运行的效果，在执行历史里选中它即可。
+  // 回读当前工作流最新定义（乐观锁回声跳过：revision 是内容哈希，一致即未变；
+  // 老服务端不下发 revision 时回退比较 yamlConfig）。调用前先把本地挂起的
+  // 参数写回冲刷落库，避免回读到未含本地编辑的旧版本覆盖内存状态。
+  const refreshCurrentWorkflow = useCallback(async () => {
+    const wf = useWorkflowStore.getState().currentWorkflow
+    if (!wf) return
+    await flushNodeParamsPersist()
+    const resp = await getWorkflow(String(wf.id))
+    const latest = useWorkflowStore.getState().currentWorkflow
+    if (!resp.data || !latest || String(resp.data.id) !== String(latest.id)) return
+    const unchanged = resp.data.revision
+      ? resp.data.revision === latest.revision
+      : resp.data.yamlConfig === latest.yamlConfig
+    if (unchanged) return
+    useWorkflowStore.getState().setCurrentWorkflow({ ...resp.data, id: String(resp.data.id) })
+  }, [])
+
+  // 判定规则（执行间严格隔离，用户确认的语义）：
+  // - eventAppliesToCanvas（视觉/日志数据）：只认「回放态选中的」那个执行。
+  //   未选中任何执行时画布绝对干净——即使本端发起的运行还在后台跑，其节点事件、
+  //   预览帧、输出、日志一律不进画布与日志面板；选中历史执行 A 时，正在跑的 B
+  //   同样不得串进来。
+  // - eventAppliesToRun（生命周期管理）：认「选中的」或「本页正在运行的」。
+  //   只用于更新执行列表状态与停跑标记（不停跑 isExecuting 会卡死、运行按钮
+  //   永远禁用），不直接渲染画布，故不受「未选中零痕迹」约束。
   const eventAppliesToCanvas = (payload: {
+    execution_id?: unknown
+    executionId?: unknown
+  }) => {
+    const rawId = payload?.execution_id ?? payload?.executionId
+    if (rawId === undefined || rawId === null) return false
+    const s = useExecutionStore.getState()
+    return String(rawId) === s.selectedExecutionId
+  }
+  const eventAppliesToRun = (payload: {
     execution_id?: unknown
     executionId?: unknown
   }) => {
@@ -769,27 +827,18 @@ function WorkflowCanvasInner({
   }
   useEventStream('/api/v1/events', (type, data) => {
     if (type === 'workflow.updated') {
-      // 后台（CLI/API）更新了当前流水线：防抖回读最新定义，驱动画布增量刷新。
-      // 先冲刷本地节点参数的防抖写回，避免回读到未含本地编辑的旧 YAML 覆盖内存状态。
+      // 后台（CLI/API/他端页面）更新了当前流水线：防抖回读最新定义，驱动画布增量刷新。
       // 注意 currentWorkflow.id 运行时可能是 number（列表页点击直接存入原始 API 项），
       // 比较前统一转字符串
       const payload = data as { id?: number | string }
       const wf = useWorkflowStore.getState().currentWorkflow
       if (!wf || payload.id === undefined || String(payload.id) !== String(wf.id)) return
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
-      refreshTimerRef.current = setTimeout(async () => {
+      refreshTimerRef.current = setTimeout(() => {
         refreshTimerRef.current = null
-        try {
-          await flushNodeParamsPersist()
-          const resp = await getWorkflow(String(payload.id))
-          const latest = useWorkflowStore.getState().currentWorkflow
-          if (!resp.data || !latest || String(resp.data.id) !== String(latest.id)) return
-          // 前端自己写回触发的回声事件：内容一致时跳过，避免无意义重解析
-          if (resp.data.yamlConfig === latest.yamlConfig) return
-          useWorkflowStore.getState().setCurrentWorkflow({ ...resp.data, id: String(resp.data.id) })
-        } catch (err) {
+        refreshCurrentWorkflow().catch((err) =>
           console.error('Failed to refresh workflow after external update:', err)
-        }
+        )
       }, 250)
       return
     }
@@ -834,7 +883,7 @@ function WorkflowCanvasInner({
       if (payload.execution_id) {
         const id = String(payload.execution_id)
         // 别的流水线的续跑与本画布无关（否则会污染 executions 列表与运行态）
-        if (!eventAppliesToCanvas(payload)) return
+        if (!eventAppliesToRun(payload)) return
         useExecutionStore.getState().updateExecutionMetadata(id, {
           status: 'running',
           params: payload.params || {},
@@ -857,7 +906,7 @@ function WorkflowCanvasInner({
 
     if (type === 'execution_paused') {
       const payload = data as { execution_id?: number }
-      if (eventAppliesToCanvas(payload)) {
+      if (eventAppliesToRun(payload)) {
         useExecutionStore.getState().updateExecutionStatus(String(payload.execution_id), 'paused')
       }
       return
@@ -865,7 +914,7 @@ function WorkflowCanvasInner({
 
     if (type === 'execution_resumed') {
       const payload = data as { execution_id?: number }
-      if (eventAppliesToCanvas(payload)) {
+      if (eventAppliesToRun(payload)) {
         useExecutionStore.getState().updateExecutionStatus(String(payload.execution_id), 'running')
       }
       return
@@ -873,12 +922,15 @@ function WorkflowCanvasInner({
 
     if (type === 'execution_cancelled') {
       const payload = data as { execution_id?: number }
-      if (eventAppliesToCanvas(payload)) {
+      if (eventAppliesToRun(payload)) {
         const id = String(payload.execution_id)
         useExecutionStore.getState().updateExecutionStatus(id, 'cancelled')
         // 取消后运行中节点被终止：后端已将 running 节点落库 cancelled，
-        // 重新拉取节点状态并同步画布，避免残留黄灯
-        void useExecutionStore.getState().loadExecutionNodes(id).then(() => syncCanvasStatusesFromExecutionNodes())
+        // 重新拉取节点状态并同步画布，避免残留黄灯。
+        // 仅当前正选中该执行才动画布——未选中时画布必须零痕迹
+        if (useExecutionStore.getState().selectedExecutionId === id) {
+          void useExecutionStore.getState().loadExecutionNodes(id).then(() => syncCanvasStatusesFromExecutionNodes())
+        }
       }
       return
     }
@@ -956,18 +1008,27 @@ function WorkflowCanvasInner({
         output?: string
         timestamp?: string
       }
-      if (payload.execution_id && eventAppliesToCanvas(payload)) {
-        useExecutionStore.getState().appendRealtimeLog({
-          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          executionId: payload.execution_id,
-          nodeId: payload.node_id,
-          nodeName: payload.node_name || payload.node_id || 'system',
-          stepName: payload.step_name,
-          level: (payload.level?.toUpperCase() as ExecutionLog['level']) || 'INFO',
-          message: payload.message || '',
-          output: payload.output,
-          timestamp: payload.timestamp ? new Date(payload.timestamp) : new Date(),
-        })
+      if (payload.execution_id) {
+        if (eventAppliesToCanvas(payload)) {
+          useExecutionStore.getState().appendRealtimeLog({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            executionId: payload.execution_id,
+            nodeId: payload.node_id,
+            nodeName: payload.node_name || payload.node_id || 'system',
+            stepName: payload.step_name,
+            level: (payload.level?.toUpperCase() as ExecutionLog['level']) || 'INFO',
+            message: payload.message || '',
+            output: payload.output,
+            timestamp: payload.timestamp ? new Date(payload.timestamp) : new Date(),
+          })
+        } else {
+          // 严格隔离：日志不属于「正在展示的执行」一律丢弃。例外记账——若是本端
+          // 正在运行（但未被选中）的执行，标记日志缺口：重新选中它时 selectExecution
+          // 会依此从 DB 重载补齐（否则 live 执行跳过重载，缺口永远补不上）
+          const s = useExecutionStore.getState()
+          const id = String(payload.execution_id)
+          if (id === s.runningExecutionId) s.markLiveLogGap(id)
+        }
       }
       return
     }
@@ -980,7 +1041,7 @@ function WorkflowCanvasInner({
         metadata?: Record<string, unknown>
       }
       // 别的流水线的收尾事件不得停掉本端的运行态（stopExecution 是全局的）
-      if (payload.execution_id && eventAppliesToCanvas(payload)) {
+      if (payload.execution_id && eventAppliesToRun(payload)) {
         const id = String(payload.execution_id)
         useExecutionStore.getState().updateExecutionMetadata(id, {
           status: (payload.status || 'success').toLowerCase(),
@@ -1006,7 +1067,7 @@ function WorkflowCanvasInner({
 
     if (type === 'execution.completed') {
       const payload = data as { execution_id?: number; status?: string }
-      if (eventAppliesToCanvas(payload)) {
+      if (eventAppliesToRun(payload)) {
         const id = String(payload.execution_id)
         if (useExecutionStore.getState().runningExecutionId === id) {
           useExecutionStore.getState().stopExecution()
@@ -1015,9 +1076,19 @@ function WorkflowCanvasInner({
           id,
           (payload.status as ExecutionStatus['status']) || 'success'
         )
-        useExecutionStore.getState().selectExecution(id)
+        // 仅当前正选中该执行才重载刷新终态（节点/日志/metadata 落库后的最终态）；
+        // 未选中时不得把画布拽进回放态——用户可能正刻意留在编辑态（零痕迹）
+        if (useExecutionStore.getState().selectedExecutionId === id) {
+          useExecutionStore.getState().selectExecution(id)
+        }
       }
     }
+  }, () => {
+    // SSE 断线重连：断线期间错过的 workflow.updated 不会补发，
+    // 重连后主动回读一次当前工作流，避免页面长期持有旧定义
+    refreshCurrentWorkflow().catch((err) =>
+      console.error('Failed to resync workflow after SSE reconnect:', err)
+    )
   })
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {

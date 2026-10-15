@@ -342,6 +342,22 @@ metadata 落库、`execution get` 响应、SSE 事件会被媒体撑爆。
 3. 同名同版本节点已存在时：`node import ... --overwrite` 原地更新（保持节点 ID，按 `name@version` 精确引用的流水线不受影响）；同名不同版本直接 import 即可并存（裸名称引用的流水线会解析到最新版本——想稳定就在 YAML 里写 `nodeRef: <name>@<version>`；反之注意：**版本锁定的流水线不会自动获得新版本的代码与 UI**，升级节点后需把流水线中的 nodeRef 改为新版本）
 4. 画布验证：workflow YAML 用 `config.nodeRef: <name>` 引用后运行，浏览器查看内嵌 UI
 
+## 验收物料展示页（本机 8899，产物统一放这里）
+
+跑通的产出物（视频/图片/对比图）**统一放到 `~/flowx-view/`，并更新同目录 `index.html`**，
+浏览器打开 <http://127.0.0.1:8899/> 即可看（`<video controls>` 内联播放）。
+
+- 服务：`python3 -m http.server 8899 --bind 127.0.0.1 --directory ~/flowx-view`（常驻；
+  新增文件无需重启，但 `index.html` 要手动改）
+- 命名：`<编号>_<主题>_<类型>.<ext>`，**按批次占百位段**（`10_` 上色 / `20_` 电商 /
+  `30_`~`41_` 去白边·分割·超分 / `50_` 抠图 / `60_` IC-Light / `70_` InstantID /
+  `80_`~`90_` G11 批量·换装 / `100_` 投影 / **`110_`~ P2 视频** / 后续顺延勿复用）
+- `index.html` 两处都改：顶部 `<ul>` 加一行链接（新批次带 🆕）+ 正文末尾加 `<h3>` 节
+  （大图先缩到宽 ≤1600 再存，手机看不出来但体积小十倍）；详见 `~/flowx-view/README.md`
+- 来源：`~/flowx-output/`（save-video/save-image 落盘）、`~/flowx-e2e-out/`（验收脚本产物）、
+  从服务端下载的对象（`GET /videos/{id}` / `/images/{id}`）。
+  ⚠️ 服务端 VIDEO/IMAGE 对象 TTL 默认 1 小时，**跑完立刻下载留档**，不要只留对象 ID
+
 ## 典型流程
 
 0. `server status` 确认 server 运行中；若 `stopped` 则 `server start`

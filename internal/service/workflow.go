@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -188,6 +190,9 @@ func (s *WorkflowService) List(f ListFilter, page, pageSize int) (*model.Paginat
 
 	items := make([]model.WorkflowListItem, 0, len(workflows))
 	for i := range workflows {
+		// 列表项同样带内容版本号：列表页点进画布会直接以该对象进入编辑，
+		// 后续 PUT 的乐观锁基线取自这里
+		workflows[i].Revision = ComputeRevision(&workflows[i])
 		items = append(items, model.WorkflowListItem{
 			Workflow: workflows[i],
 			Stats:    stats[workflows[i].ID],
@@ -255,6 +260,7 @@ func (s *WorkflowService) Get(id int64) (*model.Workflow, error) {
 		}
 		return nil, fmt.Errorf("failed to get workflow: %w", err)
 	}
+	wf.Revision = ComputeRevision(&wf)
 	return &wf, nil
 }
 
@@ -278,6 +284,8 @@ func (s *WorkflowService) Create(req *model.Workflow) (*model.Workflow, error) {
 
 	id, _ := result.LastInsertId()
 	req.ID = id
+	// 创建响应同样带内容版本号：客户端创建后立即进入编辑时，首个 PUT 就有乐观锁基线
+	req.Revision = ComputeRevision(req)
 
 	s.auditRecord("create_workflow", fmt.Sprintf("%d", id), "name="+req.Name)
 	s.eventBus.Publish(event.Event{
@@ -288,10 +296,38 @@ func (s *WorkflowService) Create(req *model.Workflow) (*model.Workflow, error) {
 	return req, nil
 }
 
+// ErrWorkflowConflict 乐观锁冲突：PUT 携带的 baseRevision 与当前内容版本不一致，
+// 说明该工作流在客户端编辑期间被他端（另一标签页/设备/CLI）修改过。
+var ErrWorkflowConflict = fmt.Errorf("workflow was modified by another client, please refresh and retry")
+
+// ComputeRevision 计算工作流可变字段的内容版本号（乐观锁基线）。
+// 覆盖 PUT 会整体写回的所有字段；内容与版本一一对应 ⇒ 客户端自己 PUT 成功后
+// 本地 revision 依然有效，不会因自己的写入误判冲突。
+func ComputeRevision(wf *model.Workflow) string {
+	h := sha256.New()
+	for _, s := range []string{wf.Name, wf.Description, wf.Intent, wf.YAMLConfig, wf.Status} {
+		io.WriteString(h, s)
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
 // Update 更新工作流
 func (s *WorkflowService) Update(id int64, req *model.Workflow) error {
 	if err := s.validator.ValidateWorkflow(req); err != nil {
 		return fmt.Errorf("validation failed: %w", err)
+	}
+
+	// 乐观锁：客户端声明了编辑基线（baseRevision）时必须与当前内容版本一致，
+	// 否则拒绝（防陈旧客户端整量覆盖他端最新修改）；未声明则兼容旧行为直接写。
+	if req.BaseRevision != "" {
+		cur, err := s.Get(id)
+		if err != nil {
+			return err
+		}
+		if ComputeRevision(cur) != req.BaseRevision {
+			return fmt.Errorf("%w (id=%d)", ErrWorkflowConflict, id)
+		}
 	}
 
 	_, err := s.db.Exec(`
@@ -715,6 +751,13 @@ func (s *WorkflowService) runWorkflow(execID int64, wf *model.Workflow) {
 	} else {
 		yamlConfig = injected
 	}
+
+	// 启动即持久化初始运行时快照：执行实例的图从 t=0 起冻结、与模板解耦。
+	// 此前快照仅在执行完成（WorkflowFinish）/暂停时导出——运行中的执行无快照，
+	// 前端回放态选中它时回退用流水线模板渲染，模板编辑（加节点等）会漏进
+	// 运行中执行的回放画面。完成/暂停时 ExportConfig 仍会覆盖为含节点终态的
+	// 最新快照（现有行为不变）；启动失败/展开失败路径不经过此处，无副作用
+	s.db.Exec("UPDATE executions SET runtime_yaml = ? WHERE id = ?", yamlConfig, execID)
 
 	s.db.Exec("UPDATE executions SET status = ?, started_at = ? WHERE id = ?",
 		"running", startTime, execID)

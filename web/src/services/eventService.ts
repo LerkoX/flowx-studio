@@ -37,12 +37,18 @@ function parseEventPayload(event: MessageEvent): { type: string; data: unknown }
   }
 }
 
-export function useEventStream(url: string, onEvent: EventHandler) {
+// onReconnect：SSE 断线后由浏览器自动重连成功时回调（首次连接不触发）。
+// 断线期间错过的事件不会补发，调用方应借此主动重拉关注的数据（如当前工作流
+// 定义），否则页面会一直持有旧状态（曾导致陈旧页整量 PUT 覆盖他端新修改）。
+export function useEventStream(url: string, onEvent: EventHandler, onReconnect?: () => void) {
   const handlerRef = useRef(onEvent)
   handlerRef.current = onEvent
+  const reconnectRef = useRef(onReconnect)
+  reconnectRef.current = onReconnect
 
   useEffect(() => {
     const es = new EventSource(url)
+    let hadError = false
 
     const handle = (event: MessageEvent) => {
       const { type, data } = parseEventPayload(event)
@@ -52,8 +58,15 @@ export function useEventStream(url: string, onEvent: EventHandler) {
     es.onmessage = handle
     KNOWN_EVENTS.forEach((t) => es.addEventListener(t, handle as EventListener))
 
+    es.onopen = () => {
+      if (hadError) {
+        hadError = false
+        reconnectRef.current?.()
+      }
+    }
     es.onerror = () => {
-      // 自动重连由浏览器 EventSource 处理
+      // 自动重连由浏览器 EventSource 处理；标记断线以便重连后补一次重同步
+      hadError = true
     }
 
     return () => es.close()

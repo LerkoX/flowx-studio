@@ -11,6 +11,11 @@ import { useWorkflowStore } from '@/stores/workflowStore'
 // 时间——源节点完成必早于目标启动，中途选中运行中的执行时入边不会被误亮
 // （后续 SSE 事件会用真实时间戳接管）
 export function syncCanvasStatusesFromExecutionNodes(): void {
+  // 隔离兑底：未选中任何执行时画布必须零痕迹，无论 store 中残留什么都播种空状态
+  if (!useExecutionStore.getState().selectedExecutionId) {
+    useWorkflowStore.getState().setNodeStatuses({})
+    return
+  }
   const statuses: Record<string, string> = {}
   const completedAt: Record<string, number> = {}
   useExecutionStore.getState().executionNodes.forEach((n) => {

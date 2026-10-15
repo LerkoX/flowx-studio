@@ -101,6 +101,7 @@ vi.mock('@/utils/mermaidParser', async (importOriginal) => {
 import '@/i18n'
 import WorkflowCanvas from '@/features/workflow-canvas/WorkflowCanvas'
 import { selectExecutionAndSync } from '@/features/workflow-canvas/executionSelection'
+import { getExecutionLogs } from '@/services/workflowService'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { useExecutionStore } from '@/stores/executionStore'
 
@@ -382,6 +383,168 @@ describe('SSE 事件按流水线/执行圈定（全局流不得改写本画布�
       useExecutionStore.getState().executionLog.map((l) => l.message),
       '本执行的日志应正常进面板',
     ).toContain('本流水线的日志')
+
+    await act(async () => root.unmount())
+  }, 20000)
+
+  it('运行中取消选中：后续节点事件/预览/日志不再触碰画布（零痕迹），停跑仍正常', async () => {
+    resetState()
+    const { root } = await mountCanvas()
+    const es = esInstances[esInstances.length - 1]
+
+    // 本端发起运行并自动选中（= 用户点运行后的状态）
+    await act(async () => {
+      useExecutionStore.getState().startExecution('201')
+      await selectExecutionAndSync('201')
+    })
+    await settle(400)
+    await act(async () => {
+      es.emit('node_start', { execution_id: 201, node_id: 'Encode' })
+    })
+    await settle(400)
+    expect(useWorkflowStore.getState().nodeStatuses.Encode, '选中时运行特效正常').toBe('running')
+
+    // 用户取消选中：画布着色与运行时数据被清空
+    await act(async () => {
+      await selectExecutionAndSync(null)
+    })
+    await settle(400)
+    expect(useExecutionStore.getState().selectedExecutionId).toBeNull()
+    expect(useWorkflowStore.getState().nodeStatuses).toEqual({})
+
+    // 该执行后续的事件：一律不得再出现在未选中的画布上
+    await act(async () => {
+      es.emit('node_start', { execution_id: 201, node_id: 'SaveImage' })
+      es.emit('node_complete', {
+        execution_id: 201,
+        node_id: 'Encode',
+        status: 'success',
+        outputs: { file_path: '/tmp/exec-201.png' },
+      })
+      es.emit('node_preview', { execution_id: 201, node_id: 'SaveImage', progress: 0.5 })
+      es.emit('execution.log', { execution_id: 201, node_id: 'Encode', level: 'INFO', message: '取消选中后的日志' })
+    })
+    await settle(600)
+
+    expect(
+      useWorkflowStore.getState().nodeStatuses,
+      '取消选中后运行中的执行不得再点亮画布',
+    ).toEqual({})
+    expect(
+      useWorkflowStore.getState().nodeRuntimeData,
+      '取消选中后不得挂输出/预览帧',
+    ).toEqual({})
+    expect(
+      useExecutionStore.getState().executionLog.map((l) => l.message),
+      '取消选中后日志不得进面板',
+    ).not.toContain('取消选中后的日志')
+
+    // 生命周期不受「零痕迹」约束：执行结束仍须正常停跑（否则运行按钮永远禁用）
+    await act(async () => {
+      es.emit('execution_complete', { execution_id: 201, status: 'SUCCESS' })
+    })
+    await settle(400)
+    expect(useExecutionStore.getState().isExecuting, '执行结束后运行态应复位').toBe(false)
+    expect(useExecutionStore.getState().runningExecutionId).toBeNull()
+    expect(useExecutionStore.getState().selectedExecutionId, '不得被拽进回放态').toBeNull()
+
+    await act(async () => root.unmount())
+  }, 20000)
+
+  it('运行中取消选中：execution.completed 不得强制重新选中该执行', async () => {
+    resetState()
+    const { root } = await mountCanvas()
+    const es = esInstances[esInstances.length - 1]
+
+    await act(async () => {
+      useExecutionStore.getState().startExecution('201')
+      await selectExecutionAndSync('201')
+      await selectExecutionAndSync(null)
+    })
+    await settle(400)
+
+    await act(async () => {
+      es.emit('execution.completed', { execution_id: 201, status: 'success' })
+    })
+    await settle(600)
+
+    expect(useExecutionStore.getState().isExecuting, '收尾事件仍应停跑').toBe(false)
+    expect(
+      useExecutionStore.getState().selectedExecutionId,
+      '用户刻意留在编辑态时，执行完成不得把画布拽进回放态',
+    ).toBeNull()
+    expect(useWorkflowStore.getState().nodeStatuses).toEqual({})
+
+    await act(async () => root.unmount())
+  }, 20000)
+
+  it('运行中改选历史执行：正在跑的那条不得污染回放画布与日志', async () => {
+    resetState()
+    const { root } = await mountCanvas()
+    const es = esInstances[esInstances.length - 1]
+
+    // 本端跑着 201，用户却选中历史执行 202 看回放
+    await act(async () => {
+      useExecutionStore.getState().startExecution('201')
+      await selectExecutionAndSync('202')
+    })
+    await settle(400)
+    expect(useExecutionStore.getState().selectedExecutionId).toBe('202')
+    const before = useWorkflowStore.getState().nodeStatuses
+
+    await act(async () => {
+      es.emit('node_start', { execution_id: 201, node_id: 'Encode' })
+      es.emit('node_preview', { execution_id: 201, node_id: 'Encode', progress: 0.5 })
+      es.emit('execution.log', { execution_id: 201, node_id: 'Encode', level: 'INFO', message: '运行中执行的日志' })
+    })
+    await settle(600)
+
+    expect(
+      useWorkflowStore.getState().nodeStatuses,
+      '正在跑的 201 不得点亮 202 的回放画布',
+    ).toEqual(before)
+    expect(useWorkflowStore.getState().nodeRuntimeData).toEqual({})
+    expect(
+      useExecutionStore.getState().executionLog.map((l) => l.message),
+      '201 的实时日志不得混进 202 的日志面板',
+    ).not.toContain('运行中执行的日志')
+
+    await act(async () => root.unmount())
+  }, 20000)
+
+  it('取消选中期间丢弃的实时日志：重新选中时从 DB 重载补齐缺口', async () => {
+    resetState()
+    const { root } = await mountCanvas()
+    const es = esInstances[esInstances.length - 1]
+
+    await act(async () => {
+      useExecutionStore.getState().startExecution('201')
+      await selectExecutionAndSync('201')
+      await selectExecutionAndSync(null)
+    })
+    await settle(400)
+
+    // 取消选中期间来了实时日志：丢弃并标记缺口
+    await act(async () => {
+      es.emit('execution.log', { execution_id: 201, node_id: 'Encode', level: 'INFO', message: '缺口期间的日志' })
+    })
+    await settle(400)
+    expect(
+      useExecutionStore.getState().liveLogGapExecutionId,
+      '未选中期间丢弃本端运行中执行的日志应标记缺口',
+    ).toBe('201')
+
+    // 重新选中：live 执行本跳过重载（竞态保护），但有缺口时必须从 DB 补齐
+    vi.mocked(getExecutionLogs).mockClear()
+    await act(async () => {
+      await selectExecutionAndSync('201')
+    })
+    await settle(400)
+    expect(
+      vi.mocked(getExecutionLogs),
+      '有日志缺口时重新选中应从 DB 重载日志',
+    ).toHaveBeenCalled()
+    expect(useExecutionStore.getState().liveLogGapExecutionId, '补齐后缺口标记应清除').toBeNull()
 
     await act(async () => root.unmount())
   }, 20000)

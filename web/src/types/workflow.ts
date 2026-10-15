@@ -44,6 +44,8 @@ export interface Workflow {
   status: 'idle' | 'running' | 'success' | 'failed' | 'paused'
   createdAt: Date
   updatedAt: Date
+  /** 内容版本号（乐观锁基线，服务端按可变字段内容算哈希）；PUT 时回传为 baseRevision */
+  revision?: string
   /** 仅列表接口返回；无执行记录时缺省 */
   stats?: WorkflowStats
 }

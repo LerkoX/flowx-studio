@@ -138,6 +138,10 @@ func (h *WorkflowHandler) Update(c *gin.Context) {
 	}
 
 	if err := h.service.Update(id, &req); err != nil {
+		if errors.Is(err, service.ErrWorkflowConflict) {
+			Error(c, http.StatusConflict, err.Error())
+			return
+		}
 		Error(c, http.StatusBadRequest, err.Error())
 		return
 	}

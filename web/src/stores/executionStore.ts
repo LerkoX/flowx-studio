@@ -14,6 +14,9 @@ interface LogFilter {
 interface ExecutionState {
   isExecuting: boolean
   runningExecutionId: string | null
+  // 本端运行中但未被选中期间，其实时日志被隔离丢弃（执行间严格隔离，未选中零痕迹）；
+  // 重新选中该执行时依此标记从 DB 重载日志补齐缺口。null 表示无缺口
+  liveLogGapExecutionId: string | null
   executions: ExecutionStatus[]
   selectedExecutionId: string | null
   selectedExecution: ExecutionStatus | null
@@ -54,6 +57,8 @@ interface ExecutionState {
   updateExecutionMetadata: (executionId: string, metadata: Record<string, unknown>) => void
   setExecutionNodes: (nodes: ExecutionNode[]) => void
   appendRealtimeLog: (entry: ExecutionLog) => void
+  // 标记某执行在本端运行但未被选中期间丢过实时日志（重新选中时需 DB 重载补齐）
+  markLiveLogGap: (executionId: string) => void
   setLogFilter: (filter: Partial<LogFilter>) => void
   clearLogs: () => void
   exportLogs: (format: 'json' | 'txt' | 'markdown') => string
@@ -94,6 +99,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
   return {
   isExecuting: false,
   runningExecutionId: null,
+  liveLogGapExecutionId: null,
   executions: [],
   executionsTotal: 0,
   executionsPage: 0,
@@ -183,8 +189,13 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
       return
     }
     // 正在实时执行的实例：日志由 SSE 逐条推送，此时若从 DB 重载，
-    // 异步响应返回时会覆盖已到达的实时日志（竞态），故跳过日志重载
-    const isLiveExecution = get().isExecuting && get().runningExecutionId === id
+    // 异步响应返回时会覆盖已到达的实时日志（竞态），故跳过日志重载。
+    // 例外：取消选中期间该执行的实时日志被隔离丢弃（liveLogGapExecutionId 标记），
+    // 重新选中时必须从 DB 重载补齐缺口
+    const isLiveExecution =
+      get().isExecuting &&
+      get().runningExecutionId === id &&
+      get().liveLogGapExecutionId !== id
     try {
       const [execResp, yamlResp] = await Promise.all([
         getExecution(id),
@@ -203,6 +214,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
       if (yamlResp?.code === 200 && yamlResp.data?.hasSnapshot) {
         set({ selectedExecutionYaml: yamlResp.data.yaml })
       }
+      // 日志缺口已随本次 DB 重载补齐（live 且无缺口时本就连续，无需清除）
+      if (get().liveLogGapExecutionId === id) set({ liveLogGapExecutionId: null })
     } catch (error) {
       console.error('Failed to select execution', error)
     } finally {
@@ -215,6 +228,13 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
     set({ loadingNodes: true })
     try {
       const resp = await getExecutionNodes(executionId)
+      // 过期守卫（执行间严格隔离）：等待响应期间用户已取消选中或改选其他执行，
+      // 丢弃本次结果——否则迟到的节点记录会在后续 syncCanvasStatusesFromExecutionNodes
+      // 时被播种到不属于它的画布上
+      if (get().selectedExecutionId !== executionId) {
+        set({ loadingNodes: false })
+        return
+      }
       if (resp.code === 200 && resp.data) {
         set({ executionNodes: resp.data.map(normalizeNode), loadingNodes: false })
       }
@@ -237,6 +257,11 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         limit: LOG_PAGE_SIZE,
         offset: 0,
       })
+      // 过期守卫：等待响应期间选中已变化，丢弃迟到的日志（否则串到别的执行视图）
+      if (get().selectedExecutionId !== executionId) {
+        set({ loadingLogs: false })
+        return
+      }
       if (resp.code === 200 && resp.data) {
         const logs = (resp.data.items || []).map(normalizeLog).reverse()
         set({ executionLog: logs, logsTotal: resp.data.total, loadingLogs: false })
@@ -261,6 +286,12 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         limit: LOG_PAGE_SIZE,
         offset: executionLog.length,
       })
+      // 过期守卫：翻页加载期间用户改选了其他执行，丢弃——否则 A 的旧日志
+      // 会被 prepend 进 B 的日志列表
+      if (get().selectedExecutionId !== selectedExecutionId) {
+        set({ loadingOlder: false })
+        return
+      }
       if (resp.code === 200 && resp.data) {
         const older = (resp.data.items || []).map(normalizeLog).reverse()
         const existingIds = new Set(executionLog.map((l) => l.id))
@@ -287,10 +318,11 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
       executionLog: [],
       logsTotal: 0,
       executionNodes: [],
+      liveLogGapExecutionId: null,
     })
   },
 
-  stopExecution: () => set({ isExecuting: false, runningExecutionId: null }),
+  stopExecution: () => set({ isExecuting: false, runningExecutionId: null, liveLogGapExecutionId: null }),
 
   beginContinue: (id) => set({ isExecuting: true, runningExecutionId: id }),
 
@@ -356,6 +388,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
       realtimeLogTimer = setTimeout(flushRealtimeLogs, REALTIME_LOG_FLUSH_MS)
     }
   },
+
+  markLiveLogGap: (executionId) => set({ liveLogGapExecutionId: executionId }),
 
   setLogFilter: (filter) => {
     const prev = get().logFilter

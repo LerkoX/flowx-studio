@@ -13,12 +13,23 @@ apiClient.interceptors.response.use(
   (response) => {
     const data = response.data as ApiResponse<unknown>
     if (data.code !== 200) {
-      return Promise.reject(new Error(data.message || 'Request failed'))
+      return Promise.reject(new ApiError(data.message || 'Request failed', response.status))
     }
     return response
   },
   (error) => {
     const message = error.response?.data?.message || error.message || 'Network error'
-    return Promise.reject(new Error(message))
+    return Promise.reject(new ApiError(message, error.response?.status))
   }
 )
+
+/** 带 HTTP 状态码的 API 错误（409=乐观锁冲突等场景需要区分处理） */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status?: number,
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}

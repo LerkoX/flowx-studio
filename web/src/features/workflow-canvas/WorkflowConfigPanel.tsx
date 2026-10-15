@@ -72,9 +72,12 @@ export default function WorkflowConfigPanel({ view }: WorkflowConfigPanelProps) 
           intent: latest.intent,
           yamlConfig: latest.yamlConfig,
           status: latest.status,
+          baseRevision: latest.revision,
         })
       }
     } catch (e) {
+      // 409 = 乐观锁冲突：他端已改，提示后由用户决定重试（本地内存已是新参数，
+      // 但服务端是他端版本；最简单的一致化是让用户刷新后重改）
       toast.error(e instanceof Error ? e.message : String(e))
     } finally {
       setSaving(false)

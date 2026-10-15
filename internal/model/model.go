@@ -279,6 +279,11 @@ type Workflow struct {
 	Status      string    `json:"status" db:"status"` // draft | active | archived
 	CreatedAt   time.Time `json:"createdAt" db:"created_at"`
 	UpdatedAt   time.Time `json:"updatedAt" db:"updated_at"`
+	// Revision 内容版本号（乐观锁）：服务端按可变字段（name/description/intent/
+	// yamlConfig/status）内容算哈希，随 GET 响应下发；客户端 PUT 时用
+	// baseRevision 回传其编辑所基于的版本，不一致说明期间被他端改过 → 409。
+	Revision     string `json:"revision,omitempty" db:"-"`
+	BaseRevision string `json:"baseRevision,omitempty" db:"-"`
 }
 
 // WorkflowStats 工作流执行统计（按 executions 表聚合）

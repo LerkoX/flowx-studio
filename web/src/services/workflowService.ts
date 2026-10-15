@@ -58,10 +58,12 @@ export async function createWorkflow(
 /**
  * 更新工作流
  * PUT /api/v1/workflows/:id
+ * baseRevision：乐观锁基线（GET 时服务端下发的 revision）；带上后若流水线
+ * 在本地编辑期间被他端修改，服务端返回 409 而不是静默覆盖。
  */
 export async function updateWorkflow(
   workflowId: string,
-  workflow: Partial<Workflow>
+  workflow: Partial<Workflow> & { baseRevision?: string }
 ): Promise<ApiResponse<{ id: number }>> {
   const response = await apiClient.put(`/api/v1/workflows/${workflowId}`, workflow)
   return response.data

@@ -104,6 +104,18 @@ const ModuleNodeWidget = memo(({ url, width, height, widgetProps }: ModuleNodeWi
   propsRef.current = widgetProps
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  // 重试序号：>0 时给 bundle URL 追加 _retry= 参数。Chrome 会把动态 import 的
+  // 失败按 URL 缓存到页面生命周期结束（module map），ESM bundle 也无法靠
+  // <script> 标签兜底恢复（export 语句按 classic script 解析必报语法错），
+  // 因此重试必须换 URL 才能绕开失败缓存（曾致整页组件加载失败后只能刷新页面）
+  const [retryNonce, setRetryNonce] = useState(0)
+  const autoRetryRef = useRef(0)
+
+  // url 变化（节点包更新换了 ?v=）时重置重试状态
+  useEffect(() => {
+    autoRetryRef.current = 0
+    setRetryNonce(0)
+  }, [url])
 
   // 挂载：url 变化时重新加载并挂载（?v= 缓存破坏使重新导入后 url 变化）
   useEffect(() => {
@@ -111,11 +123,14 @@ const ModuleNodeWidget = memo(({ url, width, height, widgetProps }: ModuleNodeWi
     setError(null)
     setLoading(true)
 
-    loadWidgetBundle(url)
+    const effectiveUrl =
+      retryNonce > 0 ? url + (url.includes('?') ? '&' : '?') + '_retry=' + retryNonce : url
+    loadWidgetBundle(effectiveUrl)
       .then((mount) => {
         if (cancelled || !containerRef.current) return
         try {
           handleRef.current = mount(containerRef.current, propsRef.current) || {}
+          autoRetryRef.current = 0
           setLoading(false)
         } catch (err) {
           console.error('[ModuleNodeWidget] mount failed:', err)
@@ -126,6 +141,16 @@ const ModuleNodeWidget = memo(({ url, width, height, widgetProps }: ModuleNodeWi
       .catch((err) => {
         if (cancelled) return
         console.error('[ModuleNodeWidget] load failed:', err)
+        // 自动重试两次（1.5s / 4s）：失败多为 server 重启/网络抖动等瞬时故障；
+        // 自动重试期间保持 loading 态，成功即恢复，不再永久卡在错误条
+        if (autoRetryRef.current < 2) {
+          autoRetryRef.current += 1
+          const delay = autoRetryRef.current === 1 ? 1500 : 4000
+          setTimeout(() => {
+            if (!cancelled) setRetryNonce((n) => n + 1)
+          }, delay)
+          return
+        }
         setError(err instanceof Error ? err.message : String(err))
         setLoading(false)
       })
@@ -141,7 +166,8 @@ const ModuleNodeWidget = memo(({ url, width, height, widgetProps }: ModuleNodeWi
       // 组件未正确清理时兜底清空容器
       if (containerRef.current) containerRef.current.innerHTML = ''
     }
-  }, [url])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url, retryNonce])
 
   // 数据推送：props 内容变化时调用组件的 update()
   // 注意 onParamsChange 是函数、JSON.stringify 会丢弃它，但预览/编辑模式切换
@@ -168,6 +194,15 @@ const ModuleNodeWidget = memo(({ url, width, height, widgetProps }: ModuleNodeWi
         <span className="text-[10px] text-rose-300/80 truncate" title={error}>
           {t('canvas.widgetLoadFailed')}: {error}
         </span>
+        <button
+          className="text-[10px] text-rose-300 underline underline-offset-2 flex-shrink-0 hover:text-rose-200"
+          onClick={() => {
+            autoRetryRef.current = 0
+            setRetryNonce((n) => n + 1)
+          }}
+        >
+          {t('canvas.widgetRetry')}
+        </button>
       </div>
     )
   }
