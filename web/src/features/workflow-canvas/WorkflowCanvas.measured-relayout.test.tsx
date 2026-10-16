@@ -46,6 +46,8 @@ Nodes:
 
 vi.mock('@/services/workflowService', () => ({
   updateWorkflow: vi.fn(async () => ({ code: 200 })),
+  // 媒体产物清单（节点预览/输入原图恢复）：本用例不涉及，返回空清单
+  getExecutionMedia: vi.fn(async () => ({ code: 200, data: { media: [] } })),
   getWorkflowExecutors: vi.fn(async () => ({
     code: 200,
     data: { source: 'workflow', executors: {}, nodes: {} },

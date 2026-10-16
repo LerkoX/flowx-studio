@@ -197,6 +197,27 @@ export async function getExecutionNodes(
   return response.data
 }
 
+/** 节点媒体产物条目（路线 A 媒体通道统一化：path 供 /api/v1/media/file?path= 直读） */
+export interface ExecutionMediaItem {
+  nodeId: string
+  kind: string
+  name: string
+  path: string
+  size: number
+  updatedAt: string
+}
+
+/**
+ * 获取某执行已物化的节点媒体产物清单（刷新/回放恢复预览用）。
+ * GET /api/v1/executions/:id/media
+ */
+export async function getExecutionMedia(
+  executionId: string
+): Promise<ApiResponse<{ media: ExecutionMediaItem[] }>> {
+  const response = await apiClient.get(`/api/v1/executions/${executionId}/media`)
+  return response.data
+}
+
 export async function getExecutionLogs(
   executionId: string,
   params?: {

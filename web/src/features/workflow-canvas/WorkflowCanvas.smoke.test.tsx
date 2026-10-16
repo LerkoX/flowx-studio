@@ -73,6 +73,8 @@ beforeAll(() => {
 
 vi.mock('@/services/workflowService', () => ({
   updateWorkflow: vi.fn(async () => ({ code: 200 })),
+  // 媒体产物清单（节点预览/输入原图恢复）：本用例不涉及，返回空清单
+  getExecutionMedia: vi.fn(async () => ({ code: 200, data: { media: [] } })),
   // 画布执行器徽章查询：测试不涉及，返回空解析结果
   getWorkflowExecutors: vi.fn(async () => ({ code: 200, data: { source: 'workflow', executors: {}, nodes: {} } })),
   getWorkflow: vi.fn(async (id) => ({

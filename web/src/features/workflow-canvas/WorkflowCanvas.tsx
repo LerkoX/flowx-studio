@@ -21,7 +21,7 @@ import { useExecutionStore } from '@/stores/executionStore'
 import { syncCanvasStatusesFromExecutionNodes } from './executionSelection'
 import { useIsMobile } from '@/hooks/useMediaQuery'
 import { parseWorkflowGraph, parseNodeRefs, parseNodeNames, parseNodeParams, parseParamSources } from '@/utils/mermaidParser'
-import { updateWorkflow, getWorkflow, getWorkflowExecutors, getExecutions, getExecution } from '@/services/workflowService'
+import { updateWorkflow, getWorkflow, getWorkflowExecutors, getExecutions, getExecution, getExecutionMedia } from '@/services/workflowService'
 import { resolveNodes } from '@/services/nodeService'
 import type { NodeDefinition } from '@/types/node'
 import type { ExecutorResolutionResult, OutputIncompleteReason } from '@/types/workflow'
@@ -653,22 +653,26 @@ function WorkflowCanvasInner({
   // 同步节点运行时数据（入参/返回/实时预览）：退出回放态时 nodeRuntimeData 清空，
   // 此处同步清掉节点上残留的 inputs/outputs/preview，不能 early-return
   useEffect(() => {
-    setNodes((nds) =>
-      nds.map((node) => {
+    setNodes((nds) => {
+      let changed = false
+      const next = nds.map((node) => {
         const runtime = nodeRuntimeData[node.id]
         const inputs = runtime?.inputs
         const outputs = runtime?.outputs
         const preview = runtime?.preview
+        const media = runtime?.media
 
         // 引用未变直接跳过：一次更新中大多数节点没有变化
         if (
           inputs === node.data.inputs &&
           outputs === node.data.outputs &&
-          preview === node.data.preview
+          preview === node.data.preview &&
+          media === node.data.media
         ) {
           return node
         }
 
+        changed = true
         return {
           ...node,
           data: {
@@ -676,11 +680,19 @@ function WorkflowCanvasInner({
             inputs,
             outputs,
             preview,
+            media,
           },
         }
       })
-    )
-  }, [nodeRuntimeData, setNodes])
+      // 全部节点引用未变：返回原数组（同引用），避免 setNodes 触发新渲染与本 effect 互循环
+      return changed ? next : nds
+    })
+    // nodes 加入依赖：选中执行后画布会被「执行快照」整套重建（node.data 运行时字段被重置），
+    // 必须在重建后把 nodeRuntimeData 已恢复的 inputs/outputs/preview 重新摆回画布——否则
+    // 历史回放的预览帧会被重建冲掉（outputs 因在重建时机播种而幸免）。无变化时返回原数组
+    // 引用，不会与 setNodes 形成无限循环。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeRuntimeData, nodes, setNodes])
 
   const selectedExecution = useExecutionStore((s) => s.selectedExecution)
 
@@ -771,6 +783,54 @@ function WorkflowCanvasInner({
       setNodeRuntimeData(nodeId, { outputs })
     }
   }, [selectedExecution, setNodeRuntimeData])
+
+  // 恢复节点预览（路线 A）：刷新页面/切换执行后拉媒体产物清单，把 kind=frame 的
+  // 最新一份还原为 preview（物化缓存在磁盘，Studio 重启/第三方断网后仍可供给）；
+  // 其余 kind（如 kind=input 的输入原图）回到 media 映射，供 widget 对比区使用。
+  // 执行中的实时帧仍由 SSE node_preview 事件覆盖
+  useEffect(() => {
+    if (!selectedExecutionId) return
+    let cancelled = false
+    getExecutionMedia(String(selectedExecutionId))
+      .then((resp) => {
+        if (cancelled) return
+        const items = resp.data?.media || []
+        type Item = { path: string; updatedAt: string }
+        const latestFrame: Record<string, Item> = {}
+        const latestByKind: Record<string, Record<string, Item>> = {}
+        for (const it of items) {
+          const at = new Date(it.updatedAt).getTime()
+          const kindMap = (latestByKind[it.nodeId] = latestByKind[it.nodeId] || {})
+          const prevKind = kindMap[it.kind]
+          if (!prevKind || at > new Date(prevKind.updatedAt).getTime()) {
+            kindMap[it.kind] = { path: it.path, updatedAt: it.updatedAt }
+          }
+          if (it.kind !== 'frame') continue
+          const cur = latestFrame[it.nodeId]
+          if (!cur || at > new Date(cur.updatedAt).getTime()) {
+            latestFrame[it.nodeId] = { path: it.path, updatedAt: it.updatedAt }
+          }
+        }
+        for (const [nodeId, it] of Object.entries(latestFrame)) {
+          setNodeRuntimeData(nodeId, {
+            preview: {
+              url: `/api/v1/media/file?path=${encodeURIComponent(it.path)}&t=${new Date(it.updatedAt).getTime()}`,
+            },
+          })
+        }
+        for (const [nodeId, kindMap] of Object.entries(latestByKind)) {
+          const media: Record<string, string> = {}
+          for (const [kind, it] of Object.entries(kindMap)) {
+            media[kind] = `/api/v1/media/file?path=${encodeURIComponent(it.path)}&t=${new Date(it.updatedAt).getTime()}`
+          }
+          setNodeRuntimeData(nodeId, { media })
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [selectedExecutionId, setNodeRuntimeData])
 
   // 订阅 SSE 事件
   // 注意：/api/v1/events 是**全局流**——所有流水线的执行事件都推过来（无 workflow 过滤）。
@@ -946,21 +1006,46 @@ function WorkflowCanvasInner({
     }
 
     if (type === 'node_preview') {
-      // 节点运行中途上报的预览帧进度（瞬态，不落库；帧本体经 preview-frame
-      // 接口以 HTTP 二进制中转拉取，不经 base64）：仅应用到当前画布正在
-      // 展示的执行（回放态选中的 / 本页正在运行的），其他执行直接忽略
-      // （帧地址按执行拼，跨执行混用会拿到别人的帧）
+      // 节点上报的媒体产物事件（路线 A 媒体通道统一化）：payload.path 是 Studio
+      // 物化后的磁盘路径 → 用通用 media 出口直读（刷新/重启/第三方断网仍可供给
+      // 最后一帧）。preview-frame 专用接口已删除：物化完成的事件带 path → 更新帧地址；
+      // 物化中的纯进度事件（无 path）保留上一帧 url 只更新进度。
       const payload = data as {
         execution_id?: number
         node_id?: string
         progress?: number
         job_id?: string
+        path?: string
+        kind?: string
       }
       if (!payload.node_id || !eventAppliesToCanvas(payload)) return
+      // 按 kind 分流：只有 frame（含缺省，兼容旧节点）驱动画布预览帧；其它 kind
+      //（如节点执行时物化的输入原图 kind=input）存进 media 映射——否则输入原图会把
+      // 过程帧顶掉（widget 的对比区靠 media.input 拿原图，见 compareInput 区）。
+      const kind = payload.kind || 'frame'
+      if (kind !== 'frame') {
+        if (!payload.path) return
+        const mediaUrl = `/api/v1/media/file?path=${encodeURIComponent(payload.path)}&t=${Date.now()}`
+        const prevMedia = useWorkflowStore.getState().nodeRuntimeData[payload.node_id]?.media
+        setNodeRuntimeData(payload.node_id, {
+          media: { ...(prevMedia || {}), [kind]: mediaUrl },
+        })
+        return
+      }
+      const existing = useWorkflowStore.getState().nodeRuntimeData[payload.node_id]?.preview
+      const url = payload.path
+        ? `/api/v1/media/file?path=${encodeURIComponent(payload.path)}&t=${Date.now()}`
+        : existing?.url
+      if (!url) {
+        // 还没有任何帧（物化未完成）：仅刷新进度条，等带 path 的事件补上帧地址
+        if (existing) {
+          setNodeRuntimeData(payload.node_id, { preview: { ...existing, progress: payload.progress } })
+        }
+        return
+      }
       setNodeRuntimeData(payload.node_id, {
         preview: {
-          // 时间戳参数驱使浏览器重新拉取最新帧（接口本身 no-cache）
-          url: `/api/v1/executions/${payload.execution_id}/nodes/${encodeURIComponent(payload.node_id)}/preview-frame?t=${Date.now()}`,
+          url,
           progress: payload.progress,
           jobId: payload.job_id || undefined,
         },

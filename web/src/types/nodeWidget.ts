@@ -51,7 +51,7 @@ export interface NodeWidgetExecution {
 
 /** 节点实时预览帧（节点经 stdout FLOWX_PREVIEW 标记上报帧地址，Studio 中转拉帧，SSE 下发进度） */
 export interface NodeWidgetPreview {
-  /** 预览帧 HTTP 地址（Studio preview-frame 中转接口，媒体不经 base64） */
+  /** 预览帧 HTTP 地址（Studio 媒体出口 /media/file，媒体不经 base64） */
   url: string
   /** 可选进度 0~1 */
   progress?: number
@@ -93,10 +93,18 @@ export interface NodeWidgetProps {
    * 节点实时预览帧（可选）：节点脚本执行中途经 stdout FLOWX_PREVIEW 标记上报
    * 帧地址（推理服务 HTTP 端点），Studio 中转拉帧，随 SSE 进度事件刷新；
    * 瞬态数据——node_complete 时清除，回放态/未执行时缺省，组件需判空。
-   * url 为 Studio preview-frame 中转接口地址（同源 cookie 认证），
+   * url 为 Studio 媒体出口地址（/media/file，同源 cookie 认证），
    * 组件以 <img src=url> 直接渲染。节点预览 UI 由组件自行渲染（画布外壳不渲染预览）。
    */
   preview?: NodeWidgetPreview
+  /**
+   * 节点媒体产物（kind → Studio 媒体出口 URL）。与 preview 分开：preview 只承载
+   * kind=frame（过程帧/结果帧），其它分类（如节点执行时物化的输入原图 kind=input）
+   * 在这里按 kind 存放。对比控件用 media.input 作「原图」：推理服务的图像对象是
+   * 内存态，GC/重启/TTL 后会 404，物化产物则随媒体缓存（72h）持久可读。
+   * 可选字段：旧版 Studio 不下发，组件需判空并回退到实时代理链。
+   */
+  media?: Record<string, string>
   /** 当前主题 */
   theme: 'dark' | 'light'
   /** 语言环境，预留 */

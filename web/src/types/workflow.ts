@@ -6,7 +6,7 @@ export interface WorkflowParam {
 }
 
 export interface NodePreview {
-  /** 预览帧 HTTP 地址（Studio preview-frame 中转接口，媒体不经 base64） */
+  /** 预览帧 HTTP 地址（Studio 媒体出口 /media/file，媒体不经 base64） */
   url: string
   /** 可选进度 0~1 */
   progress?: number
@@ -23,6 +23,13 @@ export interface NodeRuntimeData {
   endTime?: string
   /** 节点运行中的实时预览帧地址（瞬态：node_complete 时清除，不回放） */
   preview?: NodePreview
+  /**
+   * 节点媒体产物（kind → Studio 媒体出口 URL），来自物化缓存清单与 SSE 事件。
+   * 与 preview 分离存放：preview 只认 kind=frame（过程帧/结果帧），其它 kind 落到
+   * 这里。首个用途是 kind=input——节点执行时把「输入原图」也物化落盘，供画布对比
+   * 控件在推理服务对象被 GC/TTL 驱逐后仍能复现原图（对象是内存态，实时代理链会 404）。
+   */
+  media?: Record<string, string>
 }
 
 /** 工作流执行统计（列表接口附带，卡片展示运行中/成功/失败次数） */

@@ -55,6 +55,9 @@ interface GlowNodeData {
       （props.preview）由其自行渲染；外壳不渲染预览。node_complete 后保留最后一帧
       （帧源有 TTL，过期由组件 onerror 回退），切换/取消选中执行时随运行时数据清除 */
   preview?: NodePreview
+  /** 节点其它媒体产物（kind → 媒体出口 URL），目前用于 kind=input 的物化输入
+      原图：对比控件在推理服务对象被驱逐后仍能复现「原图」侧 */
+  media?: Record<string, string>
   /** 节点最终跑在哪个执行器上（画布查询 /workflows/:id/executors 注入；
       编辑态按当前定义实时解析，回放态用执行快照，与当时实际执行一致） */
   executor?: NodeExecutorInfo
@@ -204,11 +207,14 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
       execution: toWidgetExecution(selectedExecution),
       // 实时预览帧透传给节点自定义 UI（组件自行渲染，外壳不渲染预览）
       preview: nodeData.preview,
+      // 其它媒体产物（kind → URL）：目前用于 kind=input 的输入原图，供对比控件
+      // 在推理服务对象被驱逐后仍能复现原图
+      media: nodeData.media,
       theme: getCurrentTheme(),
       locale: typeof navigator !== 'undefined' ? navigator.language : 'zh-CN',
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }),
-    [nodeData.id, nodeData.nodeRef, status, nodeData.inputs, nodeData.outputs, nodeData.params, paramSources, nodeData.onParamsChange, interactive, selectedExecution, nodeData.preview]
+    [nodeData.id, nodeData.nodeRef, status, nodeData.inputs, nodeData.outputs, nodeData.params, paramSources, nodeData.onParamsChange, interactive, selectedExecution, nodeData.preview, nodeData.media]
   )
 
   const hasInputs = nodeData.inputs && nodeData.inputs.length > 0
