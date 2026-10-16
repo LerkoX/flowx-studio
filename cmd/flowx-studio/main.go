@@ -263,7 +263,14 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	api := srv.Router().Group("/api/v1")
 	api.Use(server.AuthMiddleware(token))
-	api.Use(server.RateLimitMiddleware(100, 50)) // 每 IP 100 请求/分钟，突发 50
+	// 分档限流：普通接口/写操作 100 请求/分钟；重负载只读（媒体文件、节点 widget
+	// bundle、service-proxy）走 1200/分钟——一次画布加载就是 41 个请求，同档会把
+	// 正在加载的图片打成 429（画布表现为预览随机缺失，见 IsHeavyReadPath 注释）
+	api.Use(server.RateLimitMiddlewareTiered(server.RateLimitOptions{
+		Strict:     server.RateLimitTier{PerMinute: 100, Burst: 50},
+		Loose:      server.RateLimitTier{PerMinute: 1200, Burst: 400},
+		LooseMatch: server.IsHeavyReadPath,
+	}))
 
 	// 健康检查免认证（监控探针 / server status 探测用），不含敏感数据
 	handler.NewHealthHandler(svcs.database, cfg.Data.DBPath, version).RegisterRoutes(srv.Router())
