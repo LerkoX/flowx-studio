@@ -46,6 +46,7 @@ type appServices struct {
 	executorSvc   *service.ExecutorService
 	sysCfgSvc     *service.SystemConfigService
 	assetStore    *assets.Store
+	mediaStore    *service.MediaStore
 }
 
 func main() {
@@ -140,6 +141,13 @@ func newAppServices(cfg *config.Config) (*appServices, func(), error) {
 	nodeImportSvc := service.NewNodeImportService(nodeSvc)
 	workflowSvc := service.NewWorkflowService(database, rt, bus, nodeSvc)
 	workflowSvc.SetSystemConfig(sysCfgSvc)
+	// 媒体产物物化缓存（路线 A）：节点 marker 声明的第三方媒体来源落盘，
+	// 统一经 /api/v1/media/file 出口供给；缓存根目录追加进 media 白名单
+	mediaStore := service.NewMediaStore(filepath.Join(cfg.Data.Dir, "media-cache"))
+	if mediaStore != nil {
+		workflowSvc.SetMediaStore(mediaStore)
+		cfg.Media.Roots = append(cfg.Media.Roots, mediaStore.Root())
+	}
 	auditSvc := service.NewAuditService(database)
 	nodeSvc.SetAudit(auditSvc)
 	workflowSvc.SetAudit(auditSvc)
@@ -165,6 +173,7 @@ func newAppServices(cfg *config.Config) (*appServices, func(), error) {
 		executorSvc:   executorSvc,
 		sysCfgSvc:     sysCfgSvc,
 		assetStore:    assetStore,
+		mediaStore:    mediaStore,
 	}, cleanup, nil
 }
 
@@ -214,6 +223,23 @@ func runServer(cmd *cobra.Command, args []string) error {
 	defer stop()
 
 	svcs.workflowSvc.StartEventBridge(ctx)
+
+	// 媒体产物缓存清理：启动即扫一遍 + 每小时一次（TTL 72h / LRU 5GB）
+	if svcs.mediaStore != nil {
+		svcs.mediaStore.Cleanup()
+		go func() {
+			ticker := time.NewTicker(time.Hour)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					svcs.mediaStore.Cleanup()
+				}
+			}
+		}()
+	}
 
 	// 按保留天数自动清理历史日志：执行日志读系统配置 log_retention_days（设置页可改），
 	// 审计日志读配置文件 retention.audit_days；0 表示不清理

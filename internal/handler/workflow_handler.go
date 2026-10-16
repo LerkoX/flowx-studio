@@ -52,7 +52,9 @@ func (h *WorkflowHandler) RegisterRoutes(r *gin.RouterGroup) {
 		executions.POST("/:id/pause", h.PauseExecution)
 		executions.POST("/:id/resume", h.ResumeExecution)
 		executions.POST("/:id/cancel", h.CancelExecution)
-		executions.GET("/:id/nodes/:nodeId/preview-frame", h.GetNodePreviewFrame)
+		// 执行媒体产物清单（媒体通道统一化）：刷新/回放时前端据它恢复各节点预览；
+		// 数据来自媒体缓存目录的事实（不落库），与节点执行记录无关
+		executions.GET("/:id/media", h.GetExecutionMedia)
 		// 节点级通用服务代理：widget 运行期调用其第三方服务（取资源/发动作），
 		// base 由服务端按节点执行记录解析（防 SSRF），path/method/body 由 widget 自持
 		executions.Any("/:id/nodes/:nodeId/service-proxy", h.NodeServiceProxy)
@@ -336,29 +338,20 @@ func (h *WorkflowHandler) CancelExecution(c *gin.Context) {
 	Success(c, gin.H{"executionId": id, "status": "cancelled"})
 }
 
-// GetNodePreviewFrame 中转返回节点实时预览帧（HTTP 二进制，不经 base64）。
-// 帧来源由节点 stdout 的 FLOWX_PREVIEW 标记上报（第三方服务 HTTP 端点），
-// Studio 据此中转拉帧；前端 <img> 直读本接口（flowx_token cookie 认证）。
-// GET /executions/:id/nodes/:nodeId/preview-frame
-func (h *WorkflowHandler) GetNodePreviewFrame(c *gin.Context) {
-	execID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+// GetExecutionMedia 列出某执行已物化的节点媒体产物（刷新/回放恢复预览用）。
+// 返回该执行缓存目录的事实清单（含 path，供 /api/v1/media/file?path= 直读）。
+// GET /executions/:id/media
+func (h *WorkflowHandler) GetExecutionMedia(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		Error(c, http.StatusBadRequest, "invalid execution id")
 		return
 	}
-	nodeID := c.Param("nodeId")
-	if nodeID == "" {
-		Error(c, http.StatusBadRequest, "node id is required")
-		return
+	media := h.service.GetExecutionMedia(id)
+	if media == nil {
+		media = []service.MediaItem{}
 	}
-
-	frame, mime, err := h.service.GetPreviewFrame(execID, nodeID)
-	if err != nil {
-		Error(c, http.StatusNotFound, err.Error())
-		return
-	}
-	c.Header("Cache-Control", "no-cache")
-	c.Data(http.StatusOK, mime, frame)
+	Success(c, gin.H{"media": media})
 }
 
 // NodeServiceProxy 节点级通用第三方服务代理（运行期）。

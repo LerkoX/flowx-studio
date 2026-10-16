@@ -108,7 +108,11 @@ func (h *MediaHandler) Serve(c *gin.Context) {
 		return
 	}
 
-	c.Header("Cache-Control", "private, max-age=60")
+	// ETag + no-cache：客户端每次发条件请求校验，未变命中 304（大文件省流量），
+	// 变了立刻拿新内容（过程帧覆盖式更新不会显示陈帧）。ServeContent 自带
+	// Range / If-Modified-Since / If-None-Match 处理。
+	c.Header("ETag", fmt.Sprintf("\"%x-%x\"", info.Size(), info.ModTime().UnixNano()))
+	c.Header("Cache-Control", "private, no-cache")
 	http.ServeContent(c.Writer, c.Request, info.Name(), info.ModTime(), f)
 }
 

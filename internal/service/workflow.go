@@ -36,11 +36,14 @@ type WorkflowService struct {
 	logRing   *LogRingBuffer
 	metaMu    sync.Mutex
 	metaCache map[int64]map[string]interface{}
-	// 节点实时预览：节点经 stdout 的 FLOWX_PREVIEW 标记上报帧地址（推理服务 HTTP
-	// 端点），这里按 execID/nodeID 记录来源，preview-frame 接口中转拉帧给前端。
-	// 瞬态数据：内存态，不落库；媒体全程 HTTP 二进制，不经 base64
+	// 节点预览来源注册表：节点经 stdout 标记上报帧地址（推理服务 HTTP 端点），
+	// 这里按 execID/nodeID 记录 base/token/jobID（供节点级中断与服务代理解析）；
+	// 帧本体由媒体物化层落盘后经 media 出口供给。瞬态数据：内存态，不落库。
 	previewMu   sync.Mutex
 	previewSrcs map[string]*previewSource
+	// 节点媒体产物物化缓存（路线 A）：marker 声明的第三方媒体来源落盘，
+	// 统一经 media 出口供给；nil 表示未启用（兼容旧中转直拉路径）
+	mediaCache *MediaStore
 }
 
 // NewWorkflowService 创建工作流服务
@@ -59,6 +62,18 @@ func NewWorkflowService(database *db.DB, rt *runtime.Adapter, bus *event.Bus, no
 	// 执行完成时持久化运行时快照（含各节点/步骤状态），供无状态续跑恢复
 	rt.SetExportHandler(svc.saveRuntimeSnapshot)
 	return svc
+}
+
+// SetMediaStore 装配媒体产物物化缓存（路线 A）。未装配时 marker 只更新来源
+// 注册表并广播进度事件，不物化落盘。
+func (s *WorkflowService) SetMediaStore(m *MediaStore) { s.mediaCache = m }
+
+// GetExecutionMedia 列出某执行已物化的节点媒体产物（刷新/回放恢复用，扫盘不落库）。
+func (s *WorkflowService) GetExecutionMedia(execID int64) []MediaItem {
+	if s.mediaCache == nil {
+		return nil
+	}
+	return s.mediaCache.Index(execID)
 }
 
 // saveRuntimeSnapshot 在执行完成的 WorkflowFinish 事件内同步保存快照 YAML
@@ -1063,126 +1078,11 @@ type previewSource struct {
 	jobID     string // 节点上报的不透明任务标识（FLOWX_PREVIEW marker 显式上报；语义由节点生态自定，widget 可用于构造第三方服务动作路径）
 	progress  float64
 	updatedAt time.Time
-	frame     []byte
-	frameMIME string
-	frameAt   time.Time
 }
 
-const (
-	previewFrameCacheTTL = time.Second   // 帧内容缓存时长
-	previewSourceTTL     = 2 * time.Hour // 来源映射过期（执行结束后的清扫兜底）
-	previewMaxFrameBytes = 16 << 20      // 单帧上限 16MB
-	previewFetchTimeout  = 5 * time.Second
-)
+// previewSourceTTL 来源映射过期（执行结束后的清扫兜底）
+const previewSourceTTL = 2 * time.Hour
 
-// previewMarkerPayload 节点 stdout 的 FLOWX_PREVIEW 标记 JSON 负载。
-// 节点轮询推理服务任务时上报帧地址；Studio 据此中转拉帧（媒体不走 base64）。
-// Base/JobID 为新增可选字段（节点级中断与 op-replay 重放用），旧节点包不上报。
-type previewMarkerPayload struct {
-	URL      string   `json:"url"`
-	Token    string   `json:"token"`
-	Progress *float64 `json:"progress"`
-	Base     string   `json:"base"`
-	JobID    string   `json:"job_id"`
-}
-
-// handlePreviewMarker 处理节点 stdout 的 FLOWX_PREVIEW 标记行：更新内存中的
-// 预览帧来源映射并广播轻量 node_preview 事件（只带进度，不带媒体）。
-// 标记行不落日志库、不进日志事件流
-func (s *WorkflowService) handlePreviewMarker(execID int64, nodeID string, payload previewMarkerPayload) {
-	if payload.URL == "" {
-		return
-	}
-	key := fmt.Sprintf("%d/%s", execID, nodeID)
-	now := time.Now()
-	s.previewMu.Lock()
-	src := s.previewSrcs[key]
-	if src == nil {
-		src = &previewSource{}
-		s.previewSrcs[key] = src
-	}
-	src.url = payload.URL
-	src.token = payload.Token
-	src.updatedAt = now
-	if payload.Base != "" {
-		src.base = strings.TrimRight(payload.Base, "/")
-	}
-	if payload.JobID != "" {
-		src.jobID = payload.JobID
-	}
-	if payload.Progress != nil {
-		src.progress = *payload.Progress
-	}
-	// 顺带清扫过期来源（执行结束后不会再有新标记）
-	for k, v := range s.previewSrcs {
-		if now.Sub(v.updatedAt) > previewSourceTTL {
-			delete(s.previewSrcs, k)
-		}
-	}
-	progress := src.progress
-	jobID := src.jobID
-	s.previewMu.Unlock()
-
-	s.eventBus.Publish(event.Event{Type: "node_preview", Data: map[string]interface{}{
-		"execution_id": execID,
-		"node_id":      nodeID,
-		"progress":     progress,
-		"job_id":       jobID, // 节点上报的不透明任务标识（语义由节点生态自定），透传给 widget
-		"timestamp":    now,
-	}})
-}
-
-// GetPreviewFrame 中转拉取节点实时预览帧：按 FLOWX_PREVIEW 标记记录的地址
-// 向推理服务发起 HTTP GET，返回帧字节与媒体类型。带 1s 短缓存。
-// 无预览来源返回 error（"preview not available"）
-func (s *WorkflowService) GetPreviewFrame(execID int64, nodeID string) ([]byte, string, error) {
-	key := fmt.Sprintf("%d/%s", execID, nodeID)
-	s.previewMu.Lock()
-	src := s.previewSrcs[key]
-	if src == nil || src.url == "" || time.Since(src.updatedAt) > previewSourceTTL {
-		s.previewMu.Unlock()
-		return nil, "", fmt.Errorf("preview not available")
-	}
-	if len(src.frame) > 0 && time.Since(src.frameAt) < previewFrameCacheTTL {
-		frame, mime := src.frame, src.frameMIME
-		s.previewMu.Unlock()
-		return frame, mime, nil
-	}
-	s.previewMu.Unlock()
-
-	req, err := http.NewRequest(http.MethodGet, src.url, nil)
-	if err != nil {
-		return nil, "", fmt.Errorf("invalid preview url: %w", err)
-	}
-	if src.token != "" {
-		req.Header.Set("Authorization", "Bearer "+src.token)
-	}
-	client := &http.Client{Timeout: previewFetchTimeout}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to fetch preview frame: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("preview source returned HTTP %d", resp.StatusCode)
-	}
-	frame, err := io.ReadAll(io.LimitReader(resp.Body, previewMaxFrameBytes+1))
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to read preview frame: %w", err)
-	}
-	if len(frame) > previewMaxFrameBytes {
-		return nil, "", fmt.Errorf("preview frame too large")
-	}
-	mime := resp.Header.Get("Content-Type")
-	if mime == "" {
-		mime = "image/jpeg"
-	}
-
-	s.previewMu.Lock()
-	src.frame, src.frameMIME, src.frameAt = frame, mime, time.Now()
-	s.previewMu.Unlock()
-	return frame, mime, nil
-}
 
 // UnsubscribeEvents 取消订阅事件
 func (s *WorkflowService) UnsubscribeEvents(ch chan event.Event) {
@@ -1356,31 +1256,6 @@ func (s *WorkflowService) GetExecutionNodes(executionID int64) ([]model.Executio
 	return nodes, nil
 }
 
-// splitPreviewMarkers 按行拆分日志文本：FLOWX_PREVIEW 标记行的 JSON 负载
-// 收进 markers，其余行原样（含缩进/空行）用 \n 重新 join 返回。无标记时 rest 为
-// 原文、markers 为空；全文皆标记时 rest 为空。结尾换行保留原文习惯（有标记时才重写）。
-func splitPreviewMarkers(text string) (rest string, markers []string) {
-	trailingNL := strings.HasSuffix(text, "\n")
-	var kept []string
-	for _, line := range strings.Split(strings.TrimSuffix(text, "\n"), "\n") {
-		if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, previewMarkerPrefix) {
-			markers = append(markers, strings.TrimPrefix(trimmed, previewMarkerPrefix))
-			continue
-		}
-		kept = append(kept, line)
-	}
-	if len(markers) == 0 {
-		return text, nil
-	}
-	rest = strings.Join(kept, "\n")
-	if trailingNL && rest != "" {
-		rest += "\n"
-	}
-	return rest, markers
-}
-
-// previewMarkerPrefix 节点 stdout 的预览帧地址标记前缀（见 emit_preview / handlePreviewMarker）
-const previewMarkerPrefix = "FLOWX_PREVIEW "
 
 // handleLogEntry 持久化运行时日志
 func (s *WorkflowService) handleLogEntry(entry logger.Entry) {
@@ -1390,22 +1265,21 @@ func (s *WorkflowService) handleLogEntry(entry logger.Entry) {
 		return
 	}
 
-	// FLOWX_PREVIEW 标记行：剥离出日志管道（不落库、不进 execution.log 事件），
-	// 转给预览通道更新帧来源映射并广播轻量 node_preview 事件。
+	// FLOWX_MEDIA / FLOWX_PREVIEW 标记行：剥离出日志管道（不落库、不进 execution.log 事件），
+	// 转给媒体物化通道：更新来源注册表 + 物化落盘 + 广播轻量 node_preview 事件。
 	// 逐行扫描而非整 entry 前缀匹配：断流补齐的尾部是多行合在一个 entry 里回调的，
 	// 首行是标记时整段（含进度/traceback/输出块等普通行）会被误吞（exec 767 事故）。
-	if rest, markers := splitPreviewMarkers(entry.Message); len(markers) > 0 {
+	if rest, markers := splitMediaMarkers(entry.Message); len(markers) > 0 {
 		for _, m := range markers {
-			var payload previewMarkerPayload
-			if err := json.Unmarshal([]byte(m), &payload); err == nil {
-				s.handlePreviewMarker(execID, entry.Node, payload)
+			if v, err := parseMediaMarker(m); err == nil {
+				s.handleMediaMarker(execID, entry.Node, v)
 			}
 		}
 		if rest == "" {
 			return
 		}
 		entry.Message = rest
-		if outRest, outMarkers := splitPreviewMarkers(entry.Output); len(outMarkers) > 0 {
+		if outRest, outMarkers := splitMediaMarkers(entry.Output); len(outMarkers) > 0 {
 			entry.Output = outRest
 		}
 	}

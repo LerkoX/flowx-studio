@@ -10,9 +10,11 @@ import (
 
 func TestPreviewMarker_BaseJobID(t *testing.T) {
 	svc := newPreviewTestService(t)
-	svc.handlePreviewMarker(42, "N", previewMarkerPayload{
-		URL: "http://x/preview/j1", Token: "t", Base: "http://x/", JobID: "j1",
-	})
+	v, err := parseMediaMarker(`{"url":"http://x/preview/j1","token":"t","base":"http://x/","job_id":"j1"}`)
+	if err != nil {
+		t.Fatalf("parseMediaMarker: %v", err)
+	}
+	svc.handleMediaMarker(42, "N", v)
 	svc.previewMu.Lock()
 	src := svc.previewSrcs["42/N"]
 	svc.previewMu.Unlock()
@@ -85,9 +87,11 @@ func TestNodeServiceProxy(t *testing.T) {
 	}
 
 	// preview 标记上报连接后：二进制透传 + token 转发
-	svc.handlePreviewMarker(42, "N", previewMarkerPayload{
-		URL: upstream.URL + "/preview/j1", Token: "sek", Base: upstream.URL, JobID: "j1",
-	})
+	mv, merr := parseMediaMarker(`{"url":"` + upstream.URL + `/preview/j1","token":"sek","base":"` + upstream.URL + `","job_id":"j1"}`)
+	if merr != nil {
+		t.Fatalf("parseMediaMarker: %v", merr)
+	}
+	svc.handleMediaMarker(42, "N", mv)
 	data, mime, status, err := svc.NodeServiceProxy(42, "N", "GET", "/images/imgIN1", nil)
 	if err != nil {
 		t.Fatalf("NodeServiceProxy: %v", err)
