@@ -33,6 +33,7 @@ function resetStore() {
   useExecutionStore.setState({
     isExecuting: false,
     runningExecutionId: null,
+    runningWorkflowId: null,
     liveLogGapExecutionId: null,
     selectedExecutionId: null,
     selectedExecution: null,

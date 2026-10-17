@@ -11,7 +11,7 @@ import LogViewer from '@/components/LogViewer'
 import { useAppStore } from '@/stores/appStore'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { useExecutionStore } from '@/stores/executionStore'
-import { runWorkflow, continueExecution, pauseExecution, resumeExecution, cancelExecution, getWorkflow, getExecutions } from '@/services/workflowService'
+import { runWorkflow, continueExecution, pauseExecution, resumeExecution, cancelExecution, getWorkflow } from '@/services/workflowService'
 import { parseNodeRefs } from '@/utils/mermaidParser'
 import { useIsMobile } from '@/hooks/useMediaQuery'
 import { useConfirm } from '@/hooks/useConfirm'
@@ -46,7 +46,6 @@ export default function WorkflowCanvasPage() {
   const currentWorkflow = useWorkflowStore((s) => s.currentWorkflow)
   const setCurrentWorkflow = useWorkflowStore((s) => s.setCurrentWorkflow)
   const params = useWorkflowStore((s) => s.params)
-  const isExecuting = useExecutionStore((s) => s.isExecuting)
   const runningExecutionId = useExecutionStore((s) => s.runningExecutionId)
   const selectedExecutionId = useExecutionStore((s) => s.selectedExecutionId)
   const selectedExecution = useExecutionStore((s) => s.selectedExecution)
@@ -56,13 +55,9 @@ export default function WorkflowCanvasPage() {
   const [starting, setStarting] = useState(false)
   const [pausePending, setPausePending] = useState(false)
   const [cancelPending, setCancelPending] = useState(false)
-  // 外部存活执行（running/paused）探测：运行按钮禁用态此前仅依赖本端内存态
-  // isExecuting——浏览器刷新 / CLI 或其他端发起运行后 isExecuting=false，按钮
-  // 回弹可点，误触会重复发起执行（后端仅全局并发上限，无同流水线防重护栏）。
-  // 编辑态（未选中执行）下探测本流水线存活执行：存在则禁用运行按钮并转圈，
-  // 轮询至其进入终态后自动恢复可点。回放态无需探测（isPlayback && !continueMode
-  // 已禁用按钮）
-  const [externalLiveId, setExternalLiveId] = useState<string | null>(null)
+  // 运行按钮不再探测「本流水线存活执行」来禁用：没选中任何执行时（编辑态）按钮
+  // 总是可点，同流水线允许多次并发发起（资源竞争由执行器/全局并发上限约束）。
+  // 运行态只跟着选中执行自身的状态（selectedRunning）走
   const { confirm, dialog: confirmDialog } = useConfirm()
   const { id: routeWorkflowId } = useParams<{ id: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -86,42 +81,16 @@ export default function WorkflowCanvasPage() {
   }, [isPlayback, selectedExecutionYaml, currentWorkflow?.yamlConfig, executionNodes])
 
   // 运行按钮三态：
-  // - 未选中执行：全新运行
+  // - 未选中执行（编辑态）：全新运行，**总是可点**
   // - 选中已结束执行 + 图中有新增节点：续跑该执行
   // - 选中已结束执行 + 无新增节点：禁用（无节点可跑）
   const continueMode = isPlayback && selectedFinished && pendingNodeIds.length > 0
-  const runDisabled = !currentWorkflow || starting || isExecuting || !!externalLiveId || (isPlayback && !continueMode)
-  const runBusy = starting || isExecuting || !!externalLiveId
-
-  // 编辑态探测存活执行（见 externalLiveId 声明处注释）。15s 轮询：未探测到时
-  // 覆盖「页面打开后他端新发起运行」的场景；探测到后等待其终结恢复按钮
-  useEffect(() => {
-    if (!currentWorkflow || selectedExecutionId) {
-      setExternalLiveId(null)
-      return
-    }
-    const wfId = Number(currentWorkflow.id)
-    if (!Number.isFinite(wfId)) return
-    let cancelled = false
-    const probe = () => {
-      getExecutions({ workflow_id: wfId, page: 1, page_size: 10 })
-        .then((resp) => {
-          if (cancelled) return
-          const live = resp.data?.items?.find(
-            (e) => e.status === 'running' || e.status === 'paused'
-          )
-          setExternalLiveId(live ? String(live.id) : null)
-        })
-        .catch((err) => console.error('Failed to probe live execution:', err))
-    }
-    probe()
-    const timer = setInterval(probe, 15000)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentWorkflow?.id, selectedExecutionId])
+  // 运行态只跟随**选中执行自身的状态**：编辑态（未选中）不受任何流水线的运行中
+  // 执行影响（同流水线允许多次并发发起）。不要用全局 isExecuting 或探测存活执行
+  // 来禁用，那会让「没选中任何执行也显示运行中」且跨流水线互相牵连
+  const selectedRunning = selectedExecution?.status === 'running'
+  const runDisabled = !currentWorkflow || starting || (isPlayback && !continueMode)
+  const runBusy = starting || selectedRunning
 
   // 路由携带工作流 ID：浏览器刷新后内存中的 currentWorkflow 丢失，
   // 此处按 URL 中的 id 重新拉取并恢复，保证刷新后仍停留在流水线内页
@@ -192,7 +161,7 @@ export default function WorkflowCanvasPage() {
   // 运行后由本函数按接口返回的 executionId 直接进入新执行的回放态（不再依赖
   // execution.started 事件——那是个全局事件，分不出“我点的运行”和“他端起的运行”）
   const handleRun = async () => {
-    if (!currentWorkflow || starting || isExecuting) return
+    if (!currentWorkflow || starting) return
     setStarting(true)
     try {
       // 节点 UI 参数写回有 800ms 防抖：防抖窗口内运行会读到 DB 旧参数，先冲刷
@@ -207,7 +176,7 @@ export default function WorkflowCanvasPage() {
         } else {
           await continueExecution(selectedExecutionId, currentWorkflow!.yamlConfig)
         }
-        beginContinue(selectedExecutionId)
+        beginContinue(selectedExecutionId, currentWorkflow.id)
       } else {
         const runParams: Record<string, unknown> = {}
         Object.values(params).forEach((p) => {
@@ -222,7 +191,7 @@ export default function WorkflowCanvasPage() {
         if (runId) {
           useWorkflowStore.getState().setNodeStatuses({})
           useWorkflowStore.getState().resetNodeRuntimeData()
-          useExecutionStore.getState().startExecution(String(runId))
+          useExecutionStore.getState().startExecution(String(runId), currentWorkflow.id)
           await selectExecutionAndSync(String(runId))
         }
       }

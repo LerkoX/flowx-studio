@@ -1,6 +1,7 @@
-// @ts-nocheck — 回归测试：编辑态下探测到存活执行（running/paused）时，
-// 运行按钮必须禁用并转圈——防止 isExecuting 内存态丢失（浏览器刷新 /
-// CLI 或其他端发起运行）后按钮回弹，误触重复发起执行。
+// @ts-nocheck — 回归测试：运行按钮状态语义（完全开放）。
+// 编辑态（未选中执行）**总是可点**：不受全局 isExecuting、也不受本流水线/别的
+// 流水线存活执行（running/paused）影响——同流水线允许多次并发发起。
+// 运行态只跟随「选中执行自身的状态」：选中正在运行的执行才禁用并转圈。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
@@ -19,6 +20,9 @@ if (!window.matchMedia) {
     dispatchEvent: () => false,
   })
 }
+
+// 可控路由：跨流水线用例需要切换到另一条流水线详情页
+let routeWorkflowId = '113'
 
 // 可控的「服务端」执行列表：测试用 setServerExecutions 切换场景
 let serverExecutions = []
@@ -57,7 +61,7 @@ vi.mock('react-router-dom', async (importOriginal) => {
   const orig = await importOriginal()
   return {
     ...orig,
-    useParams: () => ({ id: '113' }),
+    useParams: () => ({ id: routeWorkflowId }),
     useSearchParams: () => [new URLSearchParams(), vi.fn()],
     Navigate: () => null,
   }
@@ -97,16 +101,18 @@ function findRunButton(container) {
   )
 }
 
-describe('WorkflowCanvasPage 运行按钮禁用态（存活执行探测）', () => {
+describe('WorkflowCanvasPage 运行按钮状态（编辑态完全开放）', () => {
   let container
   let root
 
   beforeEach(() => {
     setServerExecutions([])
+    routeWorkflowId = '113'
     useWorkflowStore.getState().setCurrentWorkflow({ ...WF })
     useExecutionStore.setState({
       isExecuting: false,
       runningExecutionId: null,
+      runningWorkflowId: null,
       selectedExecutionId: null,
       selectedExecution: null,
       executionNodes: [],
@@ -129,10 +135,10 @@ describe('WorkflowCanvasPage 运行按钮禁用态（存活执行探测）', () 
     await act(async () => {
       root.render(React.createElement(WorkflowCanvasPage))
     })
-    await settle(30) // 等存活执行探测的 effect + fetch 落地
+    await settle(30)
   }
 
-  it('无存活执行：运行按钮可点击', async () => {
+  it('编辑态：无任何执行时按钮可点', async () => {
     setServerExecutions([{ id: '580', status: 'success' }])
     await renderPage()
     const btn = findRunButton(container)
@@ -140,25 +146,45 @@ describe('WorkflowCanvasPage 运行按钮禁用态（存活执行探测）', () 
     expect(btn.disabled).toBe(false)
   })
 
-  it('存在 running 执行：运行按钮禁用且转圈', async () => {
+  it('编辑态：本流水线有 running 执行时按钮仍可点、不转圈（没选中就不锁）', async () => {
     setServerExecutions([{ id: '582', status: 'running' }])
     await renderPage()
     const btn = findRunButton(container)
-    expect(btn).toBeTruthy()
-    expect(btn.disabled).toBe(true)
-    expect(btn.querySelector('svg.animate-spin')).toBeTruthy()
+    expect(btn.disabled, '编辑态不得被存活执行锁死').toBe(false)
+    expect(btn.querySelector('svg.animate-spin')).toBeFalsy()
   })
 
-  it('存在 paused 执行：运行按钮同样禁用', async () => {
+  it('编辑态：本流水线有 paused 执行时按钮同样可点', async () => {
     setServerExecutions([{ id: '582', status: 'paused' }])
     await renderPage()
+    expect(findRunButton(container).disabled).toBe(false)
+  })
+
+  it('编辑态：本端已发起过运行（isExecuting 为 true）也不锁按钮', async () => {
+    useExecutionStore.setState({
+      isExecuting: true,
+      runningExecutionId: '700',
+      runningWorkflowId: '113',
+    })
+    await renderPage()
     const btn = findRunButton(container)
-    expect(btn).toBeTruthy()
-    expect(btn.disabled).toBe(true)
+    expect(btn.disabled, '编辑态只认选中执行，不认全局运行态').toBe(false)
+    expect(btn.querySelector('svg.animate-spin')).toBeFalsy()
+  })
+
+  it('编辑态：别的流水线在跑不影响本流水线按钮', async () => {
+    useExecutionStore.setState({
+      isExecuting: true,
+      runningExecutionId: '700',
+      runningWorkflowId: '999',
+    })
+    await renderPage()
+    const btn = findRunButton(container)
+    expect(btn.disabled).toBe(false)
+    expect(btn.querySelector('svg.animate-spin')).toBeFalsy()
   })
 
   it('本端点运行：按接口返回的 execution_id 直接进入该执行回放态（不依赖 SSE 事件）', async () => {
-    setServerExecutions([])
     await renderPage()
     const btn = findRunButton(container)
     expect(btn.disabled).toBe(false)
@@ -174,29 +200,26 @@ describe('WorkflowCanvasPage 运行按钮禁用态（存活执行探测）', () 
     expect(exec.isExecuting).toBe(true)
   })
 
-  it('存活执行进入终态后：按钮恢复可点击（轮询复查）', async () => {
-    vi.useFakeTimers()
-    try {
-      setServerExecutions([{ id: '582', status: 'running' }])
-      // fake timers 下不能用 settle（内部 setTimeout 被接管），
-      // 渲染与微任务冲刷统一走 advanceTimersByTimeAsync
-      container = document.createElement('div')
-      document.body.appendChild(container)
-      root = createRoot(container)
-      await act(async () => {
-        root.render(React.createElement(WorkflowCanvasPage))
-        await vi.advanceTimersByTimeAsync(50)
-      })
-      expect(findRunButton(container).disabled).toBe(true)
+  it('回放态：选中正在运行的执行 → 按钮禁用并转圈', async () => {
+    useExecutionStore.setState({
+      selectedExecutionId: '900',
+      selectedExecution: { id: '900', workflowId: '113', status: 'running', trigger: 'manual' },
+    })
+    await renderPage()
+    const btn = findRunButton(container)
+    expect(btn.disabled, '选中执行正在运行，按钮跟随该执行的状态').toBe(true)
+    expect(btn.querySelector('svg.animate-spin')).toBeTruthy()
+  })
 
-      // 服务端执行结束 → 下一次 15s 轮询探测后按钮恢复
-      setServerExecutions([{ id: '582', status: 'failed' }])
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(15000)
-      })
-      expect(findRunButton(container).disabled).toBe(false)
-    } finally {
-      vi.useRealTimers()
-    }
+  it('回放态：选中已结束执行且无新增节点 → 按钮禁用但不转圈', async () => {
+    useExecutionStore.setState({
+      selectedExecutionId: '905',
+      selectedExecution: { id: '905', workflowId: '113', status: 'success', trigger: 'manual' },
+      executionNodes: [{ nodeId: 'A', status: 'success' }],
+    })
+    await renderPage()
+    const btn = findRunButton(container)
+    expect(btn.disabled, '无节点可跑').toBe(true)
+    expect(btn.querySelector('svg.animate-spin')).toBeFalsy()
   })
 })

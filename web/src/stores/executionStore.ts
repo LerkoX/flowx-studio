@@ -14,6 +14,10 @@ interface LogFilter {
 interface ExecutionState {
   isExecuting: boolean
   runningExecutionId: string | null
+  // 本次运行所属流水线 id。isExecuting 是全局标记，仅凭它会导致「A 流水线在跑
+  // 时打开 B 流水线详情页，B 的运行按钮也显示运行中」；运行态判定必须叠加归属。
+  // null 表示未知（旧路径/测试直调）：调用方按「视为本流水线在跑」回退
+  runningWorkflowId: string | null
   // 本端运行中但未被选中期间，其实时日志被隔离丢弃（执行间严格隔离，未选中零痕迹）；
   // 重新选中该执行时依此标记从 DB 重载日志补齐缺口。null 表示无缺口
   liveLogGapExecutionId: string | null
@@ -45,10 +49,10 @@ interface ExecutionState {
   loadExecutionNodes: (executionId: string) => Promise<void>
   loadLatestLogs: (executionId: string) => Promise<void>
   loadOlderLogs: () => Promise<void>
-  startExecution: (id: string) => void
+  startExecution: (id: string, workflowId?: string) => void
   stopExecution: () => void
   // 续跑选中执行：仅标记运行中（保留已执行节点状态与历史日志，增量追加）
-  beginContinue: (id: string) => void
+  beginContinue: (id: string, workflowId?: string) => void
   // 续跑（CLI/API 触发，不发 execution.started）时刷新选中执行的上下文：
   // 快照 YAML（可能已追加节点）、节点记录与执行详情。不清空现有状态，
   // 避免回放态画布闪烁；返回时若已不再选中该执行则丢弃结果
@@ -99,6 +103,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
   return {
   isExecuting: false,
   runningExecutionId: null,
+  runningWorkflowId: null,
   liveLogGapExecutionId: null,
   executions: [],
   executionsTotal: 0,
@@ -309,11 +314,12 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
     }
   },
 
-  startExecution: (id) => {
+  startExecution: (id, workflowId) => {
     flushRealtimeLogs()
     set({
       isExecuting: true,
       runningExecutionId: id,
+      runningWorkflowId: workflowId ? String(workflowId) : null,
       selectedExecutionId: id,
       executionLog: [],
       logsTotal: 0,
@@ -322,9 +328,21 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
     })
   },
 
-  stopExecution: () => set({ isExecuting: false, runningExecutionId: null, liveLogGapExecutionId: null }),
+  stopExecution: () =>
+    set({
+      isExecuting: false,
+      runningExecutionId: null,
+      runningWorkflowId: null,
+      liveLogGapExecutionId: null,
+    }),
 
-  beginContinue: (id) => set({ isExecuting: true, runningExecutionId: id }),
+  beginContinue: (id, workflowId) =>
+    set({
+      isExecuting: true,
+      runningExecutionId: id,
+      // 未传时保留既有归属，避免续跑把归属清成 null（那会退化成全局判定）
+      runningWorkflowId: workflowId ? String(workflowId) : get().runningWorkflowId,
+    }),
 
   refreshExecutionContext: async (id) => {
     try {

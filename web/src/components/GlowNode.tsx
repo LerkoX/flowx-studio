@@ -170,7 +170,16 @@ const GlowNode = memo(({ data, selected }: NodeProps) => {
   const selectedExecution = useExecutionStore((s) => (hasUI ? s.selectedExecution : null))
   // 实时执行期间降低未执行节点存在感；布尔订阅只在开始/结束时重渲染
   const isExecuting = useExecutionStore((s) => s.isExecuting)
-  const pendingDuringRun = isExecuting && status === 'idle'
+  const runningWorkflowId = useExecutionStore((s) => s.runningWorkflowId)
+  // 只订阅 id 字符串（引用稳定），避免参数编辑等引发的 currentWorkflow 换代重渲染
+  const currentWorkflowId = useWorkflowStore((s) =>
+    s.currentWorkflow ? String(s.currentWorkflow.id) : null,
+  )
+  // isExecuting 是全局标记，需叠加归属：否则 A 流水线在跑时切到 B，B 画的节点
+  // 也会被误判成「待执行」而降低存在感。runningWorkflowId 为 null 时回退旧行为
+  const runningHere =
+    isExecuting && (!runningWorkflowId || runningWorkflowId === currentWorkflowId)
+  const pendingDuringRun = runningHere && status === 'idle'
   // 仅带 UI 组件的节点订阅全图运行时数据：解析 {{ 节点.字段 }} 绑定的运行时值
   const nodeRuntimeData = useWorkflowStore((s) => (hasUI ? s.nodeRuntimeData : null))
   // 订阅主题偏好，切换主题时重渲染 widget

@@ -142,6 +142,7 @@ function resetState() {
   useExecutionStore.setState({
     isExecuting: false,
     runningExecutionId: null,
+    runningWorkflowId: null,
     selectedExecutionId: null,
     selectedExecution: null,
     selectedExecutionYaml: null,

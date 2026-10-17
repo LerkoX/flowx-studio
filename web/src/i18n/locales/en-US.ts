@@ -132,6 +132,8 @@ export default {
     currentValue: 'Current: {{value}}',
     typeLabel: 'Type',
     originalValue: 'Original',
+    expandEdit: 'Expand editor',
+    done: 'Done',
     currentExecution: 'Current execution',
     executionId: 'Execution ID',
     trigger: 'Trigger',

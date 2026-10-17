@@ -132,6 +132,8 @@ export default {
     currentValue: '当前值: {{value}}',
     typeLabel: '类型',
     originalValue: '原始值',
+    expandEdit: '放大编辑',
+    done: '完成',
     currentExecution: '当前执行',
     executionId: '执行 ID',
     trigger: '触发方式',

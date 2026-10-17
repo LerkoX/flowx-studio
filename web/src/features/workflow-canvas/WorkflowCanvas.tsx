@@ -955,7 +955,9 @@ function WorkflowCanvasInner({
         // beginContinue 已处理），跳过避免重复拉取
         const execStore = useExecutionStore.getState()
         if (execStore.selectedExecutionId === id && !execStore.isExecuting) {
-          execStore.beginContinue(id)
+          // 带上归属：续跑的运行态只算在本流水线头上，不得把别的流水线详情页
+          // 的运行按钮一起置成「运行中」
+          execStore.beginContinue(id, useWorkflowStore.getState().currentWorkflow?.id)
           void execStore
             .refreshExecutionContext(id)
             .then(() => syncCanvasStatusesFromExecutionNodes())

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { motion } from 'framer-motion'
-import { Save, RotateCcw, FileJson, AlertCircle, Zap } from 'lucide-react'
+import { Save, RotateCcw, FileJson, AlertCircle, Zap, Maximize2, Check } from 'lucide-react'
 import yaml from 'js-yaml'
 import { useTranslation } from 'react-i18next'
 import GlassPanel from '@/components/GlassPanel'
@@ -10,6 +11,7 @@ import { useExecutionStore } from '@/stores/executionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { toast } from '@/stores/toastStore'
 import { updateWorkflow } from '@/services/workflowService'
+import { useIsMobile } from '@/hooks/useMediaQuery'
 import i18n from '@/i18n'
 import type { WorkflowParam, Workflow } from '@/types/workflow'
 import type { ExecutionStatus } from '@/types/execution'
@@ -270,7 +272,10 @@ function parseValue(value: string, originalType: string): string | number | bool
   return value
 }
 
-// AutoResizeTextarea 长文本参数输入框：随内容自动增高（上限 240px），软换行
+// AutoResizeTextarea 长文本参数输入框：随内容自动增高（上限 240px），软换行。
+// 手机端（≤768px，与 useIsMobile 同断点）内联框太小，改为「摘要入口 + 全屏弹层
+// 放大编辑」：点击后在弹层里用大字号编辑，输入实时写回 editingValues（持久化仍由
+// 参数面板的保存 / 自动保存统一处理，与桌面内联编辑语义一致）
 function AutoResizeTextarea({
   value,
   onChange,
@@ -280,6 +285,9 @@ function AutoResizeTextarea({
   onChange: (value: string) => void
   placeholder?: string
 }) {
+  const { t } = useTranslation()
+  const isMobile = useIsMobile()
+  const [expandOpen, setExpandOpen] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
@@ -287,7 +295,68 @@ function AutoResizeTextarea({
     if (!el) return
     el.style.height = 'auto'
     el.style.height = Math.min(el.scrollHeight, 240) + 'px'
-  }, [value])
+  }, [value, expandOpen])
+
+  if (isMobile) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => setExpandOpen(true)}
+          title={t('canvas.expandEdit')}
+          className="w-full text-left px-3 py-2 rounded-lg bg-white/5 border border-white/10
+                     text-white/80 text-sm font-mono
+                     hover:border-indigo-500/40 focus:outline-none focus:border-indigo-500/50
+                     transition-colors"
+        >
+          <span className="block max-h-24 overflow-hidden whitespace-pre-wrap break-words">
+            {value || <span className="text-white/20">{placeholder}</span>}
+          </span>
+          <span className="mt-1.5 flex items-center gap-1 text-[10px] text-indigo-300/70">
+            <Maximize2 size={10} />
+            {t('canvas.expandEdit')}
+          </span>
+        </button>
+        {expandOpen &&
+          createPortal(
+            // 弹层挂 body：参数面板在 framer-motion 的 transform 容器里，
+            // fixed 会相对该容器定位，必须 portal 出去才是真全屏
+            <div
+              className="fixed inset-0 z-[10000] flex flex-col
+                         bg-[#06080f]/[0.97] backdrop-blur-sm px-3
+                         pt-[calc(10px+env(safe-area-inset-top))] pb-[calc(10px+env(safe-area-inset-bottom))]"
+            >
+              <div className="flex items-center gap-2 pb-2">
+                <span className="text-white/60 text-xs font-mono">{t('canvas.expandEdit')}</span>
+                <span className="text-white/30 text-[10px]">{value.length}</span>
+                <button
+                  type="button"
+                  onClick={() => setExpandOpen(false)}
+                  className="ml-auto flex items-center gap-1 px-3 py-1.5 rounded-md
+                             bg-indigo-500/80 hover:bg-indigo-500 text-on-accent text-xs font-medium
+                             transition-colors"
+                >
+                  <Check size={12} />
+                  {t('canvas.done')}
+                </button>
+              </div>
+              <textarea
+                autoFocus
+                value={value}
+                placeholder={placeholder}
+                spellCheck={false}
+                onChange={(e) => onChange(e.target.value)}
+                // text-base=16px：iOS 聚焦时 <16px 会强制放大整个页面
+                className="flex-1 w-full resize-none rounded-lg bg-white/5 border border-white/10 p-3
+                           text-white/90 text-base font-mono leading-relaxed
+                           focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.07]"
+              />
+            </div>,
+            document.body
+          )}
+      </>
+    )
+  }
 
   return (
     <textarea
