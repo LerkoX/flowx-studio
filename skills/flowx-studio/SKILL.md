@@ -213,9 +213,28 @@ Executors:
 
 #### 实现契约
 
-- **插件契约**：`server_op.py` 定义模块级 `register(registry)`，内部用
+- **插件契约（算子）**：`server_op.py` 定义模块级 `register(registry)`，内部用
   `@registry.register("op.name", inputs={...}, outputs={...}, description=...)` 声明算子；
   可 `from app import ops` 复用服务端核心原语（sample / vae_encode / resolve_pipe 等）
+- **插件契约 v2（HTTP 端点自注册，2026-10-19 起）**：插件可选实现第二个钩子
+  `register_routes(add_route)`，由节点包自带 HTTP 端点（首个预期用户：3D 网格等新
+  文件型对象的下载端点，不再在服务端 per-type 抄下载接口）：
+  ```python
+  def register_routes(add_route):
+      def download(oid: str):
+          ...
+      add_route("/ext/meshes/{oid}", download)            # 默认 GET
+      add_route("/ext/meshes", upload, methods=("POST",))  # 多方法透传
+  ```
+  服务端 `RouteRegistrar` 强制三条（插件绕不过）：
+  1. 路径必须 `/ext/` 前缀（与核心端点命名空间隔离，插件抢不了 `/health` 等系统端点）；
+  2. **自动挂 auth 依赖**（与 `/jobs` 等同一道 token 闸门，插件想漏挂鉴权都做不到）；
+  3. 插件加载半路失败 ⇒ 其已注册的路由整体回滚（与算子的注册表快照回滚对齐）。
+  生命周期与算子一致：随插件文件落 `PLUGINS_DIR` 持久化、重启扫描重新注册；
+  重传同文件「全摘旧路由、登全部新」；`DELETE /admin/plugins/<file>` 同时摘除其路由
+  （响应带 `routes_removed`）；上传响应带 `routes` 字段。声明了 `register_routes` 但
+  服务端版本过旧（无注册器）⇒ 加载明确报错，不静默跳过。
+  约束路由仍是进程内全信任代码（与算子同级），`/admin/plugins` 的 token 闸门不变。
 - **节点侧**：`main.py` 在 `call_op` 前调 `ensure_plugin(url, "op.name", tok=tok)`；
   `flowx.json` 的 `files` 加上 `server_op.py`。版本比对走内容 sha256，节点更新后自动重传覆盖
 - **服务端**：插件落盘 `PLUGINS_DIR`（默认 `/models/plugins.d`，bind-mount 持久化），
