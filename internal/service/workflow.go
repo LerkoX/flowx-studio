@@ -1302,7 +1302,7 @@ func (s *WorkflowService) handleLogEntry(entry logger.Entry) {
 		"level":        strings.ToLower(string(entry.Level)),
 		"message":      entry.Message,
 		"output":       entry.Output,
-		"timestamp":    entry.Timestamp,
+		"timestamp":    ts,
 	}
 	s.logRing.Append(execID, logData)
 	s.eventBus.Publish(event.Event{
